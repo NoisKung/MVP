@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, type ReactNode } from "react";
 import { useAppStore } from "@/store/app-store";
 import type { ViewMode } from "@/lib/types";
+import { openUrl } from "@tauri-apps/plugin-opener";
 import {
   LayoutDashboard,
   KanbanSquare,
@@ -9,6 +10,7 @@ import {
   HardDrive,
   Menu,
   X,
+  Heart,
 } from "lucide-react";
 
 interface NavItem {
@@ -130,7 +132,18 @@ export function AppShell({ children, onCreateClick }: AppShellProps) {
         </div>
       </aside>
 
-      <main className="main-content">{children}</main>
+      <main className="main-content">
+        {/* Ko-fi support button */}
+        <button
+          className="kofi-btn"
+          onClick={() => openUrl("https://ko-fi.com/Y8Y71U8RJO")}
+          title="Support me on Ko-fi"
+        >
+          <Heart size={14} />
+          <span>Support</span>
+        </button>
+        {children}
+      </main>
 
       <style>{`
         .app-shell {
@@ -361,6 +374,46 @@ export function AppShell({ children, onCreateClick }: AppShellProps) {
           overflow-y: auto;
           padding: 0;
           background: var(--bg-base);
+          position: relative;
+        }
+
+        /* ===== Ko-fi Button ===== */
+        .kofi-btn {
+          position: absolute;
+          top: 16px;
+          right: 20px;
+          z-index: 40;
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          padding: 6px 14px 6px 10px;
+          background: linear-gradient(135deg, #ff5e5b 0%, #ff7eb3 100%);
+          border: none;
+          border-radius: var(--radius-full);
+          color: #fff;
+          font-size: 12px;
+          font-weight: 600;
+          font-family: inherit;
+          cursor: pointer;
+          transition: all 0.25s var(--ease);
+          box-shadow: 0 2px 8px rgba(255, 94, 91, 0.25);
+          letter-spacing: 0.2px;
+        }
+        .kofi-btn:hover {
+          transform: translateY(-1px);
+          box-shadow: 0 4px 16px rgba(255, 94, 91, 0.4);
+          background: linear-gradient(135deg, #ff4744 0%, #ff6ba3 100%);
+        }
+        .kofi-btn:hover svg {
+          animation: kofi-pulse 0.8s ease infinite;
+        }
+        .kofi-btn:active {
+          transform: translateY(0) scale(0.97);
+        }
+
+        @keyframes kofi-pulse {
+          0%, 100% { transform: scale(1); }
+          50% { transform: scale(1.25); }
         }
 
         /* Mobile: offset for hamburger */
