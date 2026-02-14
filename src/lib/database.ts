@@ -3,6 +3,8 @@ import type {
   Task,
   TaskChangelog,
   TaskChangelogAction,
+  TaskRecurrence,
+  TaskDashboardStats,
   CreateTaskInput,
   UpdateTaskInput,
 } from "./types";
@@ -27,6 +29,8 @@ interface TaskChangeDiff {
   oldValue: string | null;
   newValue: string | null;
 }
+
+const MILLISECONDS_PER_DAY = 24 * 60 * 60 * 1000;
 
 /** Get or create the database connection singleton */
 async function getDb(): Promise<Database> {
@@ -54,6 +58,9 @@ async function initSchema(db: Database): Promise<void> {
       status TEXT NOT NULL CHECK(status IN ('TODO', 'DOING', 'DONE', 'ARCHIVED')),
       priority TEXT NOT NULL CHECK(priority IN ('URGENT', 'NORMAL', 'LOW')),
       is_important BOOLEAN DEFAULT 0,
+      due_at DATETIME,
+      remind_at DATETIME,
+      recurrence TEXT NOT NULL DEFAULT 'NONE' CHECK(recurrence IN ('NONE', 'DAILY', 'WEEKLY', 'MONTHLY')),
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
     )
@@ -86,6 +93,37 @@ async function initSchema(db: Database): Promise<void> {
     CREATE INDEX IF NOT EXISTS idx_task_changelogs_task_created_at
     ON task_changelogs(task_id, created_at DESC)
   `);
+
+  await ensureTaskColumns(db);
+  await db.execute(`
+    CREATE INDEX IF NOT EXISTS idx_tasks_due_at
+    ON tasks(due_at)
+  `);
+}
+
+interface SQLiteTableInfoRow {
+  name: string;
+}
+
+async function ensureTaskColumns(db: Database): Promise<void> {
+  const tableInfo = await db.select<SQLiteTableInfoRow[]>(
+    "PRAGMA table_info(tasks)",
+  );
+  const existingColumns = new Set(tableInfo.map((column) => column.name));
+
+  if (!existingColumns.has("due_at")) {
+    await db.execute("ALTER TABLE tasks ADD COLUMN due_at DATETIME");
+  }
+
+  if (!existingColumns.has("remind_at")) {
+    await db.execute("ALTER TABLE tasks ADD COLUMN remind_at DATETIME");
+  }
+
+  if (!existingColumns.has("recurrence")) {
+    await db.execute(
+      "ALTER TABLE tasks ADD COLUMN recurrence TEXT NOT NULL DEFAULT 'NONE' CHECK(recurrence IN ('NONE', 'DAILY', 'WEEKLY', 'MONTHLY'))",
+    );
+  }
 }
 
 async function insertTaskChangelog(
@@ -111,6 +149,92 @@ function isTaskImportant(task: Task): boolean {
   return Boolean(task.is_important);
 }
 
+function parseDateTime(value: string | null): Date | null {
+  if (!value) return null;
+  const parsedDate = new Date(value);
+  if (Number.isNaN(parsedDate.getTime())) return null;
+  return parsedDate;
+}
+
+function getLocalDayStart(reference: Date): Date {
+  return new Date(
+    reference.getFullYear(),
+    reference.getMonth(),
+    reference.getDate(),
+    0,
+    0,
+    0,
+    0,
+  );
+}
+
+function getLocalDayEnd(reference: Date): Date {
+  return new Date(getLocalDayStart(reference).getTime() + MILLISECONDS_PER_DAY);
+}
+
+function getLocalWeekStart(reference: Date): Date {
+  const weekStart = getLocalDayStart(reference);
+  const dayOfWeek = weekStart.getDay(); // Sunday = 0
+  const offsetToMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+  weekStart.setDate(weekStart.getDate() - offsetToMonday);
+  return weekStart;
+}
+
+function isOpenTask(task: Task): boolean {
+  return task.status !== "DONE" && task.status !== "ARCHIVED";
+}
+
+function compareByDueDateAscending(leftTask: Task, rightTask: Task): number {
+  const leftDueAt = parseDateTime(leftTask.due_at);
+  const rightDueAt = parseDateTime(rightTask.due_at);
+
+  if (leftDueAt && rightDueAt) {
+    return leftDueAt.getTime() - rightDueAt.getTime();
+  }
+  if (leftDueAt) return -1;
+  if (rightDueAt) return 1;
+
+  return (
+    new Date(rightTask.created_at).getTime() -
+    new Date(leftTask.created_at).getTime()
+  );
+}
+
+function getNextRecurringDueAt(
+  currentDueAt: string,
+  recurrence: TaskRecurrence,
+): string | null {
+  const currentDueDate = parseDateTime(currentDueAt);
+  if (!currentDueDate || recurrence === "NONE") return null;
+
+  const nextDueDate = new Date(currentDueDate);
+  if (recurrence === "DAILY") {
+    nextDueDate.setDate(nextDueDate.getDate() + 1);
+  } else if (recurrence === "WEEKLY") {
+    nextDueDate.setDate(nextDueDate.getDate() + 7);
+  } else if (recurrence === "MONTHLY") {
+    nextDueDate.setMonth(nextDueDate.getMonth() + 1);
+  }
+
+  return nextDueDate.toISOString();
+}
+
+function shiftReminderWithDueDate(
+  currentRemindAt: string | null,
+  currentDueAt: string,
+  nextDueAt: string,
+): string | null {
+  if (!currentRemindAt) return null;
+
+  const remindDate = parseDateTime(currentRemindAt);
+  const dueDate = parseDateTime(currentDueAt);
+  const nextDueDate = parseDateTime(nextDueAt);
+  if (!remindDate || !dueDate || !nextDueDate) return null;
+
+  const offsetFromDue = remindDate.getTime() - dueDate.getTime();
+  return new Date(nextDueDate.getTime() + offsetFromDue).toISOString();
+}
+
 /** Fetch all non-archived tasks, newest first */
 export async function getAllTasks(): Promise<Task[]> {
   const db = await getDb();
@@ -127,14 +251,29 @@ export async function createTask(input: CreateTaskInput): Promise<Task> {
   const now = new Date().toISOString();
 
   await db.execute(
-    `INSERT INTO tasks (id, title, description, status, priority, is_important, created_at, updated_at)
-     VALUES ($1, $2, $3, 'TODO', $4, $5, $6, $7)`,
+    `INSERT INTO tasks (
+      id,
+      title,
+      description,
+      status,
+      priority,
+      is_important,
+      due_at,
+      remind_at,
+      recurrence,
+      created_at,
+      updated_at
+    )
+     VALUES ($1, $2, $3, 'TODO', $4, $5, $6, $7, $8, $9, $10)`,
     [
       id,
       input.title,
       input.description ?? null,
       input.priority,
       input.is_important ? 1 : 0,
+      input.due_at ?? null,
+      input.remind_at ?? null,
+      input.recurrence ?? "NONE",
       now,
       now,
     ],
@@ -236,6 +375,48 @@ export async function updateTask(input: UpdateTaskInput): Promise<Task> {
       });
     }
   }
+  if (input.due_at !== undefined) {
+    setClauses.push(`due_at = $${paramIndex++}`);
+    params.push(input.due_at ?? null);
+    const oldDueAt = existingTask.due_at ?? null;
+    const newDueAt = input.due_at ?? null;
+    if (oldDueAt !== newDueAt) {
+      changes.push({
+        action: "UPDATED",
+        fieldName: "due_at",
+        oldValue: oldDueAt,
+        newValue: newDueAt,
+      });
+    }
+  }
+  if (input.remind_at !== undefined) {
+    setClauses.push(`remind_at = $${paramIndex++}`);
+    params.push(input.remind_at ?? null);
+    const oldRemindAt = existingTask.remind_at ?? null;
+    const newRemindAt = input.remind_at ?? null;
+    if (oldRemindAt !== newRemindAt) {
+      changes.push({
+        action: "UPDATED",
+        fieldName: "remind_at",
+        oldValue: oldRemindAt,
+        newValue: newRemindAt,
+      });
+    }
+  }
+  if (input.recurrence !== undefined) {
+    setClauses.push(`recurrence = $${paramIndex++}`);
+    params.push(input.recurrence);
+    const oldRecurrence = (existingTask.recurrence ?? "NONE") as TaskRecurrence;
+    const newRecurrence = input.recurrence;
+    if (oldRecurrence !== newRecurrence) {
+      changes.push({
+        action: "UPDATED",
+        fieldName: "recurrence",
+        oldValue: oldRecurrence,
+        newValue: newRecurrence,
+      });
+    }
+  }
 
   setClauses.push(`updated_at = $${paramIndex++}`);
   params.push(now);
@@ -264,6 +445,63 @@ export async function updateTask(input: UpdateTaskInput): Promise<Task> {
     });
   }
 
+  if (
+    existingTask.status !== "DONE" &&
+    updatedTask.status === "DONE" &&
+    updatedTask.recurrence !== "NONE" &&
+    updatedTask.due_at
+  ) {
+    const nextDueAt = getNextRecurringDueAt(
+      updatedTask.due_at,
+      updatedTask.recurrence,
+    );
+
+    if (nextDueAt) {
+      const nextTaskId = uuidv4();
+      const nextRemindAt = shiftReminderWithDueDate(
+        updatedTask.remind_at,
+        updatedTask.due_at,
+        nextDueAt,
+      );
+
+      await db.execute(
+        `INSERT INTO tasks (
+          id,
+          title,
+          description,
+          status,
+          priority,
+          is_important,
+          due_at,
+          remind_at,
+          recurrence,
+          created_at,
+          updated_at
+        )
+         VALUES ($1, $2, $3, 'TODO', $4, $5, $6, $7, $8, $9, $10)`,
+        [
+          nextTaskId,
+          updatedTask.title,
+          updatedTask.description ?? null,
+          updatedTask.priority,
+          updatedTask.is_important,
+          nextDueAt,
+          nextRemindAt,
+          updatedTask.recurrence,
+          now,
+          now,
+        ],
+      );
+
+      await insertTaskChangelog(db, {
+        taskId: nextTaskId,
+        action: "CREATED",
+        newValue: updatedTask.title,
+        createdAt: now,
+      });
+    }
+  }
+
   return updatedTask;
 }
 
@@ -287,6 +525,62 @@ export async function getTaskStats(): Promise<Record<string, number>> {
   return stats;
 }
 
+/** Fetch dashboard counters including due and completion momentum metrics */
+export async function getTaskDashboardStats(
+  referenceDate = new Date(),
+): Promise<TaskDashboardStats> {
+  const db = await getDb();
+  const nowIso = referenceDate.toISOString();
+  const startOfTodayIso = getLocalDayStart(referenceDate).toISOString();
+  const endOfTodayIso = getLocalDayEnd(referenceDate).toISOString();
+  const startOfWeekIso = getLocalWeekStart(referenceDate).toISOString();
+
+  const statusRows = await db.select<{ status: string; count: number }[]>(
+    "SELECT status, COUNT(*) as count FROM tasks WHERE status != 'ARCHIVED' GROUP BY status",
+  );
+  const statusStats: Record<string, number> = { TODO: 0, DOING: 0, DONE: 0 };
+  for (const row of statusRows) {
+    statusStats[row.status] = row.count;
+  }
+
+  const dueRows = await db.select<{ due_today: number; overdue: number }[]>(
+    `SELECT
+        COALESCE(SUM(CASE
+          WHEN status NOT IN ('DONE', 'ARCHIVED')
+            AND due_at IS NOT NULL
+            AND due_at >= $1
+            AND due_at < $2
+          THEN 1 ELSE 0 END), 0) as due_today,
+        COALESCE(SUM(CASE
+          WHEN status NOT IN ('DONE', 'ARCHIVED')
+            AND due_at IS NOT NULL
+            AND due_at < $3
+          THEN 1 ELSE 0 END), 0) as overdue
+      FROM tasks`,
+    [startOfTodayIso, endOfTodayIso, nowIso],
+  );
+
+  const completedRows = await db.select<{ count: number }[]>(
+    `SELECT COALESCE(COUNT(DISTINCT task_id), 0) as count
+       FROM task_changelogs
+      WHERE action = 'STATUS_CHANGED'
+        AND field_name = 'status'
+        AND new_value = 'DONE'
+        AND created_at >= $1
+        AND created_at <= $2`,
+    [startOfWeekIso, nowIso],
+  );
+
+  return {
+    TODO: statusStats.TODO ?? 0,
+    DOING: statusStats.DOING ?? 0,
+    DONE: statusStats.DONE ?? 0,
+    dueToday: Number(dueRows[0]?.due_today ?? 0),
+    overdue: Number(dueRows[0]?.overdue ?? 0),
+    completedThisWeek: Number(completedRows[0]?.count ?? 0),
+  };
+}
+
 /** Fetch changelog history for a task (latest first) */
 export async function getTaskChangelogs(
   taskId: string,
@@ -301,4 +595,42 @@ export async function getTaskChangelogs(
          LIMIT $2`,
     [taskId, limit],
   );
+}
+
+/** Fetch open tasks that are due today or overdue */
+export async function getTodayTasks(
+  referenceDate = new Date(),
+): Promise<Task[]> {
+  const tasks = await getAllTasks();
+  const dayEnd = getLocalDayEnd(referenceDate);
+
+  return tasks
+    .filter((task) => {
+      if (!isOpenTask(task)) return false;
+      const dueAt = parseDateTime(task.due_at);
+      if (!dueAt) return false;
+      return dueAt < dayEnd;
+    })
+    .sort(compareByDueDateAscending);
+}
+
+/** Fetch open tasks due after today and within the selected range */
+export async function getUpcomingTasks(
+  days = 7,
+  referenceDate = new Date(),
+): Promise<Task[]> {
+  const tasks = await getAllTasks();
+  const dayEnd = getLocalDayEnd(referenceDate);
+  const rangeEnd = new Date(
+    dayEnd.getTime() + Math.max(days, 1) * MILLISECONDS_PER_DAY,
+  );
+
+  return tasks
+    .filter((task) => {
+      if (!isOpenTask(task)) return false;
+      const dueAt = parseDateTime(task.due_at);
+      if (!dueAt) return false;
+      return dueAt >= dayEnd && dueAt < rangeEnd;
+    })
+    .sort(compareByDueDateAscending);
 }

@@ -5,6 +5,9 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 import {
   LayoutDashboard,
   KanbanSquare,
+  CalendarCheck2,
+  CalendarDays,
+  Settings2,
   Plus,
   Zap,
   HardDrive,
@@ -21,10 +24,17 @@ interface NavItem {
 
 const NAV_ITEMS: NavItem[] = [
   { view: "board", label: "Board", icon: <KanbanSquare size={18} /> },
+  { view: "today", label: "Today", icon: <CalendarCheck2 size={18} /> },
+  { view: "upcoming", label: "Upcoming", icon: <CalendarDays size={18} /> },
   {
     view: "dashboard",
     label: "Dashboard",
     icon: <LayoutDashboard size={18} />,
+  },
+  {
+    view: "settings",
+    label: "Settings",
+    icon: <Settings2 size={18} />,
   },
 ];
 

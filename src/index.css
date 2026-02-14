@@ -263,6 +263,60 @@ body {
     overflow: hidden;
 }
 
+.card-meta-row {
+    margin-top: 8px;
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+}
+
+.card-due-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 8px;
+    border-radius: var(--radius-full);
+    font-size: 11px;
+    font-weight: 600;
+    border: 1px solid transparent;
+}
+
+.card-due-overdue {
+    color: var(--danger);
+    background: var(--danger-subtle);
+    border-color: rgba(248, 113, 113, 0.4);
+}
+
+.card-due-today {
+    color: var(--warning);
+    background: var(--warning-subtle);
+    border-color: rgba(251, 191, 36, 0.4);
+}
+
+.card-due-upcoming {
+    color: var(--info);
+    background: var(--info-subtle);
+    border-color: rgba(96, 165, 250, 0.35);
+}
+
+.card-due-neutral {
+    color: var(--text-muted);
+    background: var(--bg-hover);
+    border-color: var(--border-default);
+}
+
+.card-recurrence-badge {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 8px;
+    border-radius: var(--radius-full);
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    background: var(--bg-hover);
+    border: 1px solid var(--border-default);
+}
+
 .card-footer {
     display: flex;
     align-items: center;

@@ -5,9 +5,19 @@ import type {
   CreateTaskInput,
   UpdateTaskInput,
   TaskPriority,
+  TaskRecurrence,
   TaskStatus,
 } from "@/lib/types";
-import { X, AlertTriangle, Minus, ArrowDown, Star } from "lucide-react";
+import {
+  X,
+  AlertTriangle,
+  Minus,
+  ArrowDown,
+  Star,
+  CalendarClock,
+  Bell,
+  Repeat2,
+} from "lucide-react";
 import { useTaskChangelogs } from "@/hooks/use-tasks";
 
 const PRIORITIES: {
@@ -16,25 +26,25 @@ const PRIORITIES: {
   icon: React.ReactNode;
   color: string;
 }[] = [
-    {
-      value: "URGENT",
-      label: "Urgent",
-      icon: <AlertTriangle size={13} />,
-      color: "var(--danger)",
-    },
-    {
-      value: "NORMAL",
-      label: "Normal",
-      icon: <Minus size={13} />,
-      color: "var(--accent)",
-    },
-    {
-      value: "LOW",
-      label: "Low",
-      icon: <ArrowDown size={13} />,
-      color: "var(--text-muted)",
-    },
-  ];
+  {
+    value: "URGENT",
+    label: "Urgent",
+    icon: <AlertTriangle size={13} />,
+    color: "var(--danger)",
+  },
+  {
+    value: "NORMAL",
+    label: "Normal",
+    icon: <Minus size={13} />,
+    color: "var(--accent)",
+  },
+  {
+    value: "LOW",
+    label: "Low",
+    icon: <ArrowDown size={13} />,
+    color: "var(--text-muted)",
+  },
+];
 
 const STATUS_LABELS: Record<TaskStatus, string> = {
   TODO: "To Do",
@@ -47,6 +57,13 @@ const PRIORITY_LABELS: Record<TaskPriority, string> = {
   URGENT: "Urgent",
   NORMAL: "Normal",
   LOW: "Low",
+};
+
+const RECURRENCE_LABELS: Record<TaskRecurrence, string> = {
+  NONE: "Does not repeat",
+  DAILY: "Daily",
+  WEEKLY: "Weekly",
+  MONTHLY: "Monthly",
 };
 
 function getErrorMessage(error: unknown): string {
@@ -77,6 +94,17 @@ function formatChangelogValue(
     return value === "true" ? "Important" : "Not important";
   }
 
+  if (
+    (fieldName === "due_at" || fieldName === "remind_at") &&
+    !Number.isNaN(new Date(value).getTime())
+  ) {
+    return formatDateTimeForDisplay(value);
+  }
+
+  if (fieldName === "recurrence" && value in RECURRENCE_LABELS) {
+    return RECURRENCE_LABELS[value as TaskRecurrence];
+  }
+
   return value;
 }
 
@@ -96,7 +124,13 @@ function formatChangelogMessage(log: TaskChangelog): string {
             ? "Description"
             : log.field_name === "is_important"
               ? "Importance"
-              : "Task";
+              : log.field_name === "due_at"
+                ? "Due date"
+                : log.field_name === "remind_at"
+                  ? "Reminder"
+                  : log.field_name === "recurrence"
+                    ? "Repeat"
+                    : "Task";
 
   return `${fieldLabel} changed from ${formatChangelogValue(log.field_name, log.old_value)} to ${formatChangelogValue(log.field_name, log.new_value)}`;
 }
@@ -116,6 +150,33 @@ function formatRelativeDate(dateStr: string): string {
   return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
 }
 
+function formatDateTimeForDisplay(dateStr: string): string {
+  const date = new Date(dateStr);
+  if (Number.isNaN(date.getTime())) return dateStr;
+  return date.toLocaleString("en-US", {
+    month: "short",
+    day: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
+}
+
+function toInputDateTime(dateStr: string | null | undefined): string {
+  if (!dateStr) return "";
+  const date = new Date(dateStr);
+  if (Number.isNaN(date.getTime())) return "";
+  const timezoneOffsetMs = date.getTimezoneOffset() * 60000;
+  const localDateTime = new Date(date.getTime() - timezoneOffsetMs);
+  return localDateTime.toISOString().slice(0, 16);
+}
+
+function toIsoDateTime(dateTimeInput: string): string | null {
+  if (!dateTimeInput) return null;
+  const parsedDate = new Date(dateTimeInput);
+  if (Number.isNaN(parsedDate.getTime())) return null;
+  return parsedDate.toISOString();
+}
+
 interface TaskFormProps {
   task?: Task | null;
   onSubmit: (input: CreateTaskInput | UpdateTaskInput) => void;
@@ -127,6 +188,10 @@ export function TaskForm({ task, onSubmit, onClose }: TaskFormProps) {
   const [description, setDescription] = useState("");
   const [priority, setPriority] = useState<TaskPriority>("NORMAL");
   const [isImportant, setIsImportant] = useState(false);
+  const [dueAt, setDueAt] = useState("");
+  const [remindAt, setRemindAt] = useState("");
+  const [recurrence, setRecurrence] = useState<TaskRecurrence>("NONE");
+  const [timeError, setTimeError] = useState<string | null>(null);
 
   const isEditing = !!task;
   const {
@@ -142,6 +207,9 @@ export function TaskForm({ task, onSubmit, onClose }: TaskFormProps) {
       setDescription(task.description ?? "");
       setPriority(task.priority);
       setIsImportant(!!task.is_important);
+      setDueAt(toInputDateTime(task.due_at));
+      setRemindAt(toInputDateTime(task.remind_at));
+      setRecurrence(task.recurrence ?? "NONE");
       return;
     }
 
@@ -149,6 +217,10 @@ export function TaskForm({ task, onSubmit, onClose }: TaskFormProps) {
     setDescription("");
     setPriority("NORMAL");
     setIsImportant(false);
+    setDueAt("");
+    setRemindAt("");
+    setRecurrence("NONE");
+    setTimeError(null);
   }, [task]);
 
   // Keyboard shortcut: Escape to close
@@ -164,6 +236,27 @@ export function TaskForm({ task, onSubmit, onClose }: TaskFormProps) {
     event.preventDefault();
     if (!title.trim()) return;
 
+    const dueAtIso = toIsoDateTime(dueAt);
+    const remindAtIso = toIsoDateTime(remindAt);
+
+    if (dueAt && !dueAtIso) {
+      setTimeError("Due date format is invalid.");
+      return;
+    }
+    if (remindAt && !remindAtIso) {
+      setTimeError("Reminder format is invalid.");
+      return;
+    }
+    if (dueAtIso && remindAtIso && remindAtIso > dueAtIso) {
+      setTimeError("Reminder must be set before the due date.");
+      return;
+    }
+    if (recurrence !== "NONE" && !dueAtIso) {
+      setTimeError("Recurring tasks require a due date.");
+      return;
+    }
+    setTimeError(null);
+
     if (isEditing && task) {
       const input: UpdateTaskInput = {
         id: task.id,
@@ -172,6 +265,9 @@ export function TaskForm({ task, onSubmit, onClose }: TaskFormProps) {
         priority,
         is_important: isImportant,
         status: task.status,
+        due_at: dueAtIso,
+        remind_at: remindAtIso,
+        recurrence,
       };
       onSubmit(input);
     } else {
@@ -180,6 +276,9 @@ export function TaskForm({ task, onSubmit, onClose }: TaskFormProps) {
         description: description.trim() || undefined,
         priority,
         is_important: isImportant,
+        due_at: dueAtIso,
+        remind_at: remindAtIso,
+        recurrence,
       };
       onSubmit(input);
     }
@@ -234,6 +333,56 @@ export function TaskForm({ task, onSubmit, onClose }: TaskFormProps) {
             />
           </div>
 
+          <div className="field-row">
+            <div className="field" style={{ flex: 1 }}>
+              <label className="field-label" htmlFor="task-due-at">
+                <CalendarClock size={12} />
+                Due date & time
+              </label>
+              <input
+                id="task-due-at"
+                type="datetime-local"
+                className="input"
+                value={dueAt}
+                onChange={(event) => setDueAt(event.target.value)}
+              />
+            </div>
+
+            <div className="field" style={{ flex: 1 }}>
+              <label className="field-label" htmlFor="task-remind-at">
+                <Bell size={12} />
+                Reminder
+              </label>
+              <input
+                id="task-remind-at"
+                type="datetime-local"
+                className="input"
+                value={remindAt}
+                onChange={(event) => setRemindAt(event.target.value)}
+              />
+            </div>
+          </div>
+
+          <div className="field">
+            <label className="field-label" htmlFor="task-recurrence">
+              <Repeat2 size={12} />
+              Repeat
+            </label>
+            <select
+              id="task-recurrence"
+              className="input"
+              value={recurrence}
+              onChange={(event) =>
+                setRecurrence(event.target.value as TaskRecurrence)
+              }
+            >
+              <option value="NONE">Does not repeat</option>
+              <option value="DAILY">Daily</option>
+              <option value="WEEKLY">Weekly</option>
+              <option value="MONTHLY">Monthly</option>
+            </select>
+          </div>
+
           {/* Priority & Important */}
           <div className="field-row">
             <div className="field" style={{ flex: 1 }}>
@@ -273,6 +422,8 @@ export function TaskForm({ task, onSubmit, onClose }: TaskFormProps) {
               </button>
             </div>
           </div>
+
+          {timeError && <p className="form-error">{timeError}</p>}
 
           {isEditing && (
             <div className="changelog-section">
@@ -375,7 +526,9 @@ export function TaskForm({ task, onSubmit, onClose }: TaskFormProps) {
           margin-bottom: 16px;
         }
         .field-label {
-          display: block;
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
           font-size: 12px;
           font-weight: 600;
           color: var(--text-secondary);
@@ -403,6 +556,17 @@ export function TaskForm({ task, onSubmit, onClose }: TaskFormProps) {
         }
         .input::placeholder {
           color: var(--text-disabled);
+        }
+        select.input {
+          appearance: none;
+          background-image: linear-gradient(45deg, transparent 50%, var(--text-muted) 50%),
+            linear-gradient(135deg, var(--text-muted) 50%, transparent 50%);
+          background-position:
+            calc(100% - 14px) calc(50% - 2px),
+            calc(100% - 9px) calc(50% - 2px);
+          background-size: 5px 5px, 5px 5px;
+          background-repeat: no-repeat;
+          padding-right: 28px;
         }
         .textarea {
           resize: vertical;
@@ -471,6 +635,12 @@ export function TaskForm({ task, onSubmit, onClose }: TaskFormProps) {
           margin: 8px 0 12px;
           padding-top: 12px;
           border-top: 1px solid var(--border-default);
+        }
+        .form-error {
+          margin-top: -4px;
+          margin-bottom: 10px;
+          font-size: 12px;
+          color: var(--danger);
         }
         .changelog-title {
           font-size: 12px;

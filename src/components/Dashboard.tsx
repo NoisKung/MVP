@@ -4,6 +4,9 @@ import {
   Circle,
   Loader,
   CheckCircle2,
+  CalendarCheck2,
+  AlertTriangle,
+  Trophy,
   Rocket,
   TrendingUp,
 } from "lucide-react";
@@ -30,9 +33,8 @@ function getErrorMessage(error: unknown): string {
 export function Dashboard() {
   const { data: stats, isLoading, isError, error, refetch } = useTaskStats();
 
-  const totalTasks: number = stats
-    ? Object.values(stats).reduce((a: number, b: number) => a + b, 0)
-    : 0;
+  const totalTasks =
+    (stats?.TODO ?? 0) + (stats?.DOING ?? 0) + (stats?.DONE ?? 0);
   const completionRate: number =
     totalTasks > 0 && stats
       ? Math.round(((stats.DONE ?? 0) / totalTasks) * 100)
@@ -66,6 +68,30 @@ export function Dashboard() {
       color: "var(--status-done)",
       bg: "var(--status-done-subtle)",
       icon: <CheckCircle2 size={20} />,
+    },
+  ];
+
+  const momentumCards = [
+    {
+      label: "Due Today",
+      value: stats?.dueToday ?? 0,
+      color: "var(--warning)",
+      bg: "var(--warning-subtle)",
+      icon: <CalendarCheck2 size={18} />,
+    },
+    {
+      label: "Overdue",
+      value: stats?.overdue ?? 0,
+      color: "var(--danger)",
+      bg: "var(--danger-subtle)",
+      icon: <AlertTriangle size={18} />,
+    },
+    {
+      label: "Completed This Week",
+      value: stats?.completedThisWeek ?? 0,
+      color: "var(--success)",
+      bg: "var(--success-subtle)",
+      icon: <Trophy size={18} />,
     },
   ];
 
@@ -181,6 +207,29 @@ export function Dashboard() {
           <span>50%</span>
           <span>100%</span>
         </div>
+      </div>
+
+      <div className="momentum-grid">
+        {momentumCards.map((card, index) => (
+          <div
+            key={card.label}
+            className="momentum-card animate-fade-in"
+            style={{ animationDelay: `${0.34 + index * 0.06}s` }}
+          >
+            <div
+              className="momentum-icon-wrapper"
+              style={{ color: card.color, background: card.bg }}
+            >
+              {card.icon}
+            </div>
+            <div className="momentum-info">
+              <div className="momentum-value" style={{ color: card.color }}>
+                {card.value}
+              </div>
+              <div className="momentum-label">{card.label}</div>
+            </div>
+          </div>
+        ))}
       </div>
 
       {/* Empty state */}
@@ -334,6 +383,52 @@ export function Dashboard() {
           font-variant-numeric: tabular-nums;
         }
 
+        .momentum-grid {
+          display: grid;
+          grid-template-columns: repeat(3, 1fr);
+          gap: 12px;
+          margin-bottom: 16px;
+        }
+        .momentum-card {
+          background: var(--bg-surface);
+          border: 1px solid var(--border-default);
+          border-radius: var(--radius-lg);
+          padding: 14px 16px;
+          display: flex;
+          align-items: center;
+          gap: 12px;
+          transition: all var(--duration) var(--ease);
+        }
+        .momentum-card:hover {
+          border-color: var(--border-strong);
+          background: var(--bg-elevated);
+        }
+        .momentum-icon-wrapper {
+          width: 34px;
+          height: 34px;
+          border-radius: var(--radius-md);
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          flex-shrink: 0;
+        }
+        .momentum-info {
+          min-width: 0;
+        }
+        .momentum-value {
+          font-size: 20px;
+          font-weight: 700;
+          font-variant-numeric: tabular-nums;
+          line-height: 1.1;
+        }
+        .momentum-label {
+          font-size: 11px;
+          color: var(--text-muted);
+          font-weight: 500;
+          margin-top: 2px;
+          white-space: nowrap;
+        }
+
         /* Empty State */
         .empty-state {
           text-align: center;
@@ -383,6 +478,9 @@ export function Dashboard() {
           .stats-grid {
             grid-template-columns: repeat(2, 1fr);
             gap: 10px;
+          }
+          .momentum-grid {
+            grid-template-columns: 1fr;
           }
         }
 

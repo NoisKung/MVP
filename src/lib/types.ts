@@ -4,6 +4,19 @@ export type TaskStatus = "TODO" | "DOING" | "DONE" | "ARCHIVED";
 /** Valid task priorities matching the SQLite CHECK constraint */
 export type TaskPriority = "URGENT" | "NORMAL" | "LOW";
 
+/** Valid recurrence rules matching the SQLite CHECK constraint */
+export type TaskRecurrence = "NONE" | "DAILY" | "WEEKLY" | "MONTHLY";
+
+/** Dashboard metrics derived from tasks and changelog records */
+export interface TaskDashboardStats {
+  TODO: number;
+  DOING: number;
+  DONE: number;
+  dueToday: number;
+  overdue: number;
+  completedThisWeek: number;
+}
+
 /** Task change event types */
 export type TaskChangelogAction = "CREATED" | "UPDATED" | "STATUS_CHANGED";
 
@@ -15,6 +28,9 @@ export interface Task {
   status: TaskStatus;
   priority: TaskPriority;
   is_important: number; // SQLite stores booleans as 0/1
+  due_at: string | null;
+  remind_at: string | null;
+  recurrence: TaskRecurrence;
   created_at: string;
   updated_at: string;
 }
@@ -25,6 +41,9 @@ export interface CreateTaskInput {
   description?: string;
   priority: TaskPriority;
   is_important: boolean;
+  due_at?: string | null;
+  remind_at?: string | null;
+  recurrence?: TaskRecurrence;
 }
 
 /** Input for updating an existing task */
@@ -35,6 +54,9 @@ export interface UpdateTaskInput {
   status?: TaskStatus;
   priority?: TaskPriority;
   is_important?: boolean;
+  due_at?: string | null;
+  remind_at?: string | null;
+  recurrence?: TaskRecurrence;
 }
 
 /** A single changelog record for a task */
@@ -56,4 +78,9 @@ export interface KanbanColumn {
 }
 
 /** Application view modes */
-export type ViewMode = "board" | "dashboard";
+export type ViewMode =
+  | "board"
+  | "today"
+  | "upcoming"
+  | "dashboard"
+  | "settings";

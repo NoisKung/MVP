@@ -4,14 +4,23 @@ import { AppShell } from "./components/AppShell";
 import { TaskBoard } from "./components/TaskBoard";
 import { TaskForm } from "./components/TaskForm";
 import { Dashboard } from "./components/Dashboard";
+import { TaskScheduleView } from "./components/TaskScheduleView";
+import { ReminderSettings } from "./components/ReminderSettings";
 import {
   useTasks,
+  useTodayTasks,
+  useUpcomingTasks,
   useCreateTask,
   useUpdateTask,
   useDeleteTask,
 } from "./hooks/use-tasks";
+import { useReminderNotifications } from "./hooks/use-reminder-notifications";
 import { useAppStore } from "./store/app-store";
 import type { CreateTaskInput, UpdateTaskInput, TaskStatus } from "./lib/types";
+import {
+  getRemindersEnabledPreference,
+  setRemindersEnabledPreference,
+} from "./lib/reminder-settings";
 import "./index.css";
 
 const queryClient = new QueryClient({
@@ -45,27 +54,68 @@ function getErrorMessage(error: unknown): string {
 function AppContent() {
   const {
     activeView,
+    setActiveView,
     editingTask,
     setEditingTask,
     isCreateOpen,
     setIsCreateOpen,
   } = useAppStore();
   const {
-    data: tasks = [],
-    isLoading,
-    isError,
-    error: tasksError,
-    refetch: refetchTasks,
+    data: allTasks = [],
+    isLoading: isLoadingAllTasks,
+    isError: isAllTasksError,
+    error: allTasksError,
+    refetch: refetchAllTasks,
   } = useTasks();
+  const {
+    data: todayTasks = [],
+    isLoading: isLoadingTodayTasks,
+    isError: isTodayTasksError,
+    error: todayTasksError,
+    refetch: refetchTodayTasks,
+  } = useTodayTasks();
+  const {
+    data: upcomingTasks = [],
+    isLoading: isLoadingUpcomingTasks,
+    isError: isUpcomingTasksError,
+    error: upcomingTasksError,
+    refetch: refetchUpcomingTasks,
+  } = useUpcomingTasks();
   const createTask = useCreateTask();
   const updateTask = useUpdateTask();
   const deleteTask = useDeleteTask();
   const [actionError, setActionError] = useState<string | null>(null);
+  const [remindersEnabled, setRemindersEnabled] = useState<boolean>(() =>
+    getRemindersEnabledPreference(),
+  );
 
   const openCreateModal = useCallback(() => {
     setEditingTask(null);
     setIsCreateOpen(true);
   }, [setEditingTask, setIsCreateOpen]);
+
+  const handleRemindersEnabledChange = useCallback((enabled: boolean) => {
+    setRemindersEnabled(enabled);
+    setRemindersEnabledPreference(enabled);
+  }, []);
+
+  const handleTaskNotificationOpen = useCallback(
+    (taskId: string) => {
+      const matchedTask = allTasks.find((task) => task.id === taskId);
+      if (!matchedTask) return;
+
+      setIsCreateOpen(false);
+      setEditingTask(matchedTask);
+      setActiveView("board");
+    },
+    [allTasks, setActiveView, setEditingTask, setIsCreateOpen],
+  );
+
+  useReminderNotifications(
+    allTasks,
+    remindersEnabled && !isLoadingAllTasks && !isAllTasksError,
+    handleTaskNotificationOpen,
+  );
 
   useEffect(() => {
     const handleCreateShortcut = (event: KeyboardEvent) => {
@@ -118,7 +168,34 @@ function AppContent() {
       .catch((error) => setActionError(getErrorMessage(error)));
   };
 
-  const content = isLoading ? (
+  const taskViewState =
+    activeView === "board"
+      ? {
+          tasks: allTasks,
+          isLoading: isLoadingAllTasks,
+          isError: isAllTasksError,
+          error: allTasksError,
+          refetch: refetchAllTasks,
+        }
+      : activeView === "today"
+        ? {
+            tasks: todayTasks,
+            isLoading: isLoadingTodayTasks,
+            isError: isTodayTasksError,
+            error: todayTasksError,
+            refetch: refetchTodayTasks,
+          }
+        : activeView === "upcoming"
+          ? {
+              tasks: upcomingTasks,
+              isLoading: isLoadingUpcomingTasks,
+              isError: isUpcomingTasksError,
+              error: upcomingTasksError,
+              refetch: refetchUpcomingTasks,
+            }
+          : null;
+
+  const content = taskViewState?.isLoading ? (
     <div
       style={{
         display: "flex",
@@ -139,7 +216,7 @@ function AppContent() {
         }}
       />
     </div>
-  ) : isError ? (
+  ) : taskViewState?.isError ? (
     <div
       style={{
         margin: 24,
@@ -150,7 +227,11 @@ function AppContent() {
       }}
     >
       <h2
-        style={{ fontSize: 16, marginBottom: 6, color: "var(--text-primary)" }}
+        style={{
+          fontSize: 16,
+          marginBottom: 6,
+          color: "var(--text-primary)",
+        }}
       >
         Failed to load tasks
       </h2>
@@ -161,7 +242,7 @@ function AppContent() {
           color: "var(--text-secondary)",
         }}
       >
-        {getErrorMessage(tasksError)}
+        {getErrorMessage(taskViewState.error)}
       </p>
       <button
         style={{
@@ -173,18 +254,32 @@ function AppContent() {
           fontSize: 12,
           cursor: "pointer",
         }}
-        onClick={() => void refetchTasks()}
+        onClick={() => void taskViewState?.refetch()}
       >
         Retry
       </button>
     </div>
   ) : activeView === "board" ? (
     <TaskBoard
-      tasks={tasks}
+      tasks={taskViewState?.tasks ?? []}
       onEdit={(task) => setEditingTask(task)}
       onStatusChange={handleStatusChange}
       onDelete={handleDelete}
       onCreateClick={openCreateModal}
+    />
+  ) : activeView === "today" || activeView === "upcoming" ? (
+    <TaskScheduleView
+      view={activeView}
+      tasks={taskViewState?.tasks ?? []}
+      onEdit={(task) => setEditingTask(task)}
+      onStatusChange={handleStatusChange}
+      onDelete={handleDelete}
+      onCreateClick={openCreateModal}
+    />
+  ) : activeView === "settings" ? (
+    <ReminderSettings
+      remindersEnabled={remindersEnabled}
+      onRemindersEnabledChange={handleRemindersEnabledChange}
     />
   ) : (
     <Dashboard />

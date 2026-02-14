@@ -1,15 +1,19 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   getAllTasks,
+  getTodayTasks,
+  getUpcomingTasks,
   createTask,
   updateTask,
   deleteTask,
-  getTaskStats,
+  getTaskDashboardStats,
   getTaskChangelogs,
 } from "@/lib/database";
 import type { CreateTaskInput, UpdateTaskInput } from "@/lib/types";
 
 const TASKS_KEY = ["tasks"] as const;
+const TODAY_TASKS_KEY = ["tasks", "today"] as const;
+const UPCOMING_TASKS_KEY = ["tasks", "upcoming"] as const;
 const STATS_KEY = ["task-stats"] as const;
 const CHANGELOGS_KEY = ["task-changelogs"] as const;
 
@@ -21,11 +25,27 @@ export function useTasks() {
   });
 }
 
+/** Fetch open tasks due today or overdue */
+export function useTodayTasks() {
+  return useQuery({
+    queryKey: TODAY_TASKS_KEY,
+    queryFn: () => getTodayTasks(),
+  });
+}
+
+/** Fetch open tasks due in the next 7 days (excluding today) */
+export function useUpcomingTasks() {
+  return useQuery({
+    queryKey: UPCOMING_TASKS_KEY,
+    queryFn: () => getUpcomingTasks(7),
+  });
+}
+
 /** Fetch task stats (counts by status) */
 export function useTaskStats() {
   return useQuery({
     queryKey: STATS_KEY,
-    queryFn: getTaskStats,
+    queryFn: () => getTaskDashboardStats(),
   });
 }
 
@@ -46,6 +66,8 @@ export function useCreateTask() {
     mutationFn: (input: CreateTaskInput) => createTask(input),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: TASKS_KEY });
+      queryClient.invalidateQueries({ queryKey: TODAY_TASKS_KEY });
+      queryClient.invalidateQueries({ queryKey: UPCOMING_TASKS_KEY });
       queryClient.invalidateQueries({ queryKey: STATS_KEY });
       queryClient.invalidateQueries({ queryKey: CHANGELOGS_KEY });
     },
@@ -60,6 +82,8 @@ export function useUpdateTask() {
     mutationFn: (input: UpdateTaskInput) => updateTask(input),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: TASKS_KEY });
+      queryClient.invalidateQueries({ queryKey: TODAY_TASKS_KEY });
+      queryClient.invalidateQueries({ queryKey: UPCOMING_TASKS_KEY });
       queryClient.invalidateQueries({ queryKey: STATS_KEY });
       queryClient.invalidateQueries({ queryKey: CHANGELOGS_KEY });
     },
@@ -74,6 +98,8 @@ export function useDeleteTask() {
     mutationFn: (id: string) => deleteTask(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: TASKS_KEY });
+      queryClient.invalidateQueries({ queryKey: TODAY_TASKS_KEY });
+      queryClient.invalidateQueries({ queryKey: UPCOMING_TASKS_KEY });
       queryClient.invalidateQueries({ queryKey: STATS_KEY });
       queryClient.invalidateQueries({ queryKey: CHANGELOGS_KEY });
     },

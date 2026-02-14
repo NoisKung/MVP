@@ -7,7 +7,13 @@ Designed for individual developers who want a distraction-free, lightning-fast k
 ## ✨ Features
 
 - 📋 **Kanban Board** — Drag-and-drop tasks across To Do, In Progress, and Done columns
+- 🗓️ **Today & Upcoming Views** — Focus on overdue/today tasks and the next 7 days at a glance
+- ⏰ **Due Dates & Reminders** — Add schedule metadata directly in task form
+- 🔁 **Recurring Tasks** — Repeat tasks daily, weekly, or monthly
+- 🔔 **Desktop Notifications** — Native reminder notifications via Tauri plugin (click to open task)
 - 📊 **Dashboard** — Visualize your productivity at a glance
+- 📈 **Momentum Metrics** — Track due today, overdue, and completed-this-week trends
+- ⚙️ **Reminder Settings** — Toggle reminders and reset permission/history from Settings
 - 💾 **Local-first** — All data stored locally via SQLite, no account needed
 - ⚡ **Blazing fast** — Powered by Tauri for near-native performance
 - 🎨 **Beautiful UI** — Dark-themed, modern design with smooth animations

@@ -7,6 +7,7 @@ import {
   ChevronRight,
   ChevronLeft,
   Trash2,
+  Clock3,
 } from "lucide-react";
 import { useState } from "react";
 
@@ -62,6 +63,8 @@ export function TaskCard({
   const priorityConfig = PRIORITY_CONFIG[task.priority];
   const nextStatus = getNextStatus(task.status);
   const prevStatus = getPrevStatus(task.status);
+  const dueBadge = getDueBadge(task);
+  const recurrenceLabel = getRecurrenceLabel(task.recurrence);
 
   const relativeDate = getRelativeDate(task.created_at);
 
@@ -120,6 +123,20 @@ export function TaskCard({
       {/* Description */}
       {task.description && <p className="card-desc">{task.description}</p>}
 
+      {(dueBadge || recurrenceLabel) && (
+        <div className="card-meta-row">
+          {dueBadge && (
+            <span className={`card-due-badge card-due-${dueBadge.tone}`}>
+              <Clock3 size={11} />
+              {dueBadge.label}
+            </span>
+          )}
+          {recurrenceLabel && (
+            <span className="card-recurrence-badge">{recurrenceLabel}</span>
+          )}
+        </div>
+      )}
+
       {/* Footer */}
       <div className="card-footer">
         <span className="card-date">{relativeDate}</span>
@@ -171,4 +188,65 @@ function getRelativeDate(dateStr: string): string {
   if (diffHours < 24) return `${diffHours}h ago`;
   if (diffDays < 7) return `${diffDays}d ago`;
   return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+}
+
+type DueBadgeTone = "overdue" | "today" | "upcoming" | "neutral";
+
+interface DueBadge {
+  label: string;
+  tone: DueBadgeTone;
+}
+
+function getDueBadge(task: Task): DueBadge | null {
+  if (!task.due_at) return null;
+
+  const dueDate = new Date(task.due_at);
+  if (Number.isNaN(dueDate.getTime())) return null;
+
+  const now = new Date();
+  const todayStart = new Date(
+    now.getFullYear(),
+    now.getMonth(),
+    now.getDate(),
+    0,
+    0,
+    0,
+    0,
+  );
+  const todayEnd = new Date(todayStart);
+  todayEnd.setDate(todayEnd.getDate() + 1);
+
+  const formattedDate = dueDate.toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+  });
+  const formattedTime = dueDate.toLocaleTimeString("en-US", {
+    hour: "numeric",
+    minute: "2-digit",
+  });
+
+  const isDone = task.status === "DONE";
+  if (!isDone && dueDate < now) {
+    return {
+      label: `Overdue • ${formattedDate} ${formattedTime}`,
+      tone: "overdue",
+    };
+  }
+  if (dueDate >= todayStart && dueDate < todayEnd) {
+    return { label: `Due today • ${formattedTime}`, tone: "today" };
+  }
+  if (dueDate >= todayEnd) {
+    return {
+      label: `Due • ${formattedDate} ${formattedTime}`,
+      tone: "upcoming",
+    };
+  }
+  return { label: `Due • ${formattedDate} ${formattedTime}`, tone: "neutral" };
+}
+
+function getRecurrenceLabel(taskRecurrence: Task["recurrence"]): string | null {
+  if (taskRecurrence === "DAILY") return "Repeats daily";
+  if (taskRecurrence === "WEEKLY") return "Repeats weekly";
+  if (taskRecurrence === "MONTHLY") return "Repeats monthly";
+  return null;
 }
