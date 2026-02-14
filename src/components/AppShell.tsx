@@ -1,169 +1,337 @@
-import type { ReactNode } from "react";
+import { useState, useEffect, useCallback, type ReactNode } from "react";
 import { useAppStore } from "@/store/app-store";
 import type { ViewMode } from "@/lib/types";
+import {
+  LayoutDashboard,
+  KanbanSquare,
+  Plus,
+  Zap,
+  HardDrive,
+  Menu,
+  X,
+} from "lucide-react";
 
 interface NavItem {
-    view: ViewMode;
-    label: string;
-    icon: string;
+  view: ViewMode;
+  label: string;
+  icon: React.ReactNode;
 }
 
 const NAV_ITEMS: NavItem[] = [
-    { view: "board", label: "Board", icon: "📋" },
-    { view: "dashboard", label: "Dashboard", icon: "📊" },
+  { view: "board", label: "Board", icon: <KanbanSquare size={18} /> },
+  {
+    view: "dashboard",
+    label: "Dashboard",
+    icon: <LayoutDashboard size={18} />,
+  },
 ];
 
 interface AppShellProps {
-    children: ReactNode;
-    onCreateClick: () => void;
+  children: ReactNode;
+  onCreateClick: () => void;
 }
 
 export function AppShell({ children, onCreateClick }: AppShellProps) {
-    const { activeView, setActiveView } = useAppStore();
+  const { activeView, setActiveView } = useAppStore();
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [isMobile, setIsMobile] = useState(false);
 
-    return (
-        <div className="app-shell">
-            {/* Sidebar */}
-            <aside className="sidebar">
-                {/* Logo */}
-                <div className="sidebar-logo">
-                    <div className="logo-icon">⚡</div>
-                    <span className="logo-text">SoloStack</span>
-                </div>
+  // Track viewport width
+  useEffect(() => {
+    const mq = window.matchMedia("(max-width: 640px)");
+    const update = (e: MediaQueryList | MediaQueryListEvent) => {
+      setIsMobile(e.matches);
+      if (!e.matches) setSidebarOpen(false);
+    };
+    update(mq);
+    mq.addEventListener("change", update);
+    return () => mq.removeEventListener("change", update);
+  }, []);
 
-                {/* New Task Button */}
-                <button className="btn-new-task" onClick={onCreateClick}>
-                    <span className="btn-plus">+</span>
-                    New Task
-                </button>
+  const closeSidebar = useCallback(() => setSidebarOpen(false), []);
 
-                {/* Navigation */}
-                <nav className="sidebar-nav">
-                    {NAV_ITEMS.map((item) => (
-                        <button
-                            key={item.view}
-                            className={`nav-item ${activeView === item.view ? "active" : ""}`}
-                            onClick={() => setActiveView(item.view)}
-                        >
-                            <span className="nav-icon">{item.icon}</span>
-                            <span className="nav-label">{item.label}</span>
-                        </button>
-                    ))}
-                </nav>
+  const handleNavClick = (view: ViewMode) => {
+    setActiveView(view);
+    if (isMobile) closeSidebar();
+  };
 
-                {/* Footer */}
-                <div className="sidebar-footer">
-                    <div className="footer-badge">Local-First</div>
-                    <span className="footer-version">v0.1.0</span>
-                </div>
-            </aside>
+  const handleCreateClick = () => {
+    onCreateClick();
+    if (isMobile) closeSidebar();
+  };
 
-            {/* Main Content */}
-            <main className="main-content">
-                {children}
-            </main>
+  return (
+    <div className="app-shell">
+      {/* Mobile hamburger */}
+      {isMobile && (
+        <button
+          className="hamburger-btn"
+          onClick={() => setSidebarOpen(true)}
+          aria-label="Open menu"
+        >
+          <Menu size={20} />
+        </button>
+      )}
 
-            <style>{`
+      {/* Overlay backdrop for mobile */}
+      {isMobile && sidebarOpen && (
+        <div className="sidebar-backdrop" onClick={closeSidebar} />
+      )}
+
+      <aside
+        className={`sidebar${isMobile ? " sidebar-mobile" : ""}${sidebarOpen ? " sidebar-open" : ""}`}
+      >
+        {/* Brand */}
+        <div className="sidebar-brand">
+          <div className="brand-icon">
+            <Zap size={18} strokeWidth={2.5} />
+          </div>
+          <span className="brand-text">SoloStack</span>
+          {isMobile && (
+            <button
+              className="sidebar-close-btn"
+              onClick={closeSidebar}
+              aria-label="Close menu"
+            >
+              <X size={18} />
+            </button>
+          )}
+        </div>
+
+        {/* Create button */}
+        <button className="btn-create" onClick={handleCreateClick}>
+          <Plus size={16} strokeWidth={2.5} />
+          <span>New Task</span>
+          <kbd className="shortcut">⌘N</kbd>
+        </button>
+
+        {/* Navigation */}
+        <nav className="sidebar-nav">
+          <div className="nav-section-label">Workspace</div>
+          {NAV_ITEMS.map((item) => (
+            <button
+              key={item.view}
+              className={`nav-item ${activeView === item.view ? "active" : ""}`}
+              onClick={() => handleNavClick(item.view)}
+            >
+              <span className="nav-icon">{item.icon}</span>
+              <span className="nav-label">{item.label}</span>
+            </button>
+          ))}
+        </nav>
+
+        {/* Footer */}
+        <div className="sidebar-footer">
+          <div className="footer-status">
+            <HardDrive size={13} />
+            <span>Local Storage</span>
+          </div>
+          <span className="footer-version">v0.1.0</span>
+        </div>
+      </aside>
+
+      <main className="main-content">{children}</main>
+
+      <style>{`
         .app-shell {
           display: flex;
           height: 100vh;
           width: 100vw;
           overflow: hidden;
+          position: relative;
+        }
+
+        /* ===== Hamburger ===== */
+        .hamburger-btn {
+          position: fixed;
+          top: 12px;
+          left: 12px;
+          z-index: 50;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          width: 36px;
+          height: 36px;
+          background: var(--bg-elevated);
+          border: 1px solid var(--border-default);
+          border-radius: var(--radius-md);
+          color: var(--text-primary);
+          cursor: pointer;
+          transition: all var(--duration) var(--ease);
+        }
+        .hamburger-btn:hover {
+          background: var(--bg-hover);
+          border-color: var(--border-strong);
         }
 
         /* ===== Sidebar ===== */
         .sidebar {
-          width: 240px;
-          min-width: 240px;
-          background: var(--color-bg-secondary);
-          border-right: 1px solid var(--color-border);
+          width: 220px;
+          min-width: 220px;
+          background: var(--bg-surface);
+          border-right: 1px solid var(--border-default);
           display: flex;
           flex-direction: column;
-          padding: 20px 14px;
+          padding: 16px 12px;
+          gap: 4px;
         }
-        .sidebar-logo {
+
+        /* Mobile sidebar */
+        .sidebar-mobile {
+          position: fixed;
+          top: 0;
+          left: 0;
+          bottom: 0;
+          width: 260px;
+          min-width: 260px;
+          z-index: 200;
+          transform: translateX(-100%);
+          transition: transform 0.28s cubic-bezier(0.4, 0, 0.2, 1);
+          box-shadow: none;
+        }
+        .sidebar-mobile.sidebar-open {
+          transform: translateX(0);
+          box-shadow: 8px 0 32px rgba(0, 0, 0, 0.5);
+        }
+
+        .sidebar-backdrop {
+          position: fixed;
+          inset: 0;
+          z-index: 150;
+          background: rgba(0, 0, 0, 0.45);
+          backdrop-filter: blur(2px);
+          animation: fadeIn 200ms var(--ease) forwards;
+        }
+
+        .sidebar-close-btn {
+          margin-left: auto;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          width: 28px;
+          height: 28px;
+          background: none;
+          border: 1px solid var(--border-default);
+          border-radius: var(--radius-sm);
+          color: var(--text-muted);
+          cursor: pointer;
+          transition: all var(--duration) var(--ease);
+        }
+        .sidebar-close-btn:hover {
+          background: var(--bg-hover);
+          color: var(--text-primary);
+        }
+
+        .sidebar-brand {
           display: flex;
           align-items: center;
           gap: 10px;
-          padding: 8px 10px;
-          margin-bottom: 24px;
+          padding: 6px 8px;
+          margin-bottom: 16px;
         }
-        .logo-icon {
-          font-size: 1.6rem;
-          line-height: 1;
+        .brand-icon {
+          width: 30px;
+          height: 30px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          background: var(--accent-subtle);
+          color: var(--accent);
+          border-radius: var(--radius-md);
+          flex-shrink: 0;
         }
-        .logo-text {
-          font-size: 1.18rem;
+        .brand-text {
+          font-size: 15px;
           font-weight: 700;
-          background: linear-gradient(135deg, #f0f0f5, #6c63ff);
-          -webkit-background-clip: text;
-          -webkit-text-fill-color: transparent;
+          color: var(--text-primary);
           letter-spacing: -0.3px;
         }
 
-        /* New Task Button */
-        .btn-new-task {
+        /* Create Button */
+        .btn-create {
           display: flex;
           align-items: center;
           gap: 8px;
           width: 100%;
-          padding: 11px 16px;
-          background: var(--color-accent);
+          padding: 8px 12px;
+          background: var(--accent);
           border: none;
-          border-radius: var(--radius-sm);
+          border-radius: var(--radius-md);
           color: #fff;
-          font-size: 0.9rem;
+          font-size: 13px;
           font-weight: 600;
           font-family: inherit;
           cursor: pointer;
-          transition: all var(--transition);
-          margin-bottom: 24px;
+          transition: all var(--duration) var(--ease);
+          margin-bottom: 20px;
         }
-        .btn-new-task:hover {
-          background: var(--color-accent-hover);
-          box-shadow: 0 0 20px var(--color-accent-glow);
-          transform: translateY(-1px);
+        .btn-create:hover {
+          background: var(--accent-hover);
+          box-shadow: var(--shadow-glow);
         }
-        .btn-plus {
-          font-size: 1.2rem;
-          font-weight: 300;
-          line-height: 1;
+        .btn-create:active {
+          transform: scale(0.98);
+        }
+        .shortcut {
+          margin-left: auto;
+          font-size: 10px;
+          font-family: inherit;
+          color: rgba(255,255,255,0.5);
+          background: rgba(255,255,255,0.1);
+          padding: 2px 5px;
+          border-radius: 4px;
+          border: none;
+          font-weight: 500;
         }
 
         /* Navigation */
         .sidebar-nav {
           display: flex;
           flex-direction: column;
-          gap: 4px;
+          gap: 2px;
           flex: 1;
+        }
+        .nav-section-label {
+          font-size: 11px;
+          font-weight: 600;
+          color: var(--text-disabled);
+          text-transform: uppercase;
+          letter-spacing: 0.8px;
+          padding: 8px 10px 6px;
         }
         .nav-item {
           display: flex;
           align-items: center;
           gap: 10px;
           width: 100%;
-          padding: 10px 14px;
+          padding: 7px 10px;
           background: none;
           border: none;
           border-radius: var(--radius-sm);
-          color: var(--color-text-secondary);
-          font-size: 0.88rem;
+          color: var(--text-secondary);
+          font-size: 13px;
           font-weight: 500;
           font-family: inherit;
           cursor: pointer;
-          transition: all var(--transition);
+          transition: all var(--duration) var(--ease);
           text-align: left;
         }
         .nav-item:hover {
-          background: var(--color-bg-card);
-          color: var(--color-text-primary);
+          background: var(--bg-hover);
+          color: var(--text-primary);
         }
         .nav-item.active {
-          background: var(--color-bg-card);
-          color: var(--color-accent);
+          background: var(--bg-hover);
+          color: var(--text-primary);
+        }
+        .nav-item.active .nav-icon {
+          color: var(--accent);
         }
         .nav-icon {
-          font-size: 1.1rem;
+          display: flex;
+          align-items: center;
+          color: var(--text-muted);
+          transition: color var(--duration) var(--ease);
         }
 
         /* Footer */
@@ -171,32 +339,40 @@ export function AppShell({ children, onCreateClick }: AppShellProps) {
           display: flex;
           align-items: center;
           justify-content: space-between;
-          padding: 12px 10px 0;
-          border-top: 1px solid var(--color-border);
+          padding: 12px 8px 4px;
+          border-top: 1px solid var(--border-default);
         }
-        .footer-badge {
-          font-size: 0.7rem;
-          font-weight: 600;
-          color: var(--color-done);
-          background: rgba(34, 197, 94, 0.1);
-          padding: 3px 8px;
-          border-radius: 10px;
-          text-transform: uppercase;
-          letter-spacing: 0.5px;
+        .footer-status {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          font-size: 11px;
+          color: var(--text-muted);
         }
         .footer-version {
-          font-size: 0.72rem;
-          color: var(--color-text-muted);
+          font-size: 11px;
+          color: var(--text-disabled);
+          font-variant-numeric: tabular-nums;
         }
 
         /* ===== Main Content ===== */
         .main-content {
           flex: 1;
           overflow-y: auto;
-          padding: 24px;
-          background: var(--color-bg-primary);
+          padding: 0;
+          background: var(--bg-base);
+        }
+
+        /* Mobile: offset for hamburger */
+        @media (max-width: 640px) {
+          .main-content {
+            padding-top: 52px;
+          }
+          .shortcut {
+            display: none;
+          }
         }
       `}</style>
-        </div>
-    );
+    </div>
+  );
 }

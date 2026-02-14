@@ -14,11 +14,12 @@
       {
         "title": "solostack",
         "width": 800,
-        "height": 600
+        "height": 600,
+        "dragDropEnabled": false
       }
     ],
     "security": {
-      "csp": null
+      "csp": "default-src 'self'; img-src 'self' asset: http://asset.localhost data: blob:; style-src 'self' 'unsafe-inline'; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost https://ipc.localhost http://localhost:1420 http://127.0.0.1:1420 ws://localhost:1420 ws://localhost:1421 ws://127.0.0.1:1420 ws://127.0.0.1:1421; script-src 'self'"
     }
   },
   "bundle": {
