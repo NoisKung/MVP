@@ -142,18 +142,17 @@ export function AppShell({ children, onCreateClick }: AppShellProps) {
         </div>
       </aside>
 
-      <main className="main-content">
-        {/* Ko-fi support button */}
-        <button
-          className="kofi-btn"
-          onClick={() => openUrl("https://ko-fi.com/Y8Y71U8RJO")}
-          title="Support me on Ko-fi"
-        >
-          <Heart size={14} />
-          <span>Support</span>
-        </button>
-        {children}
-      </main>
+      <main className="main-content">{children}</main>
+
+      {/* Ko-fi support floating action button */}
+      <button
+        className="kofi-btn"
+        onClick={() => openUrl("https://ko-fi.com/Y8Y71U8RJO")}
+        title="Support me on Ko-fi"
+        aria-label="Support me on Ko-fi"
+      >
+        <Heart size={16} />
+      </button>
 
       <style>{`
         .app-shell {
@@ -389,29 +388,26 @@ export function AppShell({ children, onCreateClick }: AppShellProps) {
 
         /* ===== Ko-fi Button ===== */
         .kofi-btn {
-          position: absolute;
-          top: 16px;
+          position: fixed;
           right: 20px;
-          z-index: 40;
+          bottom: 20px;
+          z-index: 260;
           display: flex;
           align-items: center;
-          gap: 6px;
-          padding: 6px 14px 6px 10px;
+          justify-content: center;
+          width: 42px;
+          height: 42px;
           background: linear-gradient(135deg, #ff5e5b 0%, #ff7eb3 100%);
           border: none;
-          border-radius: var(--radius-full);
+          border-radius: 9999px;
           color: #fff;
-          font-size: 12px;
-          font-weight: 600;
-          font-family: inherit;
           cursor: pointer;
           transition: all 0.25s var(--ease);
-          box-shadow: 0 2px 8px rgba(255, 94, 91, 0.25);
-          letter-spacing: 0.2px;
+          box-shadow: 0 6px 18px rgba(255, 94, 91, 0.35);
         }
         .kofi-btn:hover {
           transform: translateY(-1px);
-          box-shadow: 0 4px 16px rgba(255, 94, 91, 0.4);
+          box-shadow: 0 10px 24px rgba(255, 94, 91, 0.4);
           background: linear-gradient(135deg, #ff4744 0%, #ff6ba3 100%);
         }
         .kofi-btn:hover svg {
@@ -430,6 +426,12 @@ export function AppShell({ children, onCreateClick }: AppShellProps) {
         @media (max-width: 640px) {
           .main-content {
             padding-top: 52px;
+          }
+          .kofi-btn {
+            right: 14px;
+            bottom: 14px;
+            width: 40px;
+            height: 40px;
           }
           .shortcut {
             display: none;

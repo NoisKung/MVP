@@ -102,7 +102,7 @@ function AppContent() {
     saveCurrentFiltersAsView,
     applySavedView,
     deleteSavedView,
-  } = useTaskFilters();
+  } = useTaskFilters(activeView);
   const [actionError, setActionError] = useState<string | null>(null);
   const [remindersEnabled, setRemindersEnabled] = useState<boolean>(() =>
     getRemindersEnabledPreference(),

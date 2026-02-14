@@ -5,37 +5,53 @@ import type {
   TaskFilterState,
   TaskPriority,
   TaskSortBy,
+  TaskSortableView,
   TaskStatus,
+  TaskViewFilterPreferences,
+  ViewMode,
 } from "@/lib/types";
 import {
-  DEFAULT_TASK_FILTERS,
+  DEFAULT_TASK_VIEW_FILTERS,
   loadSavedTaskViewsFromStorage,
-  loadTaskFiltersFromStorage,
+  loadTaskViewFiltersFromStorage,
   normalizeTaskFilters,
   saveSavedTaskViewsToStorage,
-  saveTaskFiltersToStorage,
+  saveTaskViewFiltersToStorage,
 } from "@/lib/task-filters";
 
 function createSavedViewId(): string {
-  if (
-    typeof crypto !== "undefined" &&
-    typeof crypto.randomUUID === "function"
-  ) {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
     return crypto.randomUUID();
   }
   return `saved-view-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
 }
 
-function hasFiltersApplied(filters: TaskFilterState): boolean {
+function toSortableView(view: ViewMode): TaskSortableView | null {
+  if (view === "board" || view === "today" || view === "upcoming") return view;
+  return null;
+}
+
+function hasFiltersApplied(
+  filters: TaskFilterState,
+  defaultFilters: TaskFilterState,
+): boolean {
   return (
     filters.search.trim().length > 0 ||
     filters.statuses.length > 0 ||
     filters.priorities.length > 0 ||
     filters.importantOnly ||
-    filters.dueFilter !== "ALL" ||
-    filters.sortBy !== DEFAULT_TASK_FILTERS.sortBy
+    filters.dueFilter !== defaultFilters.dueFilter ||
+    filters.sortBy !== defaultFilters.sortBy
   );
 }
+
+type ActiveSavedViewIds = Record<TaskSortableView, string | null>;
+
+const INITIAL_ACTIVE_SAVED_VIEW_IDS: ActiveSavedViewIds = {
+  board: null,
+  today: null,
+  upcoming: null,
+};
 
 interface UseTaskFiltersResult {
   filters: TaskFilterState;
@@ -54,82 +70,150 @@ interface UseTaskFiltersResult {
   deleteSavedView: (savedViewId: string) => void;
 }
 
-export function useTaskFilters(): UseTaskFiltersResult {
-  const [filters, setFilters] = useState<TaskFilterState>(() =>
-    loadTaskFiltersFromStorage(),
+export function useTaskFilters(activeView: ViewMode): UseTaskFiltersResult {
+  const currentSortableView = toSortableView(activeView);
+
+  const [viewFilters, setViewFilters] = useState<TaskViewFilterPreferences>(() =>
+    loadTaskViewFiltersFromStorage(),
   );
   const [savedViews, setSavedViews] = useState<SavedTaskView[]>(() =>
     loadSavedTaskViewsFromStorage(),
   );
-  const [activeSavedViewId, setActiveSavedViewId] = useState<string | null>(
-    null,
+  const [activeSavedViewIds, setActiveSavedViewIds] = useState<ActiveSavedViewIds>(
+    INITIAL_ACTIVE_SAVED_VIEW_IDS,
   );
 
   useEffect(() => {
-    saveTaskFiltersToStorage(filters);
-  }, [filters]);
+    saveTaskViewFiltersToStorage(viewFilters);
+  }, [viewFilters]);
 
   useEffect(() => {
     saveSavedTaskViewsToStorage(savedViews);
   }, [savedViews]);
 
-  const setSearch = useCallback((search: string) => {
-    setFilters((prevFilters) => ({ ...prevFilters, search }));
-    setActiveSavedViewId(null);
-  }, []);
+  const filters = useMemo<TaskFilterState>(() => {
+    if (!currentSortableView) {
+      return { ...DEFAULT_TASK_VIEW_FILTERS.board };
+    }
+    return viewFilters[currentSortableView];
+  }, [currentSortableView, viewFilters]);
 
-  const toggleStatus = useCallback((status: TaskStatus) => {
-    setFilters((prevFilters) => {
-      const hasStatus = prevFilters.statuses.includes(status);
-      const nextStatuses = hasStatus
-        ? prevFilters.statuses.filter((item) => item !== status)
-        : [...prevFilters.statuses, status];
-      return { ...prevFilters, statuses: nextStatuses };
-    });
-    setActiveSavedViewId(null);
-  }, []);
+  const currentDefaultFilters = currentSortableView
+    ? DEFAULT_TASK_VIEW_FILTERS[currentSortableView]
+    : DEFAULT_TASK_VIEW_FILTERS.board;
 
-  const togglePriority = useCallback((priority: TaskPriority) => {
-    setFilters((prevFilters) => {
-      const hasPriority = prevFilters.priorities.includes(priority);
-      const nextPriorities = hasPriority
-        ? prevFilters.priorities.filter((item) => item !== priority)
-        : [...prevFilters.priorities, priority];
-      return { ...prevFilters, priorities: nextPriorities };
-    });
-    setActiveSavedViewId(null);
-  }, []);
+  const hasActiveFilters = useMemo(
+    () => hasFiltersApplied(filters, currentDefaultFilters),
+    [filters, currentDefaultFilters],
+  );
 
-  const setImportantOnly = useCallback((importantOnly: boolean) => {
-    setFilters((prevFilters) => ({ ...prevFilters, importantOnly }));
-    setActiveSavedViewId(null);
-  }, []);
+  const currentViewSavedViews = useMemo(() => {
+    if (!currentSortableView) return [];
+    return savedViews.filter((savedView) => savedView.scope === currentSortableView);
+  }, [currentSortableView, savedViews]);
 
-  const setDueFilter = useCallback((dueFilter: TaskDueFilter) => {
-    setFilters((prevFilters) => ({ ...prevFilters, dueFilter }));
-    setActiveSavedViewId(null);
-  }, []);
+  const activeSavedViewId = currentSortableView
+    ? activeSavedViewIds[currentSortableView]
+    : null;
 
-  const setSortBy = useCallback((sortBy: TaskSortBy) => {
-    setFilters((prevFilters) => ({ ...prevFilters, sortBy }));
-    setActiveSavedViewId(null);
-  }, []);
+  const updateCurrentFilters = useCallback(
+    (updater: (filters: TaskFilterState) => TaskFilterState) => {
+      if (!currentSortableView) return;
+
+      setViewFilters((prevFilters) => {
+        const updatedFilters = normalizeTaskFilters(
+          updater(prevFilters[currentSortableView]),
+        );
+        return { ...prevFilters, [currentSortableView]: updatedFilters };
+      });
+      setActiveSavedViewIds((prevIds) => ({
+        ...prevIds,
+        [currentSortableView]: null,
+      }));
+    },
+    [currentSortableView],
+  );
+
+  const setSearch = useCallback(
+    (search: string) => {
+      updateCurrentFilters((prevFilters) => ({ ...prevFilters, search }));
+    },
+    [updateCurrentFilters],
+  );
+
+  const toggleStatus = useCallback(
+    (status: TaskStatus) => {
+      updateCurrentFilters((prevFilters) => {
+        const hasStatus = prevFilters.statuses.includes(status);
+        const nextStatuses = hasStatus
+          ? prevFilters.statuses.filter((item) => item !== status)
+          : [...prevFilters.statuses, status];
+        return { ...prevFilters, statuses: nextStatuses };
+      });
+    },
+    [updateCurrentFilters],
+  );
+
+  const togglePriority = useCallback(
+    (priority: TaskPriority) => {
+      updateCurrentFilters((prevFilters) => {
+        const hasPriority = prevFilters.priorities.includes(priority);
+        const nextPriorities = hasPriority
+          ? prevFilters.priorities.filter((item) => item !== priority)
+          : [...prevFilters.priorities, priority];
+        return { ...prevFilters, priorities: nextPriorities };
+      });
+    },
+    [updateCurrentFilters],
+  );
+
+  const setImportantOnly = useCallback(
+    (importantOnly: boolean) => {
+      updateCurrentFilters((prevFilters) => ({ ...prevFilters, importantOnly }));
+    },
+    [updateCurrentFilters],
+  );
+
+  const setDueFilter = useCallback(
+    (dueFilter: TaskDueFilter) => {
+      updateCurrentFilters((prevFilters) => ({ ...prevFilters, dueFilter }));
+    },
+    [updateCurrentFilters],
+  );
+
+  const setSortBy = useCallback(
+    (sortBy: TaskSortBy) => {
+      updateCurrentFilters((prevFilters) => ({ ...prevFilters, sortBy }));
+    },
+    [updateCurrentFilters],
+  );
 
   const clearFilters = useCallback(() => {
-    setFilters({ ...DEFAULT_TASK_FILTERS });
-    setActiveSavedViewId(null);
-  }, []);
+    if (!currentSortableView) return;
+
+    setViewFilters((prevFilters) => ({
+      ...prevFilters,
+      [currentSortableView]: { ...DEFAULT_TASK_VIEW_FILTERS[currentSortableView] },
+    }));
+    setActiveSavedViewIds((prevIds) => ({
+      ...prevIds,
+      [currentSortableView]: null,
+    }));
+  }, [currentSortableView]);
 
   const saveCurrentFiltersAsView = useCallback(
     (name: string): SavedTaskView | null => {
+      if (!currentSortableView) return null;
+
       const normalizedName = name.trim();
       if (!normalizedName) return null;
 
       const nowIso = new Date().toISOString();
-      const normalizedFilters = normalizeTaskFilters(filters);
+      const normalizedFilters = normalizeTaskFilters(viewFilters[currentSortableView]);
 
       const existingView = savedViews.find(
         (savedView) =>
+          savedView.scope === currentSortableView &&
           savedView.name.trim().toLowerCase() === normalizedName.toLowerCase(),
       );
 
@@ -146,50 +230,68 @@ export function useTaskFilters(): UseTaskFiltersResult {
             savedView.id === existingView.id ? updatedView : savedView,
           ),
         );
-        setActiveSavedViewId(existingView.id);
+        setActiveSavedViewIds((prevIds) => ({
+          ...prevIds,
+          [currentSortableView]: existingView.id,
+        }));
         return updatedView;
       }
 
       const newSavedView: SavedTaskView = {
         id: createSavedViewId(),
         name: normalizedName,
+        scope: currentSortableView,
         filters: normalizedFilters,
         created_at: nowIso,
         updated_at: nowIso,
       };
 
       setSavedViews((prevViews) => [newSavedView, ...prevViews]);
-      setActiveSavedViewId(newSavedView.id);
+      setActiveSavedViewIds((prevIds) => ({
+        ...prevIds,
+        [currentSortableView]: newSavedView.id,
+      }));
       return newSavedView;
     },
-    [filters, savedViews],
+    [currentSortableView, savedViews, viewFilters],
   );
 
   const applySavedView = useCallback(
     (savedViewId: string) => {
+      if (!currentSortableView) return;
+
       const targetView = savedViews.find(
-        (savedView) => savedView.id === savedViewId,
+        (savedView) =>
+          savedView.id === savedViewId && savedView.scope === currentSortableView,
       );
       if (!targetView) return;
 
-      setFilters(normalizeTaskFilters(targetView.filters));
-      setActiveSavedViewId(savedViewId);
+      setViewFilters((prevFilters) => ({
+        ...prevFilters,
+        [currentSortableView]: normalizeTaskFilters(targetView.filters),
+      }));
+      setActiveSavedViewIds((prevIds) => ({
+        ...prevIds,
+        [currentSortableView]: savedViewId,
+      }));
     },
-    [savedViews],
+    [currentSortableView, savedViews],
   );
 
   const deleteSavedView = useCallback((savedViewId: string) => {
     setSavedViews((prevViews) =>
       prevViews.filter((savedView) => savedView.id !== savedViewId),
     );
-    setActiveSavedViewId((prevId) => (prevId === savedViewId ? null : prevId));
+    setActiveSavedViewIds((prevIds) => ({
+      board: prevIds.board === savedViewId ? null : prevIds.board,
+      today: prevIds.today === savedViewId ? null : prevIds.today,
+      upcoming: prevIds.upcoming === savedViewId ? null : prevIds.upcoming,
+    }));
   }, []);
-
-  const hasActiveFilters = useMemo(() => hasFiltersApplied(filters), [filters]);
 
   return {
     filters,
-    savedViews,
+    savedViews: currentViewSavedViews,
     activeSavedViewId,
     hasActiveFilters,
     setSearch,

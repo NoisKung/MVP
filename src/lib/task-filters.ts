@@ -6,10 +6,14 @@ import type {
   TaskPriority,
   TaskSortBy,
   TaskStatus,
+  TaskSortableView,
+  TaskViewFilterPreferences,
 } from "./types";
 
 export const TASK_FILTERS_STORAGE_KEY = "solostack.task-filters";
 export const SAVED_TASK_VIEWS_STORAGE_KEY = "solostack.saved-task-views";
+export const TASK_VIEW_FILTERS_STORAGE_KEY = "solostack.task-view-filters";
+export const TASK_VIEW_SORTS_STORAGE_KEY = "solostack.task-view-sorts";
 
 const DAY_IN_MILLISECONDS = 24 * 60 * 60 * 1000;
 
@@ -37,6 +41,12 @@ export const DEFAULT_TASK_FILTERS: TaskFilterState = {
   importantOnly: false,
   dueFilter: "ALL",
   sortBy: "CREATED_DESC",
+};
+
+export const DEFAULT_TASK_VIEW_FILTERS: TaskViewFilterPreferences = {
+  board: { ...DEFAULT_TASK_FILTERS, sortBy: "CREATED_DESC" },
+  today: { ...DEFAULT_TASK_FILTERS, sortBy: "DUE_ASC" },
+  upcoming: { ...DEFAULT_TASK_FILTERS, sortBy: "DUE_ASC" },
 };
 
 const PRIORITY_RANKING: Record<TaskPriority, number> = {
@@ -80,6 +90,21 @@ function normalizePriorities(priorities: unknown): TaskPriority[] {
   return priorities.filter((priority): priority is TaskPriority =>
     ALLOWED_PRIORITIES.includes(priority as TaskPriority),
   );
+}
+
+function normalizeTaskSortableView(value: unknown): TaskSortableView {
+  if (value === "today" || value === "upcoming") return value;
+  return "board";
+}
+
+function normalizeSortBy(
+  sortBy: unknown,
+  fallbackSortBy: TaskSortBy,
+): TaskSortBy {
+  if (ALLOWED_SORT_OPTIONS.includes(sortBy as TaskSortBy)) {
+    return sortBy as TaskSortBy;
+  }
+  return fallbackSortBy;
 }
 
 export function normalizeTaskFilters(input: unknown): TaskFilterState {
@@ -246,32 +271,140 @@ function compareByCreatedDesc(leftTask: Task, rightTask: Task): number {
   return compareDateDesc(leftTask.created_at, rightTask.created_at);
 }
 
-export function loadTaskFiltersFromStorage(): TaskFilterState {
-  if (typeof window === "undefined") {
-    return { ...DEFAULT_TASK_FILTERS };
-  }
-
-  try {
-    const raw = window.localStorage.getItem(TASK_FILTERS_STORAGE_KEY);
-    if (!raw) return { ...DEFAULT_TASK_FILTERS };
-    const parsed = JSON.parse(raw);
-    return normalizeTaskFilters(parsed);
-  } catch {
-    return { ...DEFAULT_TASK_FILTERS };
-  }
+function normalizeTaskViewFilters(
+  input: Partial<TaskViewFilterPreferences>,
+): TaskViewFilterPreferences {
+  return {
+    board: normalizeTaskFiltersForScope(input.board, "board"),
+    today: normalizeTaskFiltersForScope(input.today, "today"),
+    upcoming: normalizeTaskFiltersForScope(input.upcoming, "upcoming"),
+  };
 }
 
-export function saveTaskFiltersToStorage(filters: TaskFilterState): void {
+function migrateLegacyTaskViewFilters(): TaskViewFilterPreferences {
+  if (typeof window === "undefined") {
+    return { ...DEFAULT_TASK_VIEW_FILTERS };
+  }
+
+  let legacyBoardFilters = { ...DEFAULT_TASK_VIEW_FILTERS.board };
+  let legacySorts: Record<TaskSortableView, TaskSortBy> = {
+    board: DEFAULT_TASK_VIEW_FILTERS.board.sortBy,
+    today: DEFAULT_TASK_VIEW_FILTERS.today.sortBy,
+    upcoming: DEFAULT_TASK_VIEW_FILTERS.upcoming.sortBy,
+  };
+
+  try {
+    const rawLegacyFilters = window.localStorage.getItem(
+      TASK_FILTERS_STORAGE_KEY,
+    );
+    if (rawLegacyFilters) {
+      legacyBoardFilters = normalizeTaskFiltersForScope(
+        JSON.parse(rawLegacyFilters),
+        "board",
+      );
+    }
+  } catch {
+    // Ignore malformed legacy payloads.
+  }
+
+  legacySorts.board = legacyBoardFilters.sortBy;
+
+  try {
+    const rawLegacySorts = window.localStorage.getItem(
+      TASK_VIEW_SORTS_STORAGE_KEY,
+    );
+    if (rawLegacySorts) {
+      const parsedLegacySorts = JSON.parse(rawLegacySorts) as Partial<
+        Record<TaskSortableView, TaskSortBy>
+      >;
+      legacySorts = {
+        board: normalizeSortBy(parsedLegacySorts.board, legacySorts.board),
+        today: normalizeSortBy(parsedLegacySorts.today, legacySorts.today),
+        upcoming: normalizeSortBy(
+          parsedLegacySorts.upcoming,
+          legacySorts.upcoming,
+        ),
+      };
+    }
+  } catch {
+    // Ignore malformed legacy payloads.
+  }
+
+  return {
+    board: { ...legacyBoardFilters, sortBy: legacySorts.board },
+    today: { ...DEFAULT_TASK_VIEW_FILTERS.today, sortBy: legacySorts.today },
+    upcoming: {
+      ...DEFAULT_TASK_VIEW_FILTERS.upcoming,
+      sortBy: legacySorts.upcoming,
+    },
+  };
+}
+
+function isTaskViewFilterPreferences(
+  value: unknown,
+): value is TaskViewFilterPreferences {
+  if (!value || typeof value !== "object") return false;
+  const maybePreferences = value as Partial<TaskViewFilterPreferences>;
+  return Boolean(
+    maybePreferences.board &&
+    maybePreferences.today &&
+    maybePreferences.upcoming,
+  );
+}
+
+export function loadTaskViewFiltersFromStorage(): TaskViewFilterPreferences {
+  if (typeof window === "undefined") {
+    return { ...DEFAULT_TASK_VIEW_FILTERS };
+  }
+
+  try {
+    const raw = window.localStorage.getItem(TASK_VIEW_FILTERS_STORAGE_KEY);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (isTaskViewFilterPreferences(parsed)) {
+        return normalizeTaskViewFilters(parsed);
+      }
+    }
+  } catch {
+    // Continue with migration fallback.
+  }
+
+  return migrateLegacyTaskViewFilters();
+}
+
+export function saveTaskViewFiltersToStorage(
+  viewFilters: TaskViewFilterPreferences,
+): void {
   if (typeof window === "undefined") return;
   try {
-    const normalizedFilters = normalizeTaskFilters(filters);
+    const normalizedFilters = normalizeTaskViewFilters(viewFilters);
     window.localStorage.setItem(
-      TASK_FILTERS_STORAGE_KEY,
+      TASK_VIEW_FILTERS_STORAGE_KEY,
       JSON.stringify(normalizedFilters),
     );
   } catch {
     // Ignore storage quota and serialization errors.
   }
+}
+
+function normalizeTaskFiltersForScope(
+  input: unknown,
+  scope: TaskSortableView,
+): TaskFilterState {
+  const normalizedFilters = normalizeTaskFilters(input);
+  const sourceSortBy =
+    input && typeof input === "object"
+      ? (input as Partial<TaskFilterState>).sortBy
+      : undefined;
+
+  return {
+    ...DEFAULT_TASK_VIEW_FILTERS[scope],
+    ...normalizedFilters,
+    sortBy: normalizeSortBy(
+      sourceSortBy,
+      DEFAULT_TASK_VIEW_FILTERS[scope].sortBy,
+    ),
+  };
 }
 
 function isSavedTaskView(value: unknown): value is SavedTaskView {
@@ -295,10 +428,14 @@ export function loadSavedTaskViewsFromStorage(): SavedTaskView[] {
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
 
-    return parsed.filter(isSavedTaskView).map((savedView) => ({
-      ...savedView,
-      filters: normalizeTaskFilters(savedView.filters),
-    }));
+    return parsed.filter(isSavedTaskView).map((savedView) => {
+      const scope = normalizeTaskSortableView(savedView.scope);
+      return {
+        ...savedView,
+        scope,
+        filters: normalizeTaskFiltersForScope(savedView.filters, scope),
+      };
+    });
   } catch {
     return [];
   }
@@ -307,10 +444,14 @@ export function loadSavedTaskViewsFromStorage(): SavedTaskView[] {
 export function saveSavedTaskViewsToStorage(savedViews: SavedTaskView[]): void {
   if (typeof window === "undefined") return;
   try {
-    const normalizedViews = savedViews.map((savedView) => ({
-      ...savedView,
-      filters: normalizeTaskFilters(savedView.filters),
-    }));
+    const normalizedViews = savedViews.map((savedView) => {
+      const scope = normalizeTaskSortableView(savedView.scope);
+      return {
+        ...savedView,
+        scope,
+        filters: normalizeTaskFiltersForScope(savedView.filters, scope),
+      };
+    });
     window.localStorage.setItem(
       SAVED_TASK_VIEWS_STORAGE_KEY,
       JSON.stringify(normalizedViews),

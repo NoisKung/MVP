@@ -7,7 +7,7 @@ Designed for individual developers who want a distraction-free, lightning-fast k
 ## ✨ Features
 
 - 📋 **Kanban Board** — Drag-and-drop tasks across To Do, In Progress, and Done columns
-- 🔎 **Search + Filters + Sort** — Quickly narrow tasks by text, status, priority, importance, due window, and ordering
+- 🔎 **Search + Filters + Sort** — Quickly narrow tasks by text, status, priority, importance, due window, and per-view ordering
 - 💾 **Saved Views** — Save and reapply custom filter combinations
 - 🗓️ **Today & Upcoming Views** — Focus on overdue/today tasks and the next 7 days at a glance
 - ⏰ **Due Dates & Reminders** — Add schedule metadata directly in task form

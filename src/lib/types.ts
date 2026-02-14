@@ -93,6 +93,18 @@ export type TaskSortBy =
   | "PRIORITY_DESC"
   | "TITLE_ASC";
 
+/** Views that support independent sort preference */
+export type TaskSortableView = "board" | "today" | "upcoming";
+
+/** Per-view sort preference map */
+export type TaskViewSortPreferences = Record<TaskSortableView, TaskSortBy>;
+
+/** Per-view filter state map */
+export type TaskViewFilterPreferences = Record<
+  TaskSortableView,
+  TaskFilterState
+>;
+
 /** Search/filter state for task lists */
 export interface TaskFilterState {
   search: string;
@@ -107,6 +119,7 @@ export interface TaskFilterState {
 export interface SavedTaskView {
   id: string;
   name: string;
+  scope: TaskSortableView;
   filters: TaskFilterState;
   created_at: string;
   updated_at: string;
