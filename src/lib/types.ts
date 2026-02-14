@@ -77,6 +77,41 @@ export interface KanbanColumn {
   color: string;
 }
 
+/** Due-date filter buckets */
+export type TaskDueFilter =
+  | "ALL"
+  | "OVERDUE"
+  | "TODAY"
+  | "NEXT_7_DAYS"
+  | "NO_DUE";
+
+/** Task sort options for list and board ordering */
+export type TaskSortBy =
+  | "CREATED_DESC"
+  | "UPDATED_DESC"
+  | "DUE_ASC"
+  | "PRIORITY_DESC"
+  | "TITLE_ASC";
+
+/** Search/filter state for task lists */
+export interface TaskFilterState {
+  search: string;
+  statuses: TaskStatus[];
+  priorities: TaskPriority[];
+  importantOnly: boolean;
+  dueFilter: TaskDueFilter;
+  sortBy: TaskSortBy;
+}
+
+/** User-saved filter preset */
+export interface SavedTaskView {
+  id: string;
+  name: string;
+  filters: TaskFilterState;
+  created_at: string;
+  updated_at: string;
+}
+
 /** Application view modes */
 export type ViewMode =
   | "board"

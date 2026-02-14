@@ -1,11 +1,12 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { AppShell } from "./components/AppShell";
 import { TaskBoard } from "./components/TaskBoard";
 import { TaskForm } from "./components/TaskForm";
 import { Dashboard } from "./components/Dashboard";
 import { TaskScheduleView } from "./components/TaskScheduleView";
 import { ReminderSettings } from "./components/ReminderSettings";
+import { TaskFiltersBar } from "./components/TaskFiltersBar";
 import {
   useTasks,
   useTodayTasks,
@@ -15,12 +16,14 @@ import {
   useDeleteTask,
 } from "./hooks/use-tasks";
 import { useReminderNotifications } from "./hooks/use-reminder-notifications";
+import { useTaskFilters } from "./hooks/use-task-filters";
 import { useAppStore } from "./store/app-store";
 import type { CreateTaskInput, UpdateTaskInput, TaskStatus } from "./lib/types";
 import {
   getRemindersEnabledPreference,
   setRemindersEnabledPreference,
 } from "./lib/reminder-settings";
+import { applyTaskFilters } from "./lib/task-filters";
 import "./index.css";
 
 const queryClient = new QueryClient({
@@ -84,6 +87,22 @@ function AppContent() {
   const createTask = useCreateTask();
   const updateTask = useUpdateTask();
   const deleteTask = useDeleteTask();
+  const {
+    filters,
+    savedViews,
+    activeSavedViewId,
+    hasActiveFilters,
+    setSearch,
+    toggleStatus,
+    togglePriority,
+    setImportantOnly,
+    setDueFilter,
+    setSortBy,
+    clearFilters,
+    saveCurrentFiltersAsView,
+    applySavedView,
+    deleteSavedView,
+  } = useTaskFilters();
   const [actionError, setActionError] = useState<string | null>(null);
   const [remindersEnabled, setRemindersEnabled] = useState<boolean>(() =>
     getRemindersEnabledPreference(),
@@ -195,6 +214,11 @@ function AppContent() {
             }
           : null;
 
+  const filteredTaskViewTasks = useMemo(() => {
+    if (!taskViewState) return [];
+    return applyTaskFilters(taskViewState.tasks, filters);
+  }, [taskViewState, filters]);
+
   const content = taskViewState?.isLoading ? (
     <div
       style={{
@@ -261,7 +285,7 @@ function AppContent() {
     </div>
   ) : activeView === "board" ? (
     <TaskBoard
-      tasks={taskViewState?.tasks ?? []}
+      tasks={filteredTaskViewTasks}
       onEdit={(task) => setEditingTask(task)}
       onStatusChange={handleStatusChange}
       onDelete={handleDelete}
@@ -270,7 +294,7 @@ function AppContent() {
   ) : activeView === "today" || activeView === "upcoming" ? (
     <TaskScheduleView
       view={activeView}
-      tasks={taskViewState?.tasks ?? []}
+      tasks={filteredTaskViewTasks}
       onEdit={(task) => setEditingTask(task)}
       onStatusChange={handleStatusChange}
       onDelete={handleDelete}
@@ -287,6 +311,26 @@ function AppContent() {
 
   return (
     <AppShell onCreateClick={openCreateModal}>
+      {taskViewState && !taskViewState.isLoading && !taskViewState.isError && (
+        <TaskFiltersBar
+          filters={filters}
+          savedViews={savedViews}
+          activeSavedViewId={activeSavedViewId}
+          hasActiveFilters={hasActiveFilters}
+          visibleTasks={filteredTaskViewTasks.length}
+          totalTasks={taskViewState.tasks.length}
+          onSearchChange={setSearch}
+          onToggleStatus={toggleStatus}
+          onTogglePriority={togglePriority}
+          onSetImportantOnly={setImportantOnly}
+          onSetDueFilter={setDueFilter}
+          onSetSortBy={setSortBy}
+          onClearFilters={clearFilters}
+          onSaveCurrentView={saveCurrentFiltersAsView}
+          onApplySavedView={applySavedView}
+          onDeleteSavedView={deleteSavedView}
+        />
+      )}
       {actionError && (
         <div
           style={{
