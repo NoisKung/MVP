@@ -6,6 +6,7 @@ import { TaskForm } from "./components/TaskForm";
 import { QuickCapture } from "./components/QuickCapture";
 import { Dashboard } from "./components/Dashboard";
 import { TaskScheduleView } from "./components/TaskScheduleView";
+import { ProjectView } from "./components/ProjectView";
 import { ReminderSettings } from "./components/ReminderSettings";
 import { TaskFiltersBar } from "./components/TaskFiltersBar";
 import {
@@ -115,6 +116,9 @@ function AppContent() {
   const [quickCaptureError, setQuickCaptureError] = useState<string | null>(
     null,
   );
+  const [createModalProjectId, setCreateModalProjectId] = useState<
+    string | null
+  >(null);
   const [remindersEnabled, setRemindersEnabled] = useState<boolean>(() =>
     getRemindersEnabledPreference(),
   );
@@ -128,17 +132,22 @@ function AppContent() {
     setActionError(null);
     setQuickCaptureError(null);
     setEditingTask(null);
+    setCreateModalProjectId(null);
     setIsCreateOpen(false);
     setIsQuickCaptureOpen(true);
   }, [setEditingTask, setIsCreateOpen]);
 
   useQuickCaptureShortcut(openQuickCapture);
 
-  const openCreateModal = useCallback(() => {
-    closeQuickCapture();
-    setEditingTask(null);
-    setIsCreateOpen(true);
-  }, [closeQuickCapture, setEditingTask, setIsCreateOpen]);
+  const openCreateModal = useCallback(
+    (projectId: string | null = null) => {
+      closeQuickCapture();
+      setEditingTask(null);
+      setCreateModalProjectId(projectId);
+      setIsCreateOpen(true);
+    },
+    [closeQuickCapture, setEditingTask, setIsCreateOpen],
+  );
 
   const handleRemindersEnabledChange = useCallback((enabled: boolean) => {
     setRemindersEnabled(enabled);
@@ -151,6 +160,7 @@ function AppContent() {
       if (!matchedTask) return;
 
       closeQuickCapture();
+      setCreateModalProjectId(null);
       setIsCreateOpen(false);
       setEditingTask(matchedTask);
       setActiveView("board");
@@ -159,6 +169,7 @@ function AppContent() {
       allTasks,
       closeQuickCapture,
       setActiveView,
+      setCreateModalProjectId,
       setEditingTask,
       setIsCreateOpen,
     ],
@@ -202,6 +213,7 @@ function AppContent() {
     try {
       await createTask.mutateAsync(input as CreateTaskInput);
       setIsCreateOpen(false);
+      setCreateModalProjectId(null);
     } catch (error) {
       setActionError(getErrorMessage(error));
     }
@@ -354,12 +366,23 @@ function AppContent() {
       onEdit={handleEditTask}
       onStatusChange={handleStatusChange}
       onDelete={handleDelete}
-      onCreateClick={openCreateModal}
+      onCreateClick={() => openCreateModal(null)}
     />
   ) : activeView === "today" || activeView === "upcoming" ? (
     <TaskScheduleView
       view={activeView}
       tasks={filteredTaskViewTasks}
+      onEdit={handleEditTask}
+      onStatusChange={handleStatusChange}
+      onDelete={handleDelete}
+      onCreateClick={() => openCreateModal(null)}
+    />
+  ) : activeView === "projects" ? (
+    <ProjectView
+      tasks={allTasks}
+      isLoadingTasks={isLoadingAllTasks}
+      isTasksError={isAllTasksError}
+      tasksError={allTasksError}
       onEdit={handleEditTask}
       onStatusChange={handleStatusChange}
       onDelete={handleDelete}
@@ -375,7 +398,7 @@ function AppContent() {
   );
 
   return (
-    <AppShell onCreateClick={openCreateModal}>
+    <AppShell onCreateClick={() => openCreateModal(null)}>
       {taskViewState && !taskViewState.isLoading && !taskViewState.isError && (
         <TaskFiltersBar
           filters={filters}
@@ -425,8 +448,12 @@ function AppContent() {
       {/* Create Task Modal */}
       {isCreateOpen && (
         <TaskForm
+          initialProjectId={createModalProjectId}
           onSubmit={handleCreate}
-          onClose={() => setIsCreateOpen(false)}
+          onClose={() => {
+            setIsCreateOpen(false);
+            setCreateModalProjectId(null);
+          }}
         />
       )}
 

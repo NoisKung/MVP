@@ -234,11 +234,17 @@ function createDraftSubtaskId(): string {
 
 interface TaskFormProps {
   task?: Task | null;
+  initialProjectId?: string | null;
   onSubmit: (input: CreateTaskInput | UpdateTaskInput) => void;
   onClose: () => void;
 }
 
-export function TaskForm({ task, onSubmit, onClose }: TaskFormProps) {
+export function TaskForm({
+  task,
+  initialProjectId = null,
+  onSubmit,
+  onClose,
+}: TaskFormProps) {
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [priority, setPriority] = useState<TaskPriority>("NORMAL");
@@ -320,7 +326,7 @@ export function TaskForm({ task, onSubmit, onClose }: TaskFormProps) {
     setDueAt("");
     setRemindAt("");
     setRecurrence("NONE");
-    setProjectId("");
+    setProjectId(initialProjectId ?? "");
     setSelectedTemplateId("");
     setTimeError(null);
     setProjectError(null);
@@ -329,7 +335,7 @@ export function TaskForm({ task, onSubmit, onClose }: TaskFormProps) {
     setNewSubtaskTitle("");
     setSubtaskError(null);
     setNaturalDueText("");
-  }, [task]);
+  }, [task, initialProjectId]);
 
   // Keyboard shortcut: Escape to close
   useEffect(() => {

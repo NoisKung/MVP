@@ -4,6 +4,7 @@ import type { ViewMode } from "@/lib/types";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import {
   LayoutDashboard,
+  FolderKanban,
   KanbanSquare,
   CalendarCheck2,
   CalendarDays,
@@ -24,6 +25,7 @@ interface NavItem {
 
 const NAV_ITEMS: NavItem[] = [
   { view: "board", label: "Board", icon: <KanbanSquare size={18} /> },
+  { view: "projects", label: "Projects", icon: <FolderKanban size={18} /> },
   { view: "today", label: "Today", icon: <CalendarCheck2 size={18} /> },
   { view: "upcoming", label: "Upcoming", icon: <CalendarDays size={18} /> },
   {
