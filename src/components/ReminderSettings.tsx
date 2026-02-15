@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState, type ChangeEvent } from "react";
 import {
   Bell,
   ShieldCheck,
@@ -7,6 +7,9 @@ import {
   CheckCircle2,
   XCircle,
   HelpCircle,
+  Download,
+  Upload,
+  Database,
 } from "lucide-react";
 import {
   type NotificationPermissionState,
@@ -14,10 +17,21 @@ import {
   requestNotificationPermissionAccess,
   resetReminderPermissionAndHistory,
 } from "@/hooks/use-reminder-notifications";
+import { useExportBackup, useImportBackup } from "@/hooks/use-tasks";
 
 interface ReminderSettingsProps {
   remindersEnabled: boolean;
   onRemindersEnabledChange: (enabled: boolean) => void;
+}
+
+function getErrorMessage(error: unknown): string {
+  if (error instanceof Error && error.message.trim()) {
+    return error.message;
+  }
+  if (typeof error === "string" && error.trim()) {
+    return error;
+  }
+  return "Unable to complete this request.";
 }
 
 export function ReminderSettings({
@@ -27,7 +41,15 @@ export function ReminderSettings({
   const [permissionState, setPermissionState] =
     useState<NotificationPermissionState>("unknown");
   const [isBusy, setIsBusy] = useState(false);
-  const [feedback, setFeedback] = useState<string | null>(null);
+  const [permissionFeedback, setPermissionFeedback] = useState<string | null>(
+    null,
+  );
+  const [backupFeedback, setBackupFeedback] = useState<string | null>(null);
+  const [backupError, setBackupError] = useState<string | null>(null);
+  const backupInputRef = useRef<HTMLInputElement | null>(null);
+  const exportBackup = useExportBackup();
+  const importBackup = useImportBackup();
+  const isBackupBusy = exportBackup.isPending || importBackup.isPending;
 
   useEffect(() => {
     void refreshPermissionState(setPermissionState);
@@ -35,11 +57,11 @@ export function ReminderSettings({
 
   const handleRequestPermission = async () => {
     setIsBusy(true);
-    setFeedback(null);
+    setPermissionFeedback(null);
     try {
       const nextState = await requestNotificationPermissionAccess();
       setPermissionState(nextState);
-      setFeedback(
+      setPermissionFeedback(
         nextState === "granted"
           ? "Notifications are enabled."
           : "Permission is not granted. You may need OS settings to allow notifications.",
@@ -51,11 +73,11 @@ export function ReminderSettings({
 
   const handleResetPermissionAndHistory = async () => {
     setIsBusy(true);
-    setFeedback(null);
+    setPermissionFeedback(null);
     try {
       const nextState = await resetReminderPermissionAndHistory();
       setPermissionState(nextState);
-      setFeedback(
+      setPermissionFeedback(
         "Permission cache and reminder history were reset. Existing reminders can notify again.",
       );
     } finally {
@@ -65,7 +87,7 @@ export function ReminderSettings({
 
   const handleRefreshPermission = async () => {
     setIsBusy(true);
-    setFeedback(null);
+    setPermissionFeedback(null);
     try {
       await refreshPermissionState(setPermissionState);
     } finally {
@@ -73,11 +95,71 @@ export function ReminderSettings({
     }
   };
 
+  const handleExportBackup = async () => {
+    setBackupError(null);
+    setBackupFeedback(null);
+    try {
+      const payload = await exportBackup.mutateAsync();
+      const backupText = JSON.stringify(payload, null, 2);
+      const blob = new Blob([backupText], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const safeTimestamp = payload.exported_at.replace(/[:.]/g, "-");
+      const filename = `solostack-backup-${safeTimestamp}.json`;
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 0);
+
+      setBackupFeedback(
+        `Backup exported successfully (${payload.data.tasks.length} tasks, ${payload.data.projects.length} projects).`,
+      );
+    } catch (error) {
+      setBackupError(getErrorMessage(error));
+    }
+  };
+
+  const handleImportBackup = async (event: ChangeEvent<HTMLInputElement>) => {
+    const selectedFile = event.target.files?.[0];
+    event.target.value = "";
+    if (!selectedFile) return;
+
+    if (
+      !window.confirm(
+        "Restoring backup will replace all current local data. Continue?",
+      )
+    ) {
+      return;
+    }
+
+    setBackupError(null);
+    setBackupFeedback(null);
+    try {
+      const fileContent = await selectedFile.text();
+      const parsedPayload = JSON.parse(fileContent) as unknown;
+      const result = await importBackup.mutateAsync(parsedPayload);
+      setBackupFeedback(
+        `Backup restored: ${result.tasks} tasks, ${result.projects} projects, ${result.task_templates} templates.`,
+      );
+    } catch (error) {
+      setBackupError(getErrorMessage(error));
+    }
+  };
+
+  const handleOpenBackupFilePicker = () => {
+    if (isBackupBusy) return;
+    backupInputRef.current?.click();
+  };
+
   return (
     <div className="settings-wrap">
       <div className="settings-header">
         <h1 className="settings-title">Settings</h1>
-        <p className="settings-subtitle">Control reminder and notification behavior</p>
+        <p className="settings-subtitle">
+          Control reminders, notification access, and local data safety
+        </p>
       </div>
 
       <section className="settings-card">
@@ -97,7 +179,8 @@ export function ReminderSettings({
           <div>
             <p className="settings-row-title">Enable reminders</p>
             <p className="settings-row-subtitle">
-              When enabled, tasks with due reminders can trigger desktop notifications.
+              When enabled, tasks with due reminders can trigger desktop
+              notifications.
             </p>
           </div>
           <button
@@ -173,7 +256,65 @@ export function ReminderSettings({
           </button>
         </div>
 
-        {feedback && <p className="settings-feedback">{feedback}</p>}
+        {permissionFeedback && (
+          <p className="settings-feedback">{permissionFeedback}</p>
+        )}
+      </section>
+
+      <section className="settings-card">
+        <div className="settings-card-header">
+          <div className="settings-card-icon">
+            <Database size={16} />
+          </div>
+          <div>
+            <h2 className="settings-card-title">Data Backup & Restore</h2>
+            <p className="settings-card-desc">
+              Export all local data to JSON and restore it later on this or
+              another machine.
+            </p>
+          </div>
+        </div>
+
+        <p className="settings-row-subtitle settings-danger-text">
+          Restore will replace all current local data.
+        </p>
+
+        <div className="settings-actions">
+          <button
+            type="button"
+            className="settings-btn settings-btn-primary"
+            onClick={() => void handleExportBackup()}
+            disabled={isBackupBusy}
+          >
+            <Download size={14} />
+            {exportBackup.isPending ? "Exporting..." : "Export Backup"}
+          </button>
+          <button
+            type="button"
+            className="settings-btn"
+            onClick={handleOpenBackupFilePicker}
+            disabled={isBackupBusy}
+          >
+            <Upload size={14} />
+            {importBackup.isPending ? "Restoring..." : "Restore Backup"}
+          </button>
+          <input
+            ref={backupInputRef}
+            type="file"
+            accept="application/json"
+            onChange={(event) => void handleImportBackup(event)}
+            style={{ display: "none" }}
+          />
+        </div>
+
+        {backupFeedback && (
+          <p className="settings-feedback">{backupFeedback}</p>
+        )}
+        {backupError && (
+          <p className="settings-feedback settings-feedback-error">
+            {backupError}
+          </p>
+        )}
       </section>
 
       <style>{`
@@ -252,6 +393,11 @@ export function ReminderSettings({
           font-size: 12px;
           color: var(--text-muted);
           line-height: 1.45;
+        }
+        .settings-danger-text {
+          margin-top: -2px;
+          margin-bottom: 10px;
+          color: var(--danger);
         }
         .toggle-btn {
           width: 44px;
@@ -348,6 +494,9 @@ export function ReminderSettings({
           font-size: 12px;
           color: var(--text-muted);
           line-height: 1.45;
+        }
+        .settings-feedback-error {
+          color: var(--danger);
         }
 
         @media (max-width: 640px) {

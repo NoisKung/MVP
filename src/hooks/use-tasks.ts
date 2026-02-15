@@ -20,8 +20,11 @@ import {
   deleteTaskTemplate,
   getTaskDashboardStats,
   getTaskChangelogs,
+  exportBackupPayload,
+  importBackupPayload,
 } from "@/lib/database";
 import type {
+  BackupPayload,
   CreateProjectInput,
   CreateTaskInput,
   CreateTaskSubtaskInput,
@@ -282,6 +285,34 @@ export function useDeleteTaskTemplate() {
   return useMutation({
     mutationFn: (id: string) => deleteTaskTemplate(id),
     onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: TASK_TEMPLATES_KEY });
+    },
+  });
+}
+
+/** Export full local data payload for backup */
+export function useExportBackup() {
+  return useMutation({
+    mutationFn: () => exportBackupPayload(),
+  });
+}
+
+/** Import backup payload and replace local data */
+export function useImportBackup() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (payload: BackupPayload | unknown) =>
+      importBackupPayload(payload),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: PROJECTS_KEY });
+      queryClient.invalidateQueries({ queryKey: TASKS_KEY });
+      queryClient.invalidateQueries({ queryKey: TODAY_TASKS_KEY });
+      queryClient.invalidateQueries({ queryKey: UPCOMING_TASKS_KEY });
+      queryClient.invalidateQueries({ queryKey: STATS_KEY });
+      queryClient.invalidateQueries({ queryKey: CHANGELOGS_KEY });
+      queryClient.invalidateQueries({ queryKey: TASK_SUBTASKS_KEY });
+      queryClient.invalidateQueries({ queryKey: TASK_SUBTASK_STATS_KEY });
       queryClient.invalidateQueries({ queryKey: TASK_TEMPLATES_KEY });
     },
   });

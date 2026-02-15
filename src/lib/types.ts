@@ -87,6 +87,20 @@ export interface TaskTemplate {
   updated_at: string;
 }
 
+/** A completed focus/work session linked to a task */
+export interface SessionRecord {
+  id: string;
+  task_id: string | null;
+  duration_minutes: number;
+  completed_at: string;
+}
+
+/** A generic key-value app setting stored in SQLite */
+export interface AppSettingRecord {
+  key: string;
+  value: string;
+}
+
 /** A project entity from the database */
 export interface Project {
   id: string;
@@ -168,6 +182,32 @@ export interface TaskChangelog {
   old_value: string | null;
   new_value: string | null;
   created_at: string;
+}
+
+/** Structured backup payload for local export/import */
+export interface BackupPayload {
+  version: 1;
+  exported_at: string;
+  data: {
+    settings: AppSettingRecord[];
+    projects: Project[];
+    tasks: Task[];
+    sessions: SessionRecord[];
+    task_subtasks: TaskSubtask[];
+    task_changelogs: TaskChangelog[];
+    task_templates: TaskTemplate[];
+  };
+}
+
+/** Row counts imported during restore */
+export interface BackupImportResult {
+  settings: number;
+  projects: number;
+  tasks: number;
+  sessions: number;
+  task_subtasks: number;
+  task_changelogs: number;
+  task_templates: number;
 }
 
 /** Kanban column definition */

@@ -1,7 +1,13 @@
 import Database from "@tauri-apps/plugin-sql";
 import type {
+  AppSettingRecord,
+  BackupImportResult,
+  BackupPayload,
   Task,
   Project,
+  SessionRecord,
+  TaskStatus,
+  TaskPriority,
   TaskSubtask,
   TaskSubtaskStats,
   TaskChangelog,
@@ -41,6 +47,20 @@ interface TaskChangeDiff {
 }
 
 const MILLISECONDS_PER_DAY = 24 * 60 * 60 * 1000;
+const TASK_STATUSES: TaskStatus[] = ["TODO", "DOING", "DONE", "ARCHIVED"];
+const TASK_PRIORITIES: TaskPriority[] = ["URGENT", "NORMAL", "LOW"];
+const PROJECT_STATUSES: ProjectStatus[] = ["ACTIVE", "COMPLETED", "ARCHIVED"];
+const TASK_RECURRENCES: TaskRecurrence[] = [
+  "NONE",
+  "DAILY",
+  "WEEKLY",
+  "MONTHLY",
+];
+const TASK_CHANGELOG_ACTIONS: TaskChangelogAction[] = [
+  "CREATED",
+  "UPDATED",
+  "STATUS_CHANGED",
+];
 
 /** Get or create the database connection singleton */
 async function getDb(): Promise<Database> {
@@ -366,6 +386,101 @@ function normalizeProjectStatus(
   status: ProjectStatus | undefined,
 ): ProjectStatus {
   return status ?? "ACTIVE";
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function asNullableString(value: unknown): string | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value !== "string") return null;
+  return value;
+}
+
+function asIsoDateStringOrNow(value: unknown): string {
+  if (typeof value === "string" && !Number.isNaN(new Date(value).getTime())) {
+    return value;
+  }
+  return new Date().toISOString();
+}
+
+function asBooleanSqliteNumber(value: unknown): number {
+  if (value === true || value === 1 || value === "1") return 1;
+  return 0;
+}
+
+function asIntegerOrDefault(value: unknown, fallback = 0): number {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return Math.trunc(value);
+  }
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return Math.trunc(parsed);
+  }
+  return fallback;
+}
+
+function asNullableInteger(value: unknown): number | null {
+  if (value === null || value === undefined) return null;
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return Math.max(0, Math.trunc(value));
+  }
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return Math.max(0, Math.trunc(parsed));
+  }
+  return null;
+}
+
+function asTaskStatus(value: unknown): TaskStatus {
+  if (
+    typeof value === "string" &&
+    TASK_STATUSES.includes(value as TaskStatus)
+  ) {
+    return value as TaskStatus;
+  }
+  return "TODO";
+}
+
+function asTaskPriority(value: unknown): TaskPriority {
+  if (
+    typeof value === "string" &&
+    TASK_PRIORITIES.includes(value as TaskPriority)
+  ) {
+    return value as TaskPriority;
+  }
+  return "NORMAL";
+}
+
+function asProjectStatus(value: unknown): ProjectStatus {
+  if (
+    typeof value === "string" &&
+    PROJECT_STATUSES.includes(value as ProjectStatus)
+  ) {
+    return value as ProjectStatus;
+  }
+  return "ACTIVE";
+}
+
+function asTaskRecurrence(value: unknown): TaskRecurrence {
+  if (
+    typeof value === "string" &&
+    TASK_RECURRENCES.includes(value as TaskRecurrence)
+  ) {
+    return value as TaskRecurrence;
+  }
+  return "NONE";
+}
+
+function asTaskChangelogAction(value: unknown): TaskChangelogAction {
+  if (
+    typeof value === "string" &&
+    TASK_CHANGELOG_ACTIONS.includes(value as TaskChangelogAction)
+  ) {
+    return value as TaskChangelogAction;
+  }
+  return "UPDATED";
 }
 
 async function assertProjectExists(
@@ -1287,4 +1402,440 @@ export async function upsertTaskTemplate(
 export async function deleteTaskTemplate(id: string): Promise<void> {
   const db = await getDb();
   await db.execute("DELETE FROM task_templates WHERE id = $1", [id]);
+}
+
+function normalizeBackupPayload(payload: unknown): BackupPayload {
+  if (!isPlainObject(payload)) {
+    throw new Error("Invalid backup payload.");
+  }
+
+  const version = payload.version;
+  if (version !== 1) {
+    throw new Error("Unsupported backup version.");
+  }
+
+  const rawData = payload.data;
+  if (!isPlainObject(rawData)) {
+    throw new Error("Invalid backup payload: missing data section.");
+  }
+
+  const rawSettings = Array.isArray(rawData.settings) ? rawData.settings : [];
+  const settingsByKey = new Map<string, AppSettingRecord>();
+  for (const entry of rawSettings) {
+    if (!isPlainObject(entry)) continue;
+    const key = asNullableString(entry.key)?.trim() ?? "";
+    if (!key) continue;
+    settingsByKey.set(key, {
+      key,
+      value: asNullableString(entry.value) ?? "",
+    });
+  }
+  const settings = Array.from(settingsByKey.values());
+
+  const rawProjects = Array.isArray(rawData.projects) ? rawData.projects : [];
+  const projectsById = new Map<string, Project>();
+  for (const entry of rawProjects) {
+    if (!isPlainObject(entry)) continue;
+    const id = asNullableString(entry.id)?.trim() ?? "";
+    const name = asNullableString(entry.name)?.trim() ?? "";
+    if (!id || !name) continue;
+    projectsById.set(id, {
+      id,
+      name,
+      description: asNullableString(entry.description),
+      color: asNullableString(entry.color),
+      status: asProjectStatus(entry.status),
+      created_at: asIsoDateStringOrNow(entry.created_at),
+      updated_at: asIsoDateStringOrNow(entry.updated_at),
+    });
+  }
+  const projects = Array.from(projectsById.values());
+  const projectIdSet = new Set(projects.map((project) => project.id));
+
+  const rawTasks = Array.isArray(rawData.tasks) ? rawData.tasks : [];
+  const tasksById = new Map<string, Task>();
+  for (const entry of rawTasks) {
+    if (!isPlainObject(entry)) continue;
+    const id = asNullableString(entry.id)?.trim() ?? "";
+    const title = asNullableString(entry.title)?.trim() ?? "";
+    if (!id || !title) continue;
+
+    const rawProjectId = asNullableString(entry.project_id);
+    const projectId =
+      rawProjectId && projectIdSet.has(rawProjectId) ? rawProjectId : null;
+
+    tasksById.set(id, {
+      id,
+      title,
+      description: asNullableString(entry.description),
+      notes_markdown: normalizeTaskNotesMarkdown(
+        asNullableString(entry.notes_markdown),
+      ),
+      project_id: projectId,
+      status: asTaskStatus(entry.status),
+      priority: asTaskPriority(entry.priority),
+      is_important: asBooleanSqliteNumber(entry.is_important),
+      due_at: asNullableString(entry.due_at),
+      remind_at: asNullableString(entry.remind_at),
+      recurrence: asTaskRecurrence(entry.recurrence),
+      created_at: asIsoDateStringOrNow(entry.created_at),
+      updated_at: asIsoDateStringOrNow(entry.updated_at),
+    });
+  }
+  const tasks = Array.from(tasksById.values());
+  const taskIdSet = new Set(tasks.map((task) => task.id));
+
+  const rawSessions = Array.isArray(rawData.sessions) ? rawData.sessions : [];
+  const sessionsById = new Map<string, SessionRecord>();
+  for (const entry of rawSessions) {
+    if (!isPlainObject(entry)) continue;
+    const id = asNullableString(entry.id)?.trim() ?? "";
+    if (!id) continue;
+
+    const rawTaskId = asNullableString(entry.task_id);
+    const taskId = rawTaskId && taskIdSet.has(rawTaskId) ? rawTaskId : null;
+    sessionsById.set(id, {
+      id,
+      task_id: taskId,
+      duration_minutes: Math.max(0, asIntegerOrDefault(entry.duration_minutes)),
+      completed_at: asIsoDateStringOrNow(entry.completed_at),
+    });
+  }
+  const sessions = Array.from(sessionsById.values());
+
+  const rawTaskSubtasks = Array.isArray(rawData.task_subtasks)
+    ? rawData.task_subtasks
+    : [];
+  const taskSubtasksById = new Map<string, TaskSubtask>();
+  for (const entry of rawTaskSubtasks) {
+    if (!isPlainObject(entry)) continue;
+    const id = asNullableString(entry.id)?.trim() ?? "";
+    const taskId = asNullableString(entry.task_id)?.trim() ?? "";
+    const title = asNullableString(entry.title)?.trim() ?? "";
+    if (!id || !taskId || !title || !taskIdSet.has(taskId)) continue;
+
+    taskSubtasksById.set(id, {
+      id,
+      task_id: taskId,
+      title,
+      is_done: asBooleanSqliteNumber(entry.is_done),
+      created_at: asIsoDateStringOrNow(entry.created_at),
+      updated_at: asIsoDateStringOrNow(entry.updated_at),
+    });
+  }
+  const taskSubtasks = Array.from(taskSubtasksById.values());
+
+  const rawTaskChangelogs = Array.isArray(rawData.task_changelogs)
+    ? rawData.task_changelogs
+    : [];
+  const taskChangelogsById = new Map<string, TaskChangelog>();
+  for (const entry of rawTaskChangelogs) {
+    if (!isPlainObject(entry)) continue;
+    const id = asNullableString(entry.id)?.trim() ?? "";
+    const taskId = asNullableString(entry.task_id)?.trim() ?? "";
+    if (!id || !taskId || !taskIdSet.has(taskId)) continue;
+
+    taskChangelogsById.set(id, {
+      id,
+      task_id: taskId,
+      action: asTaskChangelogAction(entry.action),
+      field_name: asNullableString(entry.field_name),
+      old_value: asNullableString(entry.old_value),
+      new_value: asNullableString(entry.new_value),
+      created_at: asIsoDateStringOrNow(entry.created_at),
+    });
+  }
+  const taskChangelogs = Array.from(taskChangelogsById.values());
+
+  const rawTaskTemplates = Array.isArray(rawData.task_templates)
+    ? rawData.task_templates
+    : [];
+  const taskTemplatesById = new Map<string, TaskTemplate>();
+  for (const entry of rawTaskTemplates) {
+    if (!isPlainObject(entry)) continue;
+    const id = asNullableString(entry.id)?.trim() ?? "";
+    const name = asNullableString(entry.name)?.trim() ?? "";
+    if (!id || !name) continue;
+
+    taskTemplatesById.set(id, {
+      id,
+      name,
+      title_template: asNullableString(entry.title_template),
+      description: asNullableString(entry.description),
+      priority: asTaskPriority(entry.priority),
+      is_important: asBooleanSqliteNumber(entry.is_important),
+      due_offset_minutes: asNullableInteger(entry.due_offset_minutes),
+      remind_offset_minutes: asNullableInteger(entry.remind_offset_minutes),
+      recurrence: asTaskRecurrence(entry.recurrence),
+      created_at: asIsoDateStringOrNow(entry.created_at),
+      updated_at: asIsoDateStringOrNow(entry.updated_at),
+    });
+  }
+  const taskTemplates = Array.from(taskTemplatesById.values());
+
+  return {
+    version: 1,
+    exported_at: asIsoDateStringOrNow(payload.exported_at),
+    data: {
+      settings,
+      projects,
+      tasks,
+      sessions,
+      task_subtasks: taskSubtasks,
+      task_changelogs: taskChangelogs,
+      task_templates: taskTemplates,
+    },
+  };
+}
+
+/** Export all app data into a single structured payload */
+export async function exportBackupPayload(): Promise<BackupPayload> {
+  const db = await getDb();
+
+  const [
+    settings,
+    projects,
+    tasks,
+    sessions,
+    taskSubtasks,
+    taskChangelogs,
+    taskTemplates,
+  ] = await Promise.all([
+    db.select<AppSettingRecord[]>("SELECT key, value FROM settings"),
+    db.select<Project[]>("SELECT * FROM projects ORDER BY created_at ASC"),
+    db.select<Task[]>("SELECT * FROM tasks ORDER BY created_at ASC"),
+    db.select<SessionRecord[]>(
+      "SELECT * FROM sessions ORDER BY completed_at ASC",
+    ),
+    db.select<TaskSubtask[]>(
+      "SELECT * FROM task_subtasks ORDER BY created_at ASC",
+    ),
+    db.select<TaskChangelog[]>(
+      "SELECT * FROM task_changelogs ORDER BY created_at ASC",
+    ),
+    db.select<TaskTemplate[]>(
+      "SELECT * FROM task_templates ORDER BY created_at ASC",
+    ),
+  ]);
+
+  return {
+    version: 1,
+    exported_at: new Date().toISOString(),
+    data: {
+      settings,
+      projects,
+      tasks,
+      sessions,
+      task_subtasks: taskSubtasks,
+      task_changelogs: taskChangelogs,
+      task_templates: taskTemplates,
+    },
+  };
+}
+
+/** Replace local data with a backup payload and return imported row counts */
+export async function importBackupPayload(
+  rawPayload: BackupPayload | unknown,
+): Promise<BackupImportResult> {
+  const db = await getDb();
+  const backupPayload = normalizeBackupPayload(rawPayload);
+  const {
+    settings,
+    projects,
+    tasks,
+    sessions,
+    task_subtasks: taskSubtasks,
+    task_changelogs: taskChangelogs,
+    task_templates: taskTemplates,
+  } = backupPayload.data;
+
+  await db.execute("BEGIN IMMEDIATE");
+
+  try {
+    await db.execute("DELETE FROM sessions");
+    await db.execute("DELETE FROM task_subtasks");
+    await db.execute("DELETE FROM task_changelogs");
+    await db.execute("DELETE FROM tasks");
+    await db.execute("DELETE FROM task_templates");
+    await db.execute("DELETE FROM projects");
+    await db.execute("DELETE FROM settings");
+
+    for (const setting of settings) {
+      await db.execute("INSERT INTO settings (key, value) VALUES ($1, $2)", [
+        setting.key,
+        setting.value,
+      ]);
+    }
+
+    for (const project of projects) {
+      await db.execute(
+        `INSERT INTO projects (
+            id,
+            name,
+            description,
+            color,
+            status,
+            created_at,
+            updated_at
+          )
+           VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+        [
+          project.id,
+          project.name,
+          project.description ?? null,
+          project.color ?? null,
+          project.status,
+          project.created_at,
+          project.updated_at,
+        ],
+      );
+    }
+
+    for (const task of tasks) {
+      await db.execute(
+        `INSERT INTO tasks (
+            id,
+            title,
+            description,
+            notes_markdown,
+            project_id,
+            status,
+            priority,
+            is_important,
+            due_at,
+            remind_at,
+            recurrence,
+            created_at,
+            updated_at
+          )
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)`,
+        [
+          task.id,
+          task.title,
+          task.description ?? null,
+          normalizeTaskNotesMarkdown(task.notes_markdown),
+          task.project_id ?? null,
+          task.status,
+          task.priority,
+          asBooleanSqliteNumber(task.is_important),
+          task.due_at ?? null,
+          task.remind_at ?? null,
+          task.recurrence,
+          task.created_at,
+          task.updated_at,
+        ],
+      );
+    }
+
+    for (const session of sessions) {
+      await db.execute(
+        `INSERT INTO sessions (
+            id,
+            task_id,
+            duration_minutes,
+            completed_at
+          )
+           VALUES ($1, $2, $3, $4)`,
+        [
+          session.id,
+          session.task_id ?? null,
+          Math.max(0, asIntegerOrDefault(session.duration_minutes)),
+          session.completed_at,
+        ],
+      );
+    }
+
+    for (const subtask of taskSubtasks) {
+      await db.execute(
+        `INSERT INTO task_subtasks (
+            id,
+            task_id,
+            title,
+            is_done,
+            created_at,
+            updated_at
+          )
+           VALUES ($1, $2, $3, $4, $5, $6)`,
+        [
+          subtask.id,
+          subtask.task_id,
+          subtask.title,
+          asBooleanSqliteNumber(subtask.is_done),
+          subtask.created_at,
+          subtask.updated_at,
+        ],
+      );
+    }
+
+    for (const changelog of taskChangelogs) {
+      await db.execute(
+        `INSERT INTO task_changelogs (
+            id,
+            task_id,
+            action,
+            field_name,
+            old_value,
+            new_value,
+            created_at
+          )
+           VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+        [
+          changelog.id,
+          changelog.task_id,
+          asTaskChangelogAction(changelog.action),
+          changelog.field_name ?? null,
+          changelog.old_value ?? null,
+          changelog.new_value ?? null,
+          changelog.created_at,
+        ],
+      );
+    }
+
+    for (const template of taskTemplates) {
+      await db.execute(
+        `INSERT INTO task_templates (
+            id,
+            name,
+            title_template,
+            description,
+            priority,
+            is_important,
+            due_offset_minutes,
+            remind_offset_minutes,
+            recurrence,
+            created_at,
+            updated_at
+          )
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+        [
+          template.id,
+          template.name,
+          template.title_template ?? null,
+          template.description ?? null,
+          template.priority,
+          asBooleanSqliteNumber(template.is_important),
+          asNullableInteger(template.due_offset_minutes),
+          asNullableInteger(template.remind_offset_minutes),
+          template.recurrence,
+          template.created_at,
+          template.updated_at,
+        ],
+      );
+    }
+
+    await db.execute("COMMIT");
+  } catch (error) {
+    await db.execute("ROLLBACK");
+    throw error;
+  }
+
+  return {
+    settings: settings.length,
+    projects: projects.length,
+    tasks: tasks.length,
+    sessions: sessions.length,
+    task_subtasks: taskSubtasks.length,
+    task_changelogs: taskChangelogs.length,
+    task_templates: taskTemplates.length,
+  };
 }
