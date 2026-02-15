@@ -1,15 +1,19 @@
 import Database from "@tauri-apps/plugin-sql";
 import type {
   Task,
+  Project,
   TaskSubtask,
   TaskSubtaskStats,
   TaskChangelog,
   TaskChangelogAction,
+  ProjectStatus,
   TaskRecurrence,
   TaskDashboardStats,
   TaskTemplate,
+  CreateProjectInput,
   CreateTaskSubtaskInput,
   CreateTaskInput,
+  UpdateProjectInput,
   UpdateTaskSubtaskInput,
   UpsertTaskTemplateInput,
   UpdateTaskInput,
@@ -57,10 +61,28 @@ async function initSchema(db: Database): Promise<void> {
   `);
 
   await db.execute(`
+    CREATE TABLE IF NOT EXISTS projects (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL UNIQUE,
+      description TEXT,
+      color TEXT,
+      status TEXT NOT NULL DEFAULT 'ACTIVE' CHECK(status IN ('ACTIVE', 'COMPLETED', 'ARCHIVED')),
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  await db.execute(`
+    CREATE INDEX IF NOT EXISTS idx_projects_status_updated_at
+    ON projects(status, updated_at DESC)
+  `);
+
+  await db.execute(`
     CREATE TABLE IF NOT EXISTS tasks (
       id TEXT PRIMARY KEY,
       title TEXT NOT NULL,
       description TEXT,
+      project_id TEXT,
       status TEXT NOT NULL CHECK(status IN ('TODO', 'DOING', 'DONE', 'ARCHIVED')),
       priority TEXT NOT NULL CHECK(priority IN ('URGENT', 'NORMAL', 'LOW')),
       is_important BOOLEAN DEFAULT 0,
@@ -68,7 +90,8 @@ async function initSchema(db: Database): Promise<void> {
       remind_at DATETIME,
       recurrence TEXT NOT NULL DEFAULT 'NONE' CHECK(recurrence IN ('NONE', 'DAILY', 'WEEKLY', 'MONTHLY')),
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE SET NULL
     )
   `);
 
@@ -144,6 +167,10 @@ async function initSchema(db: Database): Promise<void> {
     CREATE INDEX IF NOT EXISTS idx_tasks_due_at
     ON tasks(due_at)
   `);
+  await db.execute(`
+    CREATE INDEX IF NOT EXISTS idx_tasks_project_id
+    ON tasks(project_id)
+  `);
 }
 
 interface SQLiteTableInfoRow {
@@ -168,6 +195,10 @@ async function ensureTaskColumns(db: Database): Promise<void> {
     await db.execute(
       "ALTER TABLE tasks ADD COLUMN recurrence TEXT NOT NULL DEFAULT 'NONE' CHECK(recurrence IN ('NONE', 'DAILY', 'WEEKLY', 'MONTHLY'))",
     );
+  }
+
+  if (!existingColumns.has("project_id")) {
+    await db.execute("ALTER TABLE tasks ADD COLUMN project_id TEXT");
   }
 }
 
@@ -312,6 +343,31 @@ function normalizeSubtaskTitle(title: string): string {
   return title.trim();
 }
 
+function normalizeProjectName(name: string): string {
+  return name.trim();
+}
+
+function normalizeProjectStatus(
+  status: ProjectStatus | undefined,
+): ProjectStatus {
+  return status ?? "ACTIVE";
+}
+
+async function assertProjectExists(
+  db: Database,
+  projectId: string | null | undefined,
+): Promise<void> {
+  if (!projectId) return;
+
+  const rows = await db.select<{ id: string }[]>(
+    "SELECT id FROM projects WHERE id = $1 LIMIT 1",
+    [projectId],
+  );
+  if (rows.length === 0) {
+    throw new Error("Selected project does not exist.");
+  }
+}
+
 async function insertTaskSubtask(
   db: Database,
   input: CreateTaskSubtaskInput,
@@ -350,17 +406,169 @@ export async function getAllTasks(): Promise<Task[]> {
   return results;
 }
 
+/** Fetch projects ordered by status and latest updates */
+export async function getProjects(): Promise<Project[]> {
+  const db = await getDb();
+  return db.select<Project[]>(
+    `SELECT *
+       FROM projects
+      WHERE status != 'ARCHIVED'
+      ORDER BY
+        CASE status
+          WHEN 'ACTIVE' THEN 0
+          WHEN 'COMPLETED' THEN 1
+          ELSE 2
+        END ASC,
+        updated_at DESC,
+        name COLLATE NOCASE ASC`,
+  );
+}
+
+/** Create a new project */
+export async function createProject(
+  input: CreateProjectInput,
+): Promise<Project> {
+  const db = await getDb();
+  const now = new Date().toISOString();
+  const normalizedName = normalizeProjectName(input.name);
+  if (!normalizedName) {
+    throw new Error("Project name is required.");
+  }
+
+  const duplicateRows = await db.select<{ id: string }[]>(
+    "SELECT id FROM projects WHERE LOWER(name) = LOWER($1) LIMIT 1",
+    [normalizedName],
+  );
+  if (duplicateRows.length > 0) {
+    throw new Error("Project name already exists.");
+  }
+
+  const projectId = uuidv4();
+  await db.execute(
+    `INSERT INTO projects (
+        id,
+        name,
+        description,
+        color,
+        status,
+        created_at,
+        updated_at
+      )
+       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+    [
+      projectId,
+      normalizedName,
+      input.description?.trim() || null,
+      input.color?.trim() || null,
+      normalizeProjectStatus(input.status),
+      now,
+      now,
+    ],
+  );
+
+  const rows = await db.select<Project[]>(
+    "SELECT * FROM projects WHERE id = $1 LIMIT 1",
+    [projectId],
+  );
+  return rows[0];
+}
+
+/** Update an existing project */
+export async function updateProject(
+  input: UpdateProjectInput,
+): Promise<Project> {
+  const db = await getDb();
+  const existingRows = await db.select<Project[]>(
+    "SELECT * FROM projects WHERE id = $1 LIMIT 1",
+    [input.id],
+  );
+  const existingProject = existingRows[0];
+  if (!existingProject) {
+    throw new Error("Project not found.");
+  }
+
+  const setClauses: string[] = [];
+  const params: unknown[] = [];
+  let paramIndex = 1;
+
+  if (input.name !== undefined) {
+    const normalizedName = normalizeProjectName(input.name);
+    if (!normalizedName) {
+      throw new Error("Project name is required.");
+    }
+
+    const duplicateRows = await db.select<{ id: string }[]>(
+      "SELECT id FROM projects WHERE LOWER(name) = LOWER($1) AND id != $2 LIMIT 1",
+      [normalizedName, input.id],
+    );
+    if (duplicateRows.length > 0) {
+      throw new Error("Project name already exists.");
+    }
+
+    setClauses.push(`name = $${paramIndex++}`);
+    params.push(normalizedName);
+  }
+
+  if (input.description !== undefined) {
+    setClauses.push(`description = $${paramIndex++}`);
+    params.push(input.description?.trim() || null);
+  }
+
+  if (input.color !== undefined) {
+    setClauses.push(`color = $${paramIndex++}`);
+    params.push(input.color?.trim() || null);
+  }
+
+  if (input.status !== undefined) {
+    setClauses.push(`status = $${paramIndex++}`);
+    params.push(normalizeProjectStatus(input.status));
+  }
+
+  if (setClauses.length === 0) {
+    return existingProject;
+  }
+
+  setClauses.push(`updated_at = $${paramIndex++}`);
+  params.push(new Date().toISOString());
+  params.push(input.id);
+
+  await db.execute(
+    `UPDATE projects
+        SET ${setClauses.join(", ")}
+      WHERE id = $${paramIndex}`,
+    params,
+  );
+
+  const rows = await db.select<Project[]>(
+    "SELECT * FROM projects WHERE id = $1 LIMIT 1",
+    [input.id],
+  );
+  return rows[0];
+}
+
+/** Delete a project and unassign all linked tasks */
+export async function deleteProject(id: string): Promise<void> {
+  const db = await getDb();
+  await db.execute("UPDATE tasks SET project_id = NULL WHERE project_id = $1", [
+    id,
+  ]);
+  await db.execute("DELETE FROM projects WHERE id = $1", [id]);
+}
+
 /** Create a new task and return it */
 export async function createTask(input: CreateTaskInput): Promise<Task> {
   const db = await getDb();
   const id = uuidv4();
   const now = new Date().toISOString();
 
+  await assertProjectExists(db, input.project_id ?? null);
+
   await db.execute(
     `INSERT INTO tasks (
       id,
       title,
       description,
+      project_id,
       status,
       priority,
       is_important,
@@ -370,11 +578,12 @@ export async function createTask(input: CreateTaskInput): Promise<Task> {
       created_at,
       updated_at
     )
-     VALUES ($1, $2, $3, 'TODO', $4, $5, $6, $7, $8, $9, $10)`,
+     VALUES ($1, $2, $3, $4, 'TODO', $5, $6, $7, $8, $9, $10, $11)`,
     [
       id,
       input.title,
       input.description ?? null,
+      input.project_id ?? null,
       input.priority,
       input.is_important ? 1 : 0,
       input.due_at ?? null,
@@ -461,6 +670,21 @@ export async function updateTask(input: UpdateTaskInput): Promise<Task> {
         fieldName: "description",
         oldValue: oldDescription,
         newValue: newDescription,
+      });
+    }
+  }
+  if (input.project_id !== undefined) {
+    await assertProjectExists(db, input.project_id ?? null);
+    setClauses.push(`project_id = $${paramIndex++}`);
+    params.push(input.project_id ?? null);
+    const oldProjectId = existingTask.project_id ?? null;
+    const newProjectId = input.project_id ?? null;
+    if (oldProjectId !== newProjectId) {
+      changes.push({
+        action: "UPDATED",
+        fieldName: "project_id",
+        oldValue: oldProjectId,
+        newValue: newProjectId,
       });
     }
   }
@@ -594,6 +818,7 @@ export async function updateTask(input: UpdateTaskInput): Promise<Task> {
           id,
           title,
           description,
+          project_id,
           status,
           priority,
           is_important,
@@ -603,11 +828,12 @@ export async function updateTask(input: UpdateTaskInput): Promise<Task> {
           created_at,
           updated_at
         )
-         VALUES ($1, $2, $3, 'TODO', $4, $5, $6, $7, $8, $9, $10)`,
+         VALUES ($1, $2, $3, $4, 'TODO', $5, $6, $7, $8, $9, $10, $11)`,
         [
           nextTaskId,
           updatedTask.title,
           updatedTask.description ?? null,
+          updatedTask.project_id ?? null,
           updatedTask.priority,
           updatedTask.is_important,
           nextDueAt,

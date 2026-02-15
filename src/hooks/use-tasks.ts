@@ -1,10 +1,14 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   getAllTasks,
+  getProjects,
   getTodayTasks,
   getUpcomingTasks,
+  createProject,
   createTask,
+  updateProject,
   updateTask,
+  deleteProject,
   deleteTask,
   getTaskSubtasks,
   getTaskSubtaskStats,
@@ -18,8 +22,10 @@ import {
   getTaskChangelogs,
 } from "@/lib/database";
 import type {
+  CreateProjectInput,
   CreateTaskInput,
   CreateTaskSubtaskInput,
+  UpdateProjectInput,
   UpdateTaskSubtaskInput,
   UpdateTaskInput,
   UpsertTaskTemplateInput,
@@ -33,6 +39,15 @@ const CHANGELOGS_KEY = ["task-changelogs"] as const;
 const TASK_SUBTASKS_KEY = ["task-subtasks"] as const;
 const TASK_SUBTASK_STATS_KEY = ["task-subtask-stats"] as const;
 const TASK_TEMPLATES_KEY = ["task-templates"] as const;
+const PROJECTS_KEY = ["projects"] as const;
+
+/** Fetch all active/completed projects */
+export function useProjects() {
+  return useQuery({
+    queryKey: PROJECTS_KEY,
+    queryFn: getProjects,
+  });
+}
 
 /** Fetch all tasks */
 export function useTasks() {
@@ -111,6 +126,46 @@ export function useCreateTask() {
       queryClient.invalidateQueries({ queryKey: CHANGELOGS_KEY });
       queryClient.invalidateQueries({ queryKey: TASK_SUBTASKS_KEY });
       queryClient.invalidateQueries({ queryKey: TASK_SUBTASK_STATS_KEY });
+    },
+  });
+}
+
+/** Create a new project */
+export function useCreateProject() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (input: CreateProjectInput) => createProject(input),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: PROJECTS_KEY });
+    },
+  });
+}
+
+/** Update an existing project */
+export function useUpdateProject() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (input: UpdateProjectInput) => updateProject(input),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: PROJECTS_KEY });
+    },
+  });
+}
+
+/** Delete a project */
+export function useDeleteProject() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (id: string) => deleteProject(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: PROJECTS_KEY });
+      queryClient.invalidateQueries({ queryKey: TASKS_KEY });
+      queryClient.invalidateQueries({ queryKey: TODAY_TASKS_KEY });
+      queryClient.invalidateQueries({ queryKey: UPCOMING_TASKS_KEY });
+      queryClient.invalidateQueries({ queryKey: STATS_KEY });
     },
   });
 }

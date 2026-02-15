@@ -7,6 +7,9 @@ export type TaskPriority = "URGENT" | "NORMAL" | "LOW";
 /** Valid recurrence rules matching the SQLite CHECK constraint */
 export type TaskRecurrence = "NONE" | "DAILY" | "WEEKLY" | "MONTHLY";
 
+/** Valid project statuses matching the SQLite CHECK constraint */
+export type ProjectStatus = "ACTIVE" | "COMPLETED" | "ARCHIVED";
+
 /** Dashboard metrics derived from tasks and changelog records */
 export interface TaskDashboardStats {
   TODO: number;
@@ -25,6 +28,7 @@ export interface Task {
   id: string;
   title: string;
   description: string | null;
+  project_id: string | null;
   status: TaskStatus;
   priority: TaskPriority;
   is_important: number; // SQLite stores booleans as 0/1
@@ -39,6 +43,7 @@ export interface Task {
 export interface CreateTaskInput {
   title: string;
   description?: string;
+  project_id?: string | null;
   priority: TaskPriority;
   is_important: boolean;
   due_at?: string | null;
@@ -55,6 +60,7 @@ export interface UpdateTaskInput {
   id: string;
   title?: string;
   description?: string | null;
+  project_id?: string | null;
   status?: TaskStatus;
   priority?: TaskPriority;
   is_important?: boolean;
@@ -76,6 +82,34 @@ export interface TaskTemplate {
   recurrence: TaskRecurrence;
   created_at: string;
   updated_at: string;
+}
+
+/** A project entity from the database */
+export interface Project {
+  id: string;
+  name: string;
+  description: string | null;
+  color: string | null;
+  status: ProjectStatus;
+  created_at: string;
+  updated_at: string;
+}
+
+/** Input for creating a new project */
+export interface CreateProjectInput {
+  name: string;
+  description?: string | null;
+  color?: string | null;
+  status?: ProjectStatus;
+}
+
+/** Input for updating an existing project */
+export interface UpdateProjectInput {
+  id: string;
+  name?: string;
+  description?: string | null;
+  color?: string | null;
+  status?: ProjectStatus;
 }
 
 /** Input for creating/updating a task template */

@@ -25,8 +25,10 @@ import {
 } from "lucide-react";
 import {
   useCreateTaskSubtask,
+  useCreateProject,
   useDeleteTaskTemplate,
   useDeleteTaskSubtask,
+  useProjects,
   useTaskSubtasks,
   useTaskChangelogs,
   useTaskTemplates,
@@ -95,6 +97,10 @@ function formatChangelogValue(
   fieldName: string | null,
   value: string | null,
 ): string {
+  if (fieldName === "project_id") {
+    return value ? `Project (${value.slice(0, 8)})` : "No project";
+  }
+
   if (!value) return "Empty";
 
   if (fieldName === "status" && value in STATUS_LABELS) {
@@ -145,7 +151,9 @@ function formatChangelogMessage(log: TaskChangelog): string {
                   ? "Reminder"
                   : log.field_name === "recurrence"
                     ? "Repeat"
-                    : "Task";
+                    : log.field_name === "project_id"
+                      ? "Project"
+                      : "Task";
 
   return `${fieldLabel} changed from ${formatChangelogValue(log.field_name, log.old_value)} to ${formatChangelogValue(log.field_name, log.new_value)}`;
 }
@@ -238,8 +246,10 @@ export function TaskForm({ task, onSubmit, onClose }: TaskFormProps) {
   const [dueAt, setDueAt] = useState("");
   const [remindAt, setRemindAt] = useState("");
   const [recurrence, setRecurrence] = useState<TaskRecurrence>("NONE");
+  const [projectId, setProjectId] = useState("");
   const [naturalDueText, setNaturalDueText] = useState("");
   const [timeError, setTimeError] = useState<string | null>(null);
+  const [projectError, setProjectError] = useState<string | null>(null);
   const [selectedTemplateId, setSelectedTemplateId] = useState("");
   const [templateError, setTemplateError] = useState<string | null>(null);
   const [draftSubtasks, setDraftSubtasks] = useState<DraftSubtask[]>([]);
@@ -247,12 +257,14 @@ export function TaskForm({ task, onSubmit, onClose }: TaskFormProps) {
   const [subtaskError, setSubtaskError] = useState<string | null>(null);
 
   const isEditing = !!task;
+  const { data: projects = [], isLoading: isLoadingProjects } = useProjects();
   const { data: taskTemplates = [], isLoading: isLoadingTaskTemplates } =
     useTaskTemplates(!isEditing);
   const { data: persistedSubtasks = [], isLoading: isLoadingSubtasks } =
     useTaskSubtasks(task?.id, isEditing);
   const upsertTaskTemplate = useUpsertTaskTemplate();
   const deleteTaskTemplate = useDeleteTaskTemplate();
+  const createProject = useCreateProject();
   const createTaskSubtask = useCreateTaskSubtask();
   const updateTaskSubtask = useUpdateTaskSubtask();
   const deleteTaskSubtask = useDeleteTaskSubtask();
@@ -289,7 +301,9 @@ export function TaskForm({ task, onSubmit, onClose }: TaskFormProps) {
       setDueAt(toInputDateTime(task.due_at));
       setRemindAt(toInputDateTime(task.remind_at));
       setRecurrence(task.recurrence ?? "NONE");
+      setProjectId(task.project_id ?? "");
       setTimeError(null);
+      setProjectError(null);
       setSelectedTemplateId("");
       setTemplateError(null);
       setDraftSubtasks([]);
@@ -306,8 +320,10 @@ export function TaskForm({ task, onSubmit, onClose }: TaskFormProps) {
     setDueAt("");
     setRemindAt("");
     setRecurrence("NONE");
+    setProjectId("");
     setSelectedTemplateId("");
     setTimeError(null);
+    setProjectError(null);
     setTemplateError(null);
     setDraftSubtasks([]);
     setNewSubtaskTitle("");
@@ -354,6 +370,7 @@ export function TaskForm({ task, onSubmit, onClose }: TaskFormProps) {
         id: task.id,
         title: title.trim(),
         description: description.trim() || null,
+        project_id: projectId || null,
         priority,
         is_important: isImportant,
         status: task.status,
@@ -366,6 +383,7 @@ export function TaskForm({ task, onSubmit, onClose }: TaskFormProps) {
       const input: CreateTaskInput = {
         title: title.trim(),
         description: description.trim() || undefined,
+        project_id: projectId || null,
         priority,
         is_important: isImportant,
         due_at: dueAtIso,
@@ -476,6 +494,26 @@ export function TaskForm({ task, onSubmit, onClose }: TaskFormProps) {
       setTemplateError(null);
     } catch (error) {
       setTemplateError(getErrorMessage(error));
+    }
+  };
+
+  const handleCreateProject = async () => {
+    const suggestedName =
+      title.trim().length > 0 ? `${title.trim().slice(0, 40)} Project` : "";
+    const inputName = window.prompt("Project name", suggestedName);
+    if (!inputName) return;
+
+    const normalizedName = inputName.trim();
+    if (!normalizedName) return;
+
+    try {
+      const project = await createProject.mutateAsync({
+        name: normalizedName,
+      });
+      setProjectId(project.id);
+      setProjectError(null);
+    } catch (error) {
+      setProjectError(getErrorMessage(error));
     }
   };
 
@@ -667,6 +705,40 @@ export function TaskForm({ task, onSubmit, onClose }: TaskFormProps) {
               </div>
             </div>
           )}
+
+          <div className="field">
+            <label className="field-label" htmlFor="task-project">
+              Project <span className="optional">(optional)</span>
+            </label>
+            <div className="project-row">
+              <select
+                id="task-project"
+                className="input"
+                value={projectId}
+                onChange={(event) => {
+                  setProjectId(event.target.value);
+                  if (projectError) setProjectError(null);
+                }}
+                disabled={isLoadingProjects}
+              >
+                <option value="">No project</option>
+                {projects.map((project) => (
+                  <option key={project.id} value={project.id}>
+                    {project.name}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                className="template-btn"
+                onClick={() => void handleCreateProject()}
+                disabled={createProject.isPending}
+              >
+                <Plus size={12} />
+                {createProject.isPending ? "Creating..." : "New"}
+              </button>
+            </div>
+          </div>
 
           <div className="checklist-section">
             <div className="checklist-header">
@@ -878,6 +950,7 @@ export function TaskForm({ task, onSubmit, onClose }: TaskFormProps) {
           </div>
 
           {timeError && <p className="form-error">{timeError}</p>}
+          {projectError && <p className="form-error">{projectError}</p>}
           {templateError && <p className="form-error">{templateError}</p>}
           {subtaskError && <p className="form-error">{subtaskError}</p>}
 
@@ -1042,6 +1115,11 @@ export function TaskForm({ task, onSubmit, onClose }: TaskFormProps) {
           background: var(--bg-elevated);
         }
         .template-row {
+          display: flex;
+          gap: 8px;
+          align-items: center;
+        }
+        .project-row {
           display: flex;
           gap: 8px;
           align-items: center;
@@ -1424,6 +1502,10 @@ export function TaskForm({ task, onSubmit, onClose }: TaskFormProps) {
             gap: 0;
           }
           .template-row {
+            flex-direction: column;
+            align-items: stretch;
+          }
+          .project-row {
             flex-direction: column;
             align-items: stretch;
           }

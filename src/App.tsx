@@ -237,6 +237,7 @@ function AppContent() {
       try {
         await createTask.mutateAsync({
           title,
+          project_id: null,
           priority: "NORMAL",
           is_important: false,
           due_at: null,
