@@ -16,6 +16,7 @@ import {
   CheckCircle2,
   Check,
   X,
+  Search,
 } from "lucide-react";
 
 interface ProjectViewProps {
@@ -38,10 +39,21 @@ interface ProjectMetrics {
   progressPercent: number;
 }
 
+type ProjectStatusFilter = "ALL" | "ACTIVE" | "COMPLETED";
+type TaskSectionFilter = "ALL" | TaskStatus;
+
 const STATUS_SECTIONS: Array<{ status: TaskStatus; label: string }> = [
   { status: "TODO", label: "To Do" },
   { status: "DOING", label: "In Progress" },
   { status: "DONE", label: "Done" },
+];
+const PROJECT_STATUS_FILTERS: Array<{
+  value: ProjectStatusFilter;
+  label: string;
+}> = [
+  { value: "ALL", label: "All" },
+  { value: "ACTIVE", label: "Active" },
+  { value: "COMPLETED", label: "Completed" },
 ];
 const DEFAULT_PROJECT_COLOR = "#3B82F6";
 
@@ -126,6 +138,11 @@ export function ProjectView({
     null,
   );
   const [actionError, setActionError] = useState<string | null>(null);
+  const [projectSearch, setProjectSearch] = useState("");
+  const [projectStatusFilter, setProjectStatusFilter] =
+    useState<ProjectStatusFilter>("ALL");
+  const [taskSectionFilter, setTaskSectionFilter] =
+    useState<TaskSectionFilter>("ALL");
   const [isCreateFormOpen, setIsCreateFormOpen] = useState(false);
   const [createName, setCreateName] = useState("");
   const [createDescription, setCreateDescription] = useState("");
@@ -134,20 +151,6 @@ export function ProjectView({
   const [editName, setEditName] = useState("");
   const [editDescription, setEditDescription] = useState("");
   const [editColor, setEditColor] = useState(DEFAULT_PROJECT_COLOR);
-
-  useEffect(() => {
-    if (projects.length === 0) {
-      setSelectedProjectId(null);
-      return;
-    }
-
-    const hasSelectedProject = projects.some(
-      (project) => project.id === selectedProjectId,
-    );
-    if (!hasSelectedProject) {
-      setSelectedProjectId(projects[0].id);
-    }
-  }, [projects, selectedProjectId]);
 
   const taskMetricsByProjectId = useMemo(() => {
     const taskMap = new Map<string, Task[]>();
@@ -169,8 +172,50 @@ export function ProjectView({
     return metricsMap;
   }, [projects, tasks]);
 
+  const normalizedProjectSearch = projectSearch.trim().toLowerCase();
+  const filteredProjects = useMemo(() => {
+    return projects.filter((project) => {
+      if (
+        projectStatusFilter !== "ALL" &&
+        project.status !== projectStatusFilter
+      ) {
+        return false;
+      }
+
+      if (!normalizedProjectSearch) return true;
+      const searchableText =
+        `${project.name} ${project.description ?? ""}`.toLowerCase();
+      return searchableText.includes(normalizedProjectSearch);
+    });
+  }, [projects, projectStatusFilter, normalizedProjectSearch]);
+
+  const projectStatusCounts = useMemo(
+    () => ({
+      ALL: projects.length,
+      ACTIVE: projects.filter((project) => project.status === "ACTIVE").length,
+      COMPLETED: projects.filter((project) => project.status === "COMPLETED")
+        .length,
+    }),
+    [projects],
+  );
+
+  useEffect(() => {
+    if (filteredProjects.length === 0) {
+      setSelectedProjectId(null);
+      return;
+    }
+
+    const hasSelectedProject = filteredProjects.some(
+      (project) => project.id === selectedProjectId,
+    );
+    if (!hasSelectedProject) {
+      setSelectedProjectId(filteredProjects[0].id);
+    }
+  }, [filteredProjects, selectedProjectId]);
+
   const selectedProject =
-    projects.find((project) => project.id === selectedProjectId) ?? null;
+    filteredProjects.find((project) => project.id === selectedProjectId) ??
+    null;
 
   useEffect(() => {
     if (!selectedProject) {
@@ -181,6 +226,7 @@ export function ProjectView({
     setEditName(selectedProject.name);
     setEditDescription(selectedProject.description ?? "");
     setEditColor(selectedProject.color ?? DEFAULT_PROJECT_COLOR);
+    setTaskSectionFilter("ALL");
     setIsEditingDetails(false);
   }, [selectedProject]);
 
@@ -190,6 +236,25 @@ export function ProjectView({
       tasks.filter((task) => task.project_id === selectedProject.id),
     );
   }, [selectedProject, tasks]);
+  const selectedProjectTaskCounts = useMemo(() => {
+    const counts: Record<TaskSectionFilter, number> = {
+      ALL: selectedProjectTasks.length,
+      TODO: 0,
+      DOING: 0,
+      DONE: 0,
+      ARCHIVED: 0,
+    };
+    for (const task of selectedProjectTasks) {
+      counts[task.status] += 1;
+    }
+    return counts;
+  }, [selectedProjectTasks]);
+  const visibleTaskSections = useMemo(() => {
+    if (taskSectionFilter === "ALL") return STATUS_SECTIONS;
+    return STATUS_SECTIONS.filter(
+      (section) => section.status === taskSectionFilter,
+    );
+  }, [taskSectionFilter]);
 
   const selectedTaskIds = useMemo(
     () => selectedProjectTasks.map((task) => task.id),
@@ -213,6 +278,8 @@ export function ProjectView({
   const selectedProjectMetrics = selectedProject
     ? (taskMetricsByProjectId.get(selectedProject.id) ?? getProjectMetrics([]))
     : getProjectMetrics([]);
+  const isProjectFilterActive =
+    projectStatusFilter !== "ALL" || normalizedProjectSearch.length > 0;
 
   const handleCreateProject = async () => {
     const normalizedName = createName.trim();
@@ -230,6 +297,8 @@ export function ProjectView({
         description: normalizedDescription,
         color: normalizedColor,
       });
+      setProjectStatusFilter("ALL");
+      setProjectSearch("");
       setSelectedProjectId(project.id);
       setIsCreateFormOpen(false);
       setCreateName("");
@@ -335,62 +404,188 @@ export function ProjectView({
 
   if (projects.length === 0) {
     return (
-      <div className="project-view-empty">
-        <FolderKanban size={30} />
-        <h2>No projects yet</h2>
-        <p>Create your first project to group tasks and track progress.</p>
-        <div className="project-editor-card project-empty-editor">
-          <div className="project-editor-grid">
-            <label className="project-editor-field">
-              <span>Name</span>
-              <input
-                className="project-editor-input"
-                value={createName}
-                onChange={(event) => setCreateName(event.target.value)}
-                placeholder="Project name"
-                autoFocus
-              />
-            </label>
-            <label className="project-editor-field">
-              <span>Color</span>
-              <div className="project-color-input-row">
-                <input
-                  type="color"
-                  className="project-color-input"
-                  value={createColor}
-                  onChange={(event) => setCreateColor(event.target.value)}
-                />
+      <>
+        <div className="project-view-empty">
+          <FolderKanban size={30} />
+          <h2>No projects yet</h2>
+          <p>Create your first project to group tasks and track progress.</p>
+          <div className="project-editor-card project-empty-editor">
+            <div className="project-editor-grid">
+              <label className="project-editor-field">
+                <span>Name</span>
                 <input
                   className="project-editor-input"
-                  value={createColor}
-                  onChange={(event) => setCreateColor(event.target.value)}
-                  placeholder="#3B82F6"
+                  value={createName}
+                  onChange={(event) => setCreateName(event.target.value)}
+                  placeholder="Project name"
+                  autoFocus
                 />
-              </div>
+              </label>
+              <label className="project-editor-field">
+                <span>Color</span>
+                <div className="project-color-input-row">
+                  <input
+                    type="color"
+                    className="project-color-input"
+                    value={createColor}
+                    onChange={(event) => setCreateColor(event.target.value)}
+                  />
+                  <input
+                    className="project-editor-input"
+                    value={createColor}
+                    onChange={(event) => setCreateColor(event.target.value)}
+                    placeholder="#3B82F6"
+                  />
+                </div>
+              </label>
+            </div>
+            <label className="project-editor-field">
+              <span>Description</span>
+              <textarea
+                className="project-editor-textarea"
+                value={createDescription}
+                onChange={(event) => setCreateDescription(event.target.value)}
+                placeholder="What is this project for?"
+                rows={2}
+              />
             </label>
-          </div>
-          <label className="project-editor-field">
-            <span>Description</span>
-            <textarea
-              className="project-editor-textarea"
-              value={createDescription}
-              onChange={(event) => setCreateDescription(event.target.value)}
-              placeholder="What is this project for?"
-              rows={2}
-            />
-          </label>
-          <div className="project-editor-actions">
-            <button
-              className="project-primary-btn"
-              onClick={() => void handleCreateProject()}
-              disabled={!createName.trim() || createProject.isPending}
-            >
-              <Plus size={14} />
-              {createProject.isPending ? "Creating..." : "Create Project"}
-            </button>
+            <div className="project-editor-actions">
+              <button
+                className="project-primary-btn"
+                onClick={() => void handleCreateProject()}
+                disabled={!createName.trim() || createProject.isPending}
+              >
+                <Plus size={14} />
+                {createProject.isPending ? "Creating..." : "Create Project"}
+              </button>
+            </div>
           </div>
         </div>
-      </div>
+
+        <style>{`
+          .project-view-empty {
+            height: 100%;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            gap: 8px;
+            color: var(--text-muted);
+          }
+          .project-view-empty h2 {
+            color: var(--text-primary);
+            font-size: 18px;
+          }
+          .project-view-empty p {
+            max-width: 420px;
+            font-size: 13px;
+          }
+          .project-editor-card {
+            border: 1px solid var(--border-default);
+            border-radius: var(--radius-md);
+            background: var(--bg-surface);
+            padding: 10px;
+            display: flex;
+            flex-direction: column;
+            gap: 8px;
+          }
+          .project-empty-editor {
+            width: min(560px, 100%);
+            margin-top: 8px;
+            text-align: left;
+          }
+          .project-editor-grid {
+            display: grid;
+            grid-template-columns: 1fr auto;
+            gap: 8px;
+          }
+          .project-editor-field {
+            display: flex;
+            flex-direction: column;
+            gap: 4px;
+          }
+          .project-editor-field span {
+            font-size: 11px;
+            font-weight: 600;
+            color: var(--text-muted);
+          }
+          .project-editor-input,
+          .project-editor-textarea {
+            width: 100%;
+            border: 1px solid var(--border-default);
+            border-radius: var(--radius-sm);
+            background: var(--bg-elevated);
+            color: var(--text-primary);
+            font-size: 12px;
+            font-family: inherit;
+            outline: none;
+            transition: border-color var(--duration) var(--ease);
+          }
+          .project-editor-input {
+            height: 32px;
+            padding: 0 10px;
+          }
+          .project-editor-textarea {
+            padding: 8px 10px;
+            min-height: 64px;
+            resize: vertical;
+            line-height: 1.45;
+          }
+          .project-editor-input:focus,
+          .project-editor-textarea:focus {
+            border-color: var(--border-focus);
+          }
+          .project-color-input-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+          }
+          .project-color-input {
+            width: 34px;
+            height: 32px;
+            border: 1px solid var(--border-default);
+            border-radius: var(--radius-sm);
+            background: var(--bg-elevated);
+            cursor: pointer;
+            padding: 2px;
+          }
+          .project-editor-actions {
+            display: flex;
+            justify-content: flex-end;
+            gap: 8px;
+          }
+          .project-primary-btn {
+            height: 32px;
+            border: none;
+            border-radius: var(--radius-md);
+            padding: 0 12px;
+            background: var(--accent);
+            color: #fff;
+            font-size: 12px;
+            font-weight: 700;
+            font-family: inherit;
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            cursor: pointer;
+            transition: all var(--duration) var(--ease);
+          }
+          .project-primary-btn:hover:not(:disabled) {
+            background: var(--accent-hover);
+            box-shadow: var(--shadow-glow);
+          }
+          .project-primary-btn:disabled {
+            opacity: 0.55;
+            cursor: not-allowed;
+          }
+          @media (max-width: 900px) {
+            .project-editor-grid {
+              grid-template-columns: 1fr;
+            }
+          }
+        `}</style>
+      </>
     );
   }
 
@@ -400,28 +595,47 @@ export function ProjectView({
         <div>
           <h1 className="project-view-title">Projects</h1>
           <p className="project-view-subtitle">
-            {projects.length} project{projects.length !== 1 ? "s" : ""} tracked
+            {isProjectFilterActive
+              ? `${filteredProjects.length} of ${projects.length} project${projects.length !== 1 ? "s" : ""} shown`
+              : `${projects.length} project${projects.length !== 1 ? "s" : ""} tracked`}
           </p>
         </div>
-        <button
-          className="project-primary-btn"
-          onClick={() => {
-            setIsCreateFormOpen((prevState) => {
-              const nextState = !prevState;
-              if (nextState) {
-                setCreateName("");
-                setCreateDescription("");
-                setCreateColor(DEFAULT_PROJECT_COLOR);
-              }
-              return nextState;
-            });
-            setActionError(null);
-          }}
-          disabled={createProject.isPending || updateProject.isPending}
-        >
-          <Plus size={14} />
-          {isCreateFormOpen ? "Close" : "New Project"}
-        </button>
+        <div className="project-view-header-actions">
+          {isProjectFilterActive && (
+            <button
+              type="button"
+              className="project-ghost-btn"
+              onClick={() => {
+                setProjectSearch("");
+                setProjectStatusFilter("ALL");
+                setActionError(null);
+              }}
+              disabled={createProject.isPending || updateProject.isPending}
+            >
+              <X size={12} />
+              Clear Filters
+            </button>
+          )}
+          <button
+            className="project-primary-btn"
+            onClick={() => {
+              setIsCreateFormOpen((prevState) => {
+                const nextState = !prevState;
+                if (nextState) {
+                  setCreateName("");
+                  setCreateDescription("");
+                  setCreateColor(DEFAULT_PROJECT_COLOR);
+                }
+                return nextState;
+              });
+              setActionError(null);
+            }}
+            disabled={createProject.isPending || updateProject.isPending}
+          >
+            <Plus size={14} />
+            {isCreateFormOpen ? "Close" : "New Project"}
+          </button>
+        </div>
       </div>
 
       {actionError && <p className="project-action-error">{actionError}</p>}
@@ -495,49 +709,92 @@ export function ProjectView({
 
       <div className="project-view-layout">
         <aside className="project-list-panel">
+          <div className="project-list-controls">
+            <label
+              className="project-search-box"
+              htmlFor="project-search-input"
+            >
+              <Search size={13} />
+              <input
+                id="project-search-input"
+                className="project-search-input"
+                value={projectSearch}
+                onChange={(event) => setProjectSearch(event.target.value)}
+                placeholder="Search project..."
+              />
+            </label>
+            <div className="project-status-filter-row">
+              {PROJECT_STATUS_FILTERS.map((filterOption) => {
+                const count = projectStatusCounts[filterOption.value];
+                const isActive = projectStatusFilter === filterOption.value;
+                return (
+                  <button
+                    key={filterOption.value}
+                    type="button"
+                    className={`project-status-filter-chip${isActive ? " active" : ""}`}
+                    onClick={() => setProjectStatusFilter(filterOption.value)}
+                  >
+                    <span>{filterOption.label}</span>
+                    <strong>{count}</strong>
+                  </button>
+                );
+              })}
+            </div>
+          </div>
           <div className="project-list">
-            {projects.map((project) => {
-              const metrics =
-                taskMetricsByProjectId.get(project.id) ?? getProjectMetrics([]);
-              const isSelected = project.id === selectedProjectId;
+            {filteredProjects.length === 0 ? (
+              <p className="project-list-empty">
+                No projects match current filters.
+              </p>
+            ) : (
+              filteredProjects.map((project) => {
+                const metrics =
+                  taskMetricsByProjectId.get(project.id) ??
+                  getProjectMetrics([]);
+                const isSelected = project.id === selectedProjectId;
 
-              return (
-                <button
-                  key={project.id}
-                  className={`project-list-item${isSelected ? " selected" : ""}`}
-                  onClick={() => setSelectedProjectId(project.id)}
-                >
-                  <div className="project-list-top">
-                    <span className="project-list-name-wrap">
+                return (
+                  <button
+                    key={project.id}
+                    className={`project-list-item${isSelected ? " selected" : ""}`}
+                    onClick={() => setSelectedProjectId(project.id)}
+                  >
+                    <div className="project-list-top">
+                      <span className="project-list-name-wrap">
+                        <span
+                          className="project-color-dot"
+                          style={{
+                            background: project.color ?? DEFAULT_PROJECT_COLOR,
+                          }}
+                        />
+                        <span className="project-list-name">
+                          {project.name}
+                        </span>
+                      </span>
                       <span
-                        className="project-color-dot"
-                        style={{
-                          background: project.color ?? DEFAULT_PROJECT_COLOR,
-                        }}
+                        className={`project-status-badge${project.status === "COMPLETED" ? " completed" : ""}`}
+                      >
+                        {project.status === "COMPLETED"
+                          ? "Completed"
+                          : "Active"}
+                      </span>
+                    </div>
+                    <div className="project-progress-track">
+                      <div
+                        className="project-progress-fill"
+                        style={{ width: `${metrics.progressPercent}%` }}
                       />
-                      <span className="project-list-name">{project.name}</span>
-                    </span>
-                    <span
-                      className={`project-status-badge${project.status === "COMPLETED" ? " completed" : ""}`}
-                    >
-                      {project.status === "COMPLETED" ? "Completed" : "Active"}
-                    </span>
-                  </div>
-                  <div className="project-progress-track">
-                    <div
-                      className="project-progress-fill"
-                      style={{ width: `${metrics.progressPercent}%` }}
-                    />
-                  </div>
-                  <div className="project-list-metrics">
-                    <span>
-                      {metrics.done}/{metrics.total} done
-                    </span>
-                    <span>{metrics.overdue} overdue</span>
-                  </div>
-                </button>
-              );
-            })}
+                    </div>
+                    <div className="project-list-metrics">
+                      <span>
+                        {metrics.done}/{metrics.total} done
+                      </span>
+                      <span>{metrics.overdue} overdue</span>
+                    </div>
+                  </button>
+                );
+              })
+            )}
           </div>
         </aside>
 
@@ -619,6 +876,22 @@ export function ProjectView({
                     </div>
                   ) : (
                     <>
+                      <div className="project-detail-meta-row">
+                        <span
+                          className="project-detail-color-chip"
+                          style={{
+                            background:
+                              selectedProject.color ?? DEFAULT_PROJECT_COLOR,
+                          }}
+                        />
+                        <span
+                          className={`project-status-badge project-status-badge-detail${selectedProject.status === "COMPLETED" ? " completed" : ""}`}
+                        >
+                          {selectedProject.status === "COMPLETED"
+                            ? "Completed"
+                            : "Active"}
+                        </span>
+                      </div>
                       <h2>{selectedProject.name}</h2>
                       <p>
                         {selectedProjectTasks.length} task(s) in this project
@@ -691,6 +964,51 @@ export function ProjectView({
                 </div>
               </div>
 
+              <div className="project-progress-hero">
+                <div className="project-progress-hero-top">
+                  <span>Delivery Progress</span>
+                  <strong>{selectedProjectMetrics.progressPercent}%</strong>
+                </div>
+                <div className="project-progress-hero-track">
+                  <div
+                    className="project-progress-hero-fill"
+                    style={{
+                      width: `${selectedProjectMetrics.progressPercent}%`,
+                    }}
+                  />
+                </div>
+                <p>
+                  {selectedProjectMetrics.done} done •{" "}
+                  {selectedProjectMetrics.open} open •{" "}
+                  {selectedProjectMetrics.overdue} overdue
+                </p>
+              </div>
+
+              {selectedProjectTaskCounts.ALL > 0 && (
+                <div className="project-task-filter-row">
+                  <button
+                    type="button"
+                    className={`project-task-filter-chip${taskSectionFilter === "ALL" ? " active" : ""}`}
+                    onClick={() => setTaskSectionFilter("ALL")}
+                  >
+                    All <strong>{selectedProjectTaskCounts.ALL}</strong>
+                  </button>
+                  {STATUS_SECTIONS.map((section) => (
+                    <button
+                      key={section.status}
+                      type="button"
+                      className={`project-task-filter-chip${taskSectionFilter === section.status ? " active" : ""}`}
+                      onClick={() => setTaskSectionFilter(section.status)}
+                    >
+                      {section.label}{" "}
+                      <strong>
+                        {selectedProjectTaskCounts[section.status]}
+                      </strong>
+                    </button>
+                  ))}
+                </div>
+              )}
+
               {isLoadingTasks ? (
                 <p className="project-view-inline-state">Loading tasks...</p>
               ) : isTasksError ? (
@@ -710,7 +1028,7 @@ export function ProjectView({
                 </div>
               ) : (
                 <div className="project-task-sections">
-                  {STATUS_SECTIONS.map((section) => {
+                  {visibleTaskSections.map((section) => {
                     const sectionTasks = selectedProjectTasks.filter(
                       (task) => task.status === section.status,
                     );
@@ -752,6 +1070,10 @@ export function ProjectView({
                 </div>
               )}
             </>
+          ) : filteredProjects.length === 0 ? (
+            <p className="project-view-inline-state">
+              No projects match current filters.
+            </p>
           ) : (
             <p className="project-view-inline-state">
               Select a project to see details.
@@ -773,6 +1095,11 @@ export function ProjectView({
           justify-content: space-between;
           align-items: center;
           gap: 12px;
+        }
+        .project-view-header-actions {
+          display: inline-flex;
+          align-items: center;
+          gap: 8px;
         }
         .project-view-title {
           font-size: 20px;
@@ -883,14 +1210,100 @@ export function ProjectView({
         }
         .project-list-panel {
           overflow: hidden;
+          display: flex;
+          flex-direction: column;
+          min-height: 0;
+        }
+        .project-list-controls {
+          padding: 10px;
+          border-bottom: 1px solid var(--border-default);
+          background: linear-gradient(
+            180deg,
+            rgba(255, 255, 255, 0.02),
+            transparent
+          );
+          display: flex;
+          flex-direction: column;
+          gap: 8px;
+        }
+        .project-search-box {
+          display: inline-flex;
+          align-items: center;
+          gap: 8px;
+          border: 1px solid var(--border-default);
+          border-radius: var(--radius-sm);
+          padding: 0 10px;
+          height: 32px;
+          background: var(--bg-elevated);
+          color: var(--text-muted);
+        }
+        .project-search-input {
+          width: 100%;
+          border: none;
+          outline: none;
+          background: transparent;
+          color: var(--text-primary);
+          font-size: 12px;
+          font-family: inherit;
+        }
+        .project-search-input::placeholder {
+          color: var(--text-disabled);
+        }
+        .project-status-filter-row {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          flex-wrap: wrap;
+        }
+        .project-status-filter-chip {
+          height: 26px;
+          border: 1px solid var(--border-default);
+          border-radius: var(--radius-full);
+          background: var(--bg-elevated);
+          color: var(--text-muted);
+          font-size: 11px;
+          font-weight: 600;
+          font-family: inherit;
+          padding: 0 8px;
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          cursor: pointer;
+          transition: all var(--duration) var(--ease);
+        }
+        .project-status-filter-chip strong {
+          font-size: 10px;
+          font-weight: 700;
+          color: inherit;
+        }
+        .project-status-filter-chip:hover {
+          border-color: var(--border-strong);
+          color: var(--text-primary);
+          background: var(--bg-hover);
+        }
+        .project-status-filter-chip.active {
+          border-color: var(--accent);
+          color: var(--accent);
+          background: var(--accent-subtle);
         }
         .project-list {
-          height: 100%;
+          flex: 1;
+          min-height: 0;
           overflow-y: auto;
           padding: 10px;
           display: flex;
           flex-direction: column;
           gap: 8px;
+        }
+        .project-list-empty {
+          margin: 4px 2px;
+          border: 1px dashed var(--border-default);
+          border-radius: var(--radius-sm);
+          background: var(--bg-elevated);
+          padding: 12px;
+          font-size: 12px;
+          color: var(--text-muted);
+          text-align: center;
         }
         .project-list-item {
           text-align: left;
@@ -953,6 +1366,10 @@ export function ProjectView({
           color: var(--status-done);
           background: rgba(74, 222, 128, 0.12);
         }
+        .project-status-badge.project-status-badge-detail {
+          font-size: 11px;
+          padding: 3px 8px;
+        }
         .project-progress-track {
           width: 100%;
           height: 6px;
@@ -982,6 +1399,18 @@ export function ProjectView({
           align-items: flex-start;
           justify-content: space-between;
           gap: 12px;
+        }
+        .project-detail-meta-row {
+          display: inline-flex;
+          align-items: center;
+          gap: 8px;
+          margin-bottom: 6px;
+        }
+        .project-detail-color-chip {
+          width: 16px;
+          height: 16px;
+          border-radius: 5px;
+          box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.2) inset;
         }
         .project-detail-title-wrap {
           flex: 1;
@@ -1085,6 +1514,88 @@ export function ProjectView({
           color: var(--text-primary);
           font-variant-numeric: tabular-nums;
         }
+        .project-progress-hero {
+          border: 1px solid var(--border-default);
+          border-radius: var(--radius-md);
+          background: linear-gradient(
+            180deg,
+            rgba(59, 130, 246, 0.08),
+            rgba(59, 130, 246, 0.02)
+          );
+          padding: 10px 12px;
+          display: flex;
+          flex-direction: column;
+          gap: 8px;
+        }
+        .project-progress-hero-top {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 8px;
+        }
+        .project-progress-hero-top span {
+          font-size: 12px;
+          color: var(--text-secondary);
+          font-weight: 600;
+        }
+        .project-progress-hero-top strong {
+          font-size: 15px;
+          color: var(--text-primary);
+        }
+        .project-progress-hero-track {
+          width: 100%;
+          height: 8px;
+          border-radius: var(--radius-full);
+          background: rgba(148, 163, 184, 0.24);
+          overflow: hidden;
+        }
+        .project-progress-hero-fill {
+          height: 100%;
+          background: linear-gradient(90deg, var(--accent), #60a5fa);
+        }
+        .project-progress-hero p {
+          margin: 0;
+          font-size: 11px;
+          color: var(--text-muted);
+          font-weight: 600;
+        }
+        .project-task-filter-row {
+          display: flex;
+          align-items: center;
+          gap: 6px;
+          flex-wrap: wrap;
+        }
+        .project-task-filter-chip {
+          height: 28px;
+          border: 1px solid var(--border-default);
+          border-radius: var(--radius-full);
+          background: var(--bg-elevated);
+          color: var(--text-secondary);
+          font-size: 11px;
+          font-weight: 600;
+          font-family: inherit;
+          padding: 0 10px;
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          cursor: pointer;
+          transition: all var(--duration) var(--ease);
+        }
+        .project-task-filter-chip strong {
+          font-size: 10px;
+          font-weight: 700;
+          color: inherit;
+        }
+        .project-task-filter-chip:hover {
+          border-color: var(--border-strong);
+          color: var(--text-primary);
+          background: var(--bg-hover);
+        }
+        .project-task-filter-chip.active {
+          border-color: var(--accent);
+          color: var(--accent);
+          background: var(--accent-subtle);
+        }
         .project-task-sections {
           display: flex;
           flex-direction: column;
@@ -1182,12 +1693,24 @@ export function ProjectView({
             flex-direction: column;
             align-items: flex-start;
           }
+          .project-view-header-actions {
+            width: 100%;
+          }
+          .project-view-header-actions .project-primary-btn,
+          .project-view-header-actions .project-ghost-btn {
+            flex: 1;
+            justify-content: center;
+          }
           .project-detail-header {
             flex-direction: column;
           }
           .project-detail-actions {
             width: 100%;
             justify-content: flex-start;
+          }
+          .project-status-filter-row,
+          .project-task-filter-row {
+            width: 100%;
           }
           .project-kpis {
             grid-template-columns: repeat(2, minmax(0, 1fr));
