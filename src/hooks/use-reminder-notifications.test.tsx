@@ -25,10 +25,10 @@ vi.mock("@tauri-apps/plugin-notification", () => ({
   sendNotification: (...args: unknown[]) => sendNotificationMock(...args),
 }));
 
-interface MockNotificationConstructor extends typeof Notification {
+type MockNotificationConstructor = typeof Notification & {
   permission: NotificationPermission;
   requestPermission: () => Promise<NotificationPermission>;
-}
+};
 
 function mockWebNotificationApi({
   permission = "default",
@@ -103,7 +103,9 @@ describe("use-reminder-notifications", () => {
   it("requests permission from plugin first and web API as fallback", async () => {
     isPermissionGrantedMock.mockResolvedValue(false);
     requestPermissionMock.mockResolvedValue("granted");
-    await expect(requestNotificationPermissionAccess()).resolves.toBe("granted");
+    await expect(requestNotificationPermissionAccess()).resolves.toBe(
+      "granted",
+    );
 
     requestPermissionMock.mockRejectedValue(new Error("plugin unavailable"));
     mockWebNotificationApi({
@@ -114,12 +116,17 @@ describe("use-reminder-notifications", () => {
   });
 
   it("resets reminder history and permission cache", async () => {
-    window.localStorage.setItem(REMINDER_HISTORY_STORAGE_KEY, JSON.stringify({ a: 1 }));
+    window.localStorage.setItem(
+      REMINDER_HISTORY_STORAGE_KEY,
+      JSON.stringify({ a: 1 }),
+    );
     window.localStorage.setItem(REMINDERS_ENABLED_STORAGE_KEY, "false");
     isPermissionGrantedMock.mockResolvedValue(false);
 
     await expect(resetReminderPermissionAndHistory()).resolves.toBe("unknown");
-    expect(window.localStorage.getItem(REMINDER_HISTORY_STORAGE_KEY)).toBeNull();
+    expect(
+      window.localStorage.getItem(REMINDER_HISTORY_STORAGE_KEY),
+    ).toBeNull();
   });
 
   it("sends reminder notifications once per reminder signature and unregisters action listener", async () => {
@@ -128,8 +135,9 @@ describe("use-reminder-notifications", () => {
     isPermissionGrantedMock.mockResolvedValue(true);
 
     const unregisterMock = vi.fn();
-    let actionHandler: ((notification: { extra?: { taskId?: string } }) => void) | null =
-      null;
+    let actionHandler:
+      | ((notification: { extra?: { taskId?: string } }) => void)
+      | null = null;
     onActionMock.mockImplementation(async (handler: typeof actionHandler) => {
       actionHandler = handler;
       return { unregister: unregisterMock };
@@ -154,7 +162,9 @@ describe("use-reminder-notifications", () => {
     });
 
     expect(sendNotificationMock).toHaveBeenCalledTimes(1);
-    expect(window.localStorage.getItem(REMINDER_HISTORY_STORAGE_KEY)).not.toBeNull();
+    expect(
+      window.localStorage.getItem(REMINDER_HISTORY_STORAGE_KEY),
+    ).not.toBeNull();
 
     await act(async () => {
       await vi.advanceTimersByTimeAsync(REMINDER_CHECK_INTERVAL_MS);

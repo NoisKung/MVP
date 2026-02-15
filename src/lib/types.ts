@@ -60,6 +60,8 @@ export interface Task {
   recurrence: TaskRecurrence;
   created_at: string;
   updated_at: string;
+  sync_version?: number;
+  updated_by_device?: string | null;
 }
 
 /** Input for creating a new task */
@@ -107,6 +109,8 @@ export interface TaskTemplate {
   recurrence: TaskRecurrence;
   created_at: string;
   updated_at: string;
+  sync_version?: number;
+  updated_by_device?: string | null;
 }
 
 /** A completed focus/work session linked to a task */
@@ -132,6 +136,8 @@ export interface Project {
   status: ProjectStatus;
   created_at: string;
   updated_at: string;
+  sync_version?: number;
+  updated_by_device?: string | null;
 }
 
 /** Input for creating a new project */
@@ -172,6 +178,8 @@ export interface TaskSubtask {
   is_done: number; // SQLite stores booleans as 0/1
   created_at: string;
   updated_at: string;
+  sync_version?: number;
+  updated_by_device?: string | null;
 }
 
 /** Aggregated checklist progress per task */
@@ -230,6 +238,110 @@ export interface BackupImportResult {
   task_subtasks: number;
   task_changelogs: number;
   task_templates: number;
+}
+
+export type SyncEntityType =
+  | "PROJECT"
+  | "TASK"
+  | "TASK_SUBTASK"
+  | "TASK_TEMPLATE"
+  | "SETTING";
+
+export type SyncOperation = "UPSERT" | "DELETE";
+
+export type SyncStatus = "SYNCED" | "SYNCING" | "OFFLINE" | "CONFLICT";
+
+export interface SyncCheckpoint {
+  id: 1;
+  last_sync_cursor: string | null;
+  last_synced_at: string | null;
+  updated_at: string;
+}
+
+export interface SyncOutboxRecord {
+  id: string;
+  entity_type: SyncEntityType;
+  entity_id: string;
+  operation: SyncOperation;
+  payload_json: string | null;
+  idempotency_key: string;
+  attempts: number;
+  last_error: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DeletedRecord {
+  id: string;
+  entity_type: SyncEntityType;
+  entity_id: string;
+  deleted_at: string;
+  deleted_by_device: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SyncPushChange {
+  entity_type: SyncEntityType;
+  entity_id: string;
+  operation: SyncOperation;
+  updated_at: string;
+  updated_by_device: string;
+  sync_version: number;
+  payload: Record<string, unknown> | null;
+  idempotency_key: string;
+}
+
+export interface SyncPushRequest {
+  schema_version: 1;
+  device_id: string;
+  base_cursor: string | null;
+  changes: SyncPushChange[];
+}
+
+export interface SyncRejectedChange {
+  idempotency_key: string;
+  reason:
+    | "INVALID_ENTITY"
+    | "INVALID_OPERATION"
+    | "SCHEMA_MISMATCH"
+    | "CONFLICT"
+    | "VALIDATION_ERROR";
+  message: string;
+}
+
+export interface SyncPushResponse {
+  accepted: string[];
+  rejected: SyncRejectedChange[];
+  server_cursor: string;
+  server_time: string;
+}
+
+export interface SyncPullRequest {
+  schema_version: 1;
+  device_id: string;
+  cursor: string | null;
+  limit?: number;
+}
+
+export interface SyncPullResponse {
+  server_cursor: string;
+  server_time: string;
+  changes: SyncPushChange[];
+  has_more: boolean;
+}
+
+export interface SyncBootstrapResponse {
+  schema_version: 1;
+  server_cursor: string;
+  server_time: string;
+  data: {
+    settings: AppSettingRecord[];
+    projects: Project[];
+    tasks: Task[];
+    task_subtasks: TaskSubtask[];
+    task_templates: TaskTemplate[];
+  };
 }
 
 /** Kanban column definition */

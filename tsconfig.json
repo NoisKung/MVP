@@ -23,9 +23,10 @@
     /* Path Alias */
     "baseUrl": ".",
     "paths": {
-      "@/*": ["./src/*"]
-    }
+      "@/*": ["./src/*"],
+    },
   },
   "include": ["src"],
-  "references": [{ "path": "./tsconfig.node.json" }]
+  "exclude": ["src/**/*.test.ts", "src/**/*.test.tsx", "src/test/**", "e2e/**"],
+  "references": [{ "path": "./tsconfig.node.json" }],
 }

@@ -3,9 +3,14 @@ import type {
   AppSettingRecord,
   BackupImportResult,
   BackupPayload,
+  DeletedRecord,
   Task,
   Project,
   SessionRecord,
+  SyncCheckpoint,
+  SyncEntityType,
+  SyncOperation,
+  SyncOutboxRecord,
   TaskStatus,
   TaskPriority,
   TaskSubtask,
@@ -79,6 +84,15 @@ const TASK_CHANGELOG_ACTIONS: TaskChangelogAction[] = [
   "UPDATED",
   "STATUS_CHANGED",
 ];
+const SYNC_ENTITY_TYPES: SyncEntityType[] = [
+  "PROJECT",
+  "TASK",
+  "TASK_SUBTASK",
+  "TASK_TEMPLATE",
+  "SETTING",
+];
+const SYNC_OPERATIONS: SyncOperation[] = ["UPSERT", "DELETE"];
+const SYNC_SETTINGS_DEVICE_ID_KEY = "sync.device_id";
 
 /** Get or create the database connection singleton */
 async function getDb(): Promise<Database> {
@@ -106,7 +120,9 @@ async function initSchema(db: Database): Promise<void> {
       color TEXT,
       status TEXT NOT NULL DEFAULT 'ACTIVE' CHECK(status IN ('ACTIVE', 'COMPLETED', 'ARCHIVED')),
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      sync_version INTEGER NOT NULL DEFAULT 1,
+      updated_by_device TEXT
     )
   `);
 
@@ -130,6 +146,8 @@ async function initSchema(db: Database): Promise<void> {
       recurrence TEXT NOT NULL DEFAULT 'NONE' CHECK(recurrence IN ('NONE', 'DAILY', 'WEEKLY', 'MONTHLY')),
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      sync_version INTEGER NOT NULL DEFAULT 1,
+      updated_by_device TEXT,
       FOREIGN KEY(project_id) REFERENCES projects(id) ON DELETE SET NULL
     )
   `);
@@ -174,7 +192,9 @@ async function initSchema(db: Database): Promise<void> {
       remind_offset_minutes INTEGER,
       recurrence TEXT NOT NULL DEFAULT 'NONE' CHECK(recurrence IN ('NONE', 'DAILY', 'WEEKLY', 'MONTHLY')),
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      sync_version INTEGER NOT NULL DEFAULT 1,
+      updated_by_device TEXT
     )
   `);
 
@@ -191,6 +211,8 @@ async function initSchema(db: Database): Promise<void> {
       is_done BOOLEAN DEFAULT 0,
       created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
       updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      sync_version INTEGER NOT NULL DEFAULT 1,
+      updated_by_device TEXT,
       FOREIGN KEY(task_id) REFERENCES tasks(id) ON DELETE CASCADE
     )
   `);
@@ -200,8 +222,58 @@ async function initSchema(db: Database): Promise<void> {
     ON task_subtasks(task_id, created_at ASC)
   `);
 
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS sync_checkpoints (
+      id INTEGER PRIMARY KEY CHECK(id = 1),
+      last_sync_cursor TEXT,
+      last_synced_at DATETIME,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS sync_outbox (
+      id TEXT PRIMARY KEY,
+      entity_type TEXT NOT NULL CHECK(entity_type IN ('PROJECT', 'TASK', 'TASK_SUBTASK', 'TASK_TEMPLATE', 'SETTING')),
+      entity_id TEXT NOT NULL,
+      operation TEXT NOT NULL CHECK(operation IN ('UPSERT', 'DELETE')),
+      payload_json TEXT,
+      idempotency_key TEXT NOT NULL UNIQUE,
+      attempts INTEGER NOT NULL DEFAULT 0,
+      last_error TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  await db.execute(`
+    CREATE INDEX IF NOT EXISTS idx_sync_outbox_created_at
+    ON sync_outbox(created_at ASC)
+  `);
+
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS deleted_records (
+      id TEXT PRIMARY KEY,
+      entity_type TEXT NOT NULL CHECK(entity_type IN ('PROJECT', 'TASK', 'TASK_SUBTASK', 'TASK_TEMPLATE', 'SETTING')),
+      entity_id TEXT NOT NULL,
+      deleted_at DATETIME NOT NULL,
+      deleted_by_device TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      UNIQUE(entity_type, entity_id)
+    )
+  `);
+
+  await db.execute(`
+    CREATE INDEX IF NOT EXISTS idx_deleted_records_deleted_at
+    ON deleted_records(deleted_at DESC)
+  `);
+
+  await ensureProjectColumns(db);
   await ensureTaskColumns(db);
   await ensureTaskTemplateColumns(db);
+  await ensureTaskSubtaskColumns(db);
+  await ensureSyncTablesReady(db);
   await db.execute(`
     CREATE INDEX IF NOT EXISTS idx_tasks_due_at
     ON tasks(due_at)
@@ -214,6 +286,23 @@ async function initSchema(db: Database): Promise<void> {
 
 interface SQLiteTableInfoRow {
   name: string;
+}
+
+async function ensureProjectColumns(db: Database): Promise<void> {
+  const tableInfo = await db.select<SQLiteTableInfoRow[]>(
+    "PRAGMA table_info(projects)",
+  );
+  const existingColumns = new Set(tableInfo.map((column) => column.name));
+
+  if (!existingColumns.has("sync_version")) {
+    await db.execute(
+      "ALTER TABLE projects ADD COLUMN sync_version INTEGER NOT NULL DEFAULT 1",
+    );
+  }
+
+  if (!existingColumns.has("updated_by_device")) {
+    await db.execute("ALTER TABLE projects ADD COLUMN updated_by_device TEXT");
+  }
 }
 
 async function ensureTaskColumns(db: Database): Promise<void> {
@@ -243,6 +332,16 @@ async function ensureTaskColumns(db: Database): Promise<void> {
   if (!existingColumns.has("notes_markdown")) {
     await db.execute("ALTER TABLE tasks ADD COLUMN notes_markdown TEXT");
   }
+
+  if (!existingColumns.has("sync_version")) {
+    await db.execute(
+      "ALTER TABLE tasks ADD COLUMN sync_version INTEGER NOT NULL DEFAULT 1",
+    );
+  }
+
+  if (!existingColumns.has("updated_by_device")) {
+    await db.execute("ALTER TABLE tasks ADD COLUMN updated_by_device TEXT");
+  }
 }
 
 async function ensureTaskTemplateColumns(db: Database): Promise<void> {
@@ -262,6 +361,49 @@ async function ensureTaskTemplateColumns(db: Database): Promise<void> {
       "ALTER TABLE task_templates ADD COLUMN remind_offset_minutes INTEGER",
     );
   }
+
+  if (!existingColumns.has("sync_version")) {
+    await db.execute(
+      "ALTER TABLE task_templates ADD COLUMN sync_version INTEGER NOT NULL DEFAULT 1",
+    );
+  }
+
+  if (!existingColumns.has("updated_by_device")) {
+    await db.execute(
+      "ALTER TABLE task_templates ADD COLUMN updated_by_device TEXT",
+    );
+  }
+}
+
+async function ensureTaskSubtaskColumns(db: Database): Promise<void> {
+  const tableInfo = await db.select<SQLiteTableInfoRow[]>(
+    "PRAGMA table_info(task_subtasks)",
+  );
+  const existingColumns = new Set(tableInfo.map((column) => column.name));
+
+  if (!existingColumns.has("sync_version")) {
+    await db.execute(
+      "ALTER TABLE task_subtasks ADD COLUMN sync_version INTEGER NOT NULL DEFAULT 1",
+    );
+  }
+
+  if (!existingColumns.has("updated_by_device")) {
+    await db.execute(
+      "ALTER TABLE task_subtasks ADD COLUMN updated_by_device TEXT",
+    );
+  }
+}
+
+async function ensureSyncTablesReady(db: Database): Promise<void> {
+  await db.execute(
+    `INSERT OR IGNORE INTO sync_checkpoints (
+        id,
+        last_sync_cursor,
+        last_synced_at,
+        updated_at
+      )
+       VALUES (1, NULL, NULL, CURRENT_TIMESTAMP)`,
+  );
 }
 
 async function insertTaskChangelog(
@@ -501,6 +643,26 @@ function asTaskChangelogAction(value: unknown): TaskChangelogAction {
   return "UPDATED";
 }
 
+function asSyncEntityType(value: unknown): SyncEntityType {
+  if (
+    typeof value === "string" &&
+    SYNC_ENTITY_TYPES.includes(value as SyncEntityType)
+  ) {
+    return value as SyncEntityType;
+  }
+  throw new Error("Unsupported sync entity type.");
+}
+
+function asSyncOperation(value: unknown): SyncOperation {
+  if (
+    typeof value === "string" &&
+    SYNC_OPERATIONS.includes(value as SyncOperation)
+  ) {
+    return value as SyncOperation;
+  }
+  throw new Error("Unsupported sync operation.");
+}
+
 async function assertProjectExists(
   db: Database,
   projectId: string | null | undefined,
@@ -542,6 +704,227 @@ async function insertTaskSubtask(
       nowIso,
       nowIso,
     ],
+  );
+}
+
+export async function getOrCreateDeviceId(): Promise<string> {
+  const db = await getDb();
+  const rows = await db.select<AppSettingRecord[]>(
+    "SELECT key, value FROM settings WHERE key = $1 LIMIT 1",
+    [SYNC_SETTINGS_DEVICE_ID_KEY],
+  );
+  const existingDeviceId = rows[0]?.value?.trim() ?? "";
+  if (existingDeviceId) {
+    return existingDeviceId;
+  }
+
+  const generatedDeviceId = uuidv4();
+  await db.execute(
+    `INSERT INTO settings (key, value)
+         VALUES ($1, $2)
+    ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+    [SYNC_SETTINGS_DEVICE_ID_KEY, generatedDeviceId],
+  );
+  return generatedDeviceId;
+}
+
+export async function getSyncCheckpoint(): Promise<SyncCheckpoint> {
+  const db = await getDb();
+  const rows = await db.select<SyncCheckpoint[]>(
+    `SELECT
+        id,
+        last_sync_cursor,
+        last_synced_at,
+        updated_at
+       FROM sync_checkpoints
+      WHERE id = 1
+      LIMIT 1`,
+  );
+  if (rows[0]) return rows[0];
+
+  await ensureSyncTablesReady(db);
+  const fallbackRows = await db.select<SyncCheckpoint[]>(
+    `SELECT
+        id,
+        last_sync_cursor,
+        last_synced_at,
+        updated_at
+       FROM sync_checkpoints
+      WHERE id = 1
+      LIMIT 1`,
+  );
+  return (
+    fallbackRows[0] ?? {
+      id: 1,
+      last_sync_cursor: null,
+      last_synced_at: null,
+      updated_at: new Date().toISOString(),
+    }
+  );
+}
+
+export async function setSyncCheckpoint(
+  cursor: string | null,
+  syncedAt = new Date().toISOString(),
+): Promise<void> {
+  const db = await getDb();
+  await ensureSyncTablesReady(db);
+  await db.execute(
+    `UPDATE sync_checkpoints
+        SET last_sync_cursor = $1,
+            last_synced_at = $2,
+            updated_at = $2
+      WHERE id = 1`,
+    [cursor, syncedAt],
+  );
+}
+
+export async function enqueueSyncOutboxChange(input: {
+  entity_type: SyncEntityType;
+  entity_id: string;
+  operation: SyncOperation;
+  payload?: Record<string, unknown> | null;
+  idempotency_key?: string;
+  created_at?: string;
+}): Promise<SyncOutboxRecord> {
+  const db = await getDb();
+  const nowIso = input.created_at ?? new Date().toISOString();
+  const outboxId = uuidv4();
+  const idempotencyKey = input.idempotency_key?.trim() || uuidv4();
+
+  await db.execute(
+    `INSERT INTO sync_outbox (
+        id,
+        entity_type,
+        entity_id,
+        operation,
+        payload_json,
+        idempotency_key,
+        attempts,
+        last_error,
+        created_at,
+        updated_at
+      )
+       VALUES ($1, $2, $3, $4, $5, $6, 0, NULL, $7, $7)`,
+    [
+      outboxId,
+      asSyncEntityType(input.entity_type),
+      input.entity_id,
+      asSyncOperation(input.operation),
+      input.payload ? JSON.stringify(input.payload) : null,
+      idempotencyKey,
+      nowIso,
+    ],
+  );
+
+  const rows = await db.select<SyncOutboxRecord[]>(
+    "SELECT * FROM sync_outbox WHERE id = $1 LIMIT 1",
+    [outboxId],
+  );
+  return rows[0];
+}
+
+export async function listSyncOutboxChanges(
+  limit = 200,
+): Promise<SyncOutboxRecord[]> {
+  const db = await getDb();
+  const normalizedLimit = Math.max(1, Math.min(1000, Math.trunc(limit)));
+  return db.select<SyncOutboxRecord[]>(
+    `SELECT *
+       FROM sync_outbox
+      ORDER BY created_at ASC, id ASC
+      LIMIT $1`,
+    [normalizedLimit],
+  );
+}
+
+export async function markSyncOutboxChangeFailed(
+  id: string,
+  error: string,
+): Promise<void> {
+  const db = await getDb();
+  await db.execute(
+    `UPDATE sync_outbox
+        SET attempts = attempts + 1,
+            last_error = $1,
+            updated_at = $2
+      WHERE id = $3`,
+    [error, new Date().toISOString(), id],
+  );
+}
+
+export async function removeSyncOutboxChanges(ids: string[]): Promise<void> {
+  const db = await getDb();
+  const normalizedIds = Array.from(
+    new Set(ids.map((id) => id.trim()).filter(Boolean)),
+  );
+  if (normalizedIds.length === 0) return;
+
+  const placeholders = normalizedIds
+    .map((_, index) => `$${index + 1}`)
+    .join(", ");
+  await db.execute(
+    `DELETE FROM sync_outbox
+      WHERE id IN (${placeholders})`,
+    normalizedIds,
+  );
+}
+
+export async function upsertDeletedRecord(input: {
+  entity_type: SyncEntityType;
+  entity_id: string;
+  deleted_by_device?: string | null;
+  deleted_at?: string;
+}): Promise<DeletedRecord> {
+  const db = await getDb();
+  const recordId = uuidv4();
+  const deletedAt = input.deleted_at ?? new Date().toISOString();
+
+  await db.execute(
+    `INSERT INTO deleted_records (
+        id,
+        entity_type,
+        entity_id,
+        deleted_at,
+        deleted_by_device,
+        created_at,
+        updated_at
+      )
+       VALUES ($1, $2, $3, $4, $5, $4, $4)
+    ON CONFLICT(entity_type, entity_id) DO UPDATE SET
+      deleted_at = excluded.deleted_at,
+      deleted_by_device = excluded.deleted_by_device,
+      updated_at = excluded.updated_at`,
+    [
+      recordId,
+      asSyncEntityType(input.entity_type),
+      input.entity_id,
+      deletedAt,
+      input.deleted_by_device ?? null,
+    ],
+  );
+
+  const rows = await db.select<DeletedRecord[]>(
+    `SELECT *
+       FROM deleted_records
+      WHERE entity_type = $1 AND entity_id = $2
+      LIMIT 1`,
+    [input.entity_type, input.entity_id],
+  );
+  return rows[0];
+}
+
+export async function listDeletedRecords(
+  limit = 200,
+): Promise<DeletedRecord[]> {
+  const db = await getDb();
+  const normalizedLimit = Math.max(1, Math.min(1000, Math.trunc(limit)));
+  return db.select<DeletedRecord[]>(
+    `SELECT *
+       FROM deleted_records
+      ORDER BY deleted_at DESC, id DESC
+      LIMIT $1`,
+    [normalizedLimit],
   );
 }
 
