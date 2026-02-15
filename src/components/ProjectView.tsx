@@ -8,7 +8,15 @@ import {
   useUpdateProject,
 } from "@/hooks/use-tasks";
 import { TaskCard } from "./TaskCard";
-import { FolderKanban, Plus, Pencil, Trash2, CheckCircle2 } from "lucide-react";
+import {
+  FolderKanban,
+  Plus,
+  Pencil,
+  Trash2,
+  CheckCircle2,
+  Check,
+  X,
+} from "lucide-react";
 
 interface ProjectViewProps {
   tasks: Task[];
@@ -35,6 +43,7 @@ const STATUS_SECTIONS: Array<{ status: TaskStatus; label: string }> = [
   { status: "DOING", label: "In Progress" },
   { status: "DONE", label: "Done" },
 ];
+const DEFAULT_PROJECT_COLOR = "#3B82F6";
 
 function getErrorMessage(error: unknown): string {
   if (error instanceof Error && error.message.trim()) {
@@ -87,6 +96,12 @@ function sortProjectTasks(tasks: Task[]): Task[] {
   });
 }
 
+function normalizeProjectColor(colorValue: string): string | null {
+  const trimmedColor = colorValue.trim();
+  if (!trimmedColor) return null;
+  return /^#[0-9a-fA-F]{6}$/.test(trimmedColor) ? trimmedColor : null;
+}
+
 export function ProjectView({
   tasks,
   projectNameById,
@@ -111,6 +126,14 @@ export function ProjectView({
     null,
   );
   const [actionError, setActionError] = useState<string | null>(null);
+  const [isCreateFormOpen, setIsCreateFormOpen] = useState(false);
+  const [createName, setCreateName] = useState("");
+  const [createDescription, setCreateDescription] = useState("");
+  const [createColor, setCreateColor] = useState(DEFAULT_PROJECT_COLOR);
+  const [isEditingDetails, setIsEditingDetails] = useState(false);
+  const [editName, setEditName] = useState("");
+  const [editDescription, setEditDescription] = useState("");
+  const [editColor, setEditColor] = useState(DEFAULT_PROJECT_COLOR);
 
   useEffect(() => {
     if (projects.length === 0) {
@@ -148,6 +171,19 @@ export function ProjectView({
 
   const selectedProject =
     projects.find((project) => project.id === selectedProjectId) ?? null;
+
+  useEffect(() => {
+    if (!selectedProject) {
+      setIsEditingDetails(false);
+      return;
+    }
+
+    setEditName(selectedProject.name);
+    setEditDescription(selectedProject.description ?? "");
+    setEditColor(selectedProject.color ?? DEFAULT_PROJECT_COLOR);
+    setIsEditingDetails(false);
+  }, [selectedProject]);
+
   const selectedProjectTasks = useMemo(() => {
     if (!selectedProject) return [] as Task[];
     return sortProjectTasks(
@@ -179,35 +215,69 @@ export function ProjectView({
     : getProjectMetrics([]);
 
   const handleCreateProject = async () => {
-    const inputName = window.prompt("Project name");
-    if (!inputName) return;
-
-    const normalizedName = inputName.trim();
-    if (!normalizedName) return;
+    const normalizedName = createName.trim();
+    if (!normalizedName) {
+      setActionError("Project name is required.");
+      return;
+    }
+    const normalizedDescription = createDescription.trim() || null;
+    const normalizedColor = normalizeProjectColor(createColor);
 
     setActionError(null);
     try {
-      const project = await createProject.mutateAsync({ name: normalizedName });
+      const project = await createProject.mutateAsync({
+        name: normalizedName,
+        description: normalizedDescription,
+        color: normalizedColor,
+      });
       setSelectedProjectId(project.id);
+      setIsCreateFormOpen(false);
+      setCreateName("");
+      setCreateDescription("");
+      setCreateColor(DEFAULT_PROJECT_COLOR);
     } catch (error) {
       setActionError(getErrorMessage(error));
     }
   };
 
-  const handleRenameSelectedProject = async () => {
+  const handleStartEditingSelectedProject = () => {
     if (!selectedProject) return;
-    const inputName = window.prompt("Rename project", selectedProject.name);
-    if (!inputName) return;
+    setEditName(selectedProject.name);
+    setEditDescription(selectedProject.description ?? "");
+    setEditColor(selectedProject.color ?? DEFAULT_PROJECT_COLOR);
+    setIsEditingDetails(true);
+    setActionError(null);
+  };
 
-    const normalizedName = inputName.trim();
-    if (!normalizedName) return;
+  const handleCancelEditingSelectedProject = () => {
+    if (selectedProject) {
+      setEditName(selectedProject.name);
+      setEditDescription(selectedProject.description ?? "");
+      setEditColor(selectedProject.color ?? DEFAULT_PROJECT_COLOR);
+    }
+    setIsEditingDetails(false);
+    setActionError(null);
+  };
+
+  const handleSaveSelectedProjectDetails = async () => {
+    if (!selectedProject) return;
+    const normalizedName = editName.trim();
+    if (!normalizedName) {
+      setActionError("Project name is required.");
+      return;
+    }
+    const normalizedDescription = editDescription.trim() || null;
+    const normalizedColor = normalizeProjectColor(editColor);
 
     setActionError(null);
     try {
       await updateProject.mutateAsync({
         id: selectedProject.id,
         name: normalizedName,
+        description: normalizedDescription,
+        color: normalizedColor,
       });
+      setIsEditingDetails(false);
     } catch (error) {
       setActionError(getErrorMessage(error));
     }
@@ -269,14 +339,57 @@ export function ProjectView({
         <FolderKanban size={30} />
         <h2>No projects yet</h2>
         <p>Create your first project to group tasks and track progress.</p>
-        <button
-          className="project-primary-btn"
-          onClick={() => void handleCreateProject()}
-          disabled={createProject.isPending}
-        >
-          <Plus size={14} />
-          {createProject.isPending ? "Creating..." : "Create Project"}
-        </button>
+        <div className="project-editor-card project-empty-editor">
+          <div className="project-editor-grid">
+            <label className="project-editor-field">
+              <span>Name</span>
+              <input
+                className="project-editor-input"
+                value={createName}
+                onChange={(event) => setCreateName(event.target.value)}
+                placeholder="Project name"
+                autoFocus
+              />
+            </label>
+            <label className="project-editor-field">
+              <span>Color</span>
+              <div className="project-color-input-row">
+                <input
+                  type="color"
+                  className="project-color-input"
+                  value={createColor}
+                  onChange={(event) => setCreateColor(event.target.value)}
+                />
+                <input
+                  className="project-editor-input"
+                  value={createColor}
+                  onChange={(event) => setCreateColor(event.target.value)}
+                  placeholder="#3B82F6"
+                />
+              </div>
+            </label>
+          </div>
+          <label className="project-editor-field">
+            <span>Description</span>
+            <textarea
+              className="project-editor-textarea"
+              value={createDescription}
+              onChange={(event) => setCreateDescription(event.target.value)}
+              placeholder="What is this project for?"
+              rows={2}
+            />
+          </label>
+          <div className="project-editor-actions">
+            <button
+              className="project-primary-btn"
+              onClick={() => void handleCreateProject()}
+              disabled={!createName.trim() || createProject.isPending}
+            >
+              <Plus size={14} />
+              {createProject.isPending ? "Creating..." : "Create Project"}
+            </button>
+          </div>
+        </div>
       </div>
     );
   }
@@ -292,15 +405,93 @@ export function ProjectView({
         </div>
         <button
           className="project-primary-btn"
-          onClick={() => void handleCreateProject()}
-          disabled={createProject.isPending}
+          onClick={() => {
+            setIsCreateFormOpen((prevState) => {
+              const nextState = !prevState;
+              if (nextState) {
+                setCreateName("");
+                setCreateDescription("");
+                setCreateColor(DEFAULT_PROJECT_COLOR);
+              }
+              return nextState;
+            });
+            setActionError(null);
+          }}
+          disabled={createProject.isPending || updateProject.isPending}
         >
           <Plus size={14} />
-          {createProject.isPending ? "Creating..." : "New Project"}
+          {isCreateFormOpen ? "Close" : "New Project"}
         </button>
       </div>
 
       {actionError && <p className="project-action-error">{actionError}</p>}
+
+      {isCreateFormOpen && (
+        <div className="project-editor-card">
+          <div className="project-editor-grid">
+            <label className="project-editor-field">
+              <span>Name</span>
+              <input
+                className="project-editor-input"
+                value={createName}
+                onChange={(event) => setCreateName(event.target.value)}
+                placeholder="Project name"
+                autoFocus
+              />
+            </label>
+            <label className="project-editor-field">
+              <span>Color</span>
+              <div className="project-color-input-row">
+                <input
+                  type="color"
+                  className="project-color-input"
+                  value={createColor}
+                  onChange={(event) => setCreateColor(event.target.value)}
+                />
+                <input
+                  className="project-editor-input"
+                  value={createColor}
+                  onChange={(event) => setCreateColor(event.target.value)}
+                  placeholder="#3B82F6"
+                />
+              </div>
+            </label>
+          </div>
+          <label className="project-editor-field">
+            <span>Description</span>
+            <textarea
+              className="project-editor-textarea"
+              value={createDescription}
+              onChange={(event) => setCreateDescription(event.target.value)}
+              placeholder="What is this project for?"
+              rows={2}
+            />
+          </label>
+          <div className="project-editor-actions">
+            <button
+              type="button"
+              className="project-ghost-btn"
+              onClick={() => {
+                setIsCreateFormOpen(false);
+                setActionError(null);
+              }}
+              disabled={createProject.isPending}
+            >
+              <X size={12} />
+              Cancel
+            </button>
+            <button
+              type="button"
+              className="project-primary-btn"
+              onClick={() => void handleCreateProject()}
+              disabled={!createName.trim() || createProject.isPending}
+            >
+              <Check size={12} />
+              {createProject.isPending ? "Creating..." : "Create"}
+            </button>
+          </div>
+        </div>
+      )}
 
       <div className="project-view-layout">
         <aside className="project-list-panel">
@@ -317,7 +508,15 @@ export function ProjectView({
                   onClick={() => setSelectedProjectId(project.id)}
                 >
                   <div className="project-list-top">
-                    <span className="project-list-name">{project.name}</span>
+                    <span className="project-list-name-wrap">
+                      <span
+                        className="project-color-dot"
+                        style={{
+                          background: project.color ?? DEFAULT_PROJECT_COLOR,
+                        }}
+                      />
+                      <span className="project-list-name">{project.name}</span>
+                    </span>
                     <span
                       className={`project-status-badge${project.status === "COMPLETED" ? " completed" : ""}`}
                     >
@@ -346,25 +545,107 @@ export function ProjectView({
           {selectedProject ? (
             <>
               <div className="project-detail-header">
-                <div>
-                  <h2>{selectedProject.name}</h2>
-                  <p>{selectedProjectTasks.length} task(s) in this project</p>
+                <div className="project-detail-title-wrap">
+                  {isEditingDetails ? (
+                    <div className="project-editor-card">
+                      <div className="project-editor-grid">
+                        <label className="project-editor-field">
+                          <span>Name</span>
+                          <input
+                            className="project-editor-input"
+                            value={editName}
+                            onChange={(event) =>
+                              setEditName(event.target.value)
+                            }
+                            placeholder="Project name"
+                          />
+                        </label>
+                        <label className="project-editor-field">
+                          <span>Color</span>
+                          <div className="project-color-input-row">
+                            <input
+                              type="color"
+                              className="project-color-input"
+                              value={editColor}
+                              onChange={(event) =>
+                                setEditColor(event.target.value)
+                              }
+                            />
+                            <input
+                              className="project-editor-input"
+                              value={editColor}
+                              onChange={(event) =>
+                                setEditColor(event.target.value)
+                              }
+                              placeholder="#3B82F6"
+                            />
+                          </div>
+                        </label>
+                      </div>
+                      <label className="project-editor-field">
+                        <span>Description</span>
+                        <textarea
+                          className="project-editor-textarea"
+                          value={editDescription}
+                          onChange={(event) =>
+                            setEditDescription(event.target.value)
+                          }
+                          placeholder="What is this project for?"
+                          rows={2}
+                        />
+                      </label>
+                      <div className="project-editor-actions">
+                        <button
+                          type="button"
+                          className="project-ghost-btn"
+                          onClick={handleCancelEditingSelectedProject}
+                          disabled={updateProject.isPending}
+                        >
+                          <X size={12} />
+                          Cancel
+                        </button>
+                        <button
+                          type="button"
+                          className="project-primary-btn"
+                          onClick={() =>
+                            void handleSaveSelectedProjectDetails()
+                          }
+                          disabled={!editName.trim() || updateProject.isPending}
+                        >
+                          <Check size={12} />
+                          {updateProject.isPending ? "Saving..." : "Save"}
+                        </button>
+                      </div>
+                    </div>
+                  ) : (
+                    <>
+                      <h2>{selectedProject.name}</h2>
+                      <p>
+                        {selectedProjectTasks.length} task(s) in this project
+                      </p>
+                      {selectedProject.description && (
+                        <p className="project-detail-description">
+                          {selectedProject.description}
+                        </p>
+                      )}
+                    </>
+                  )}
                 </div>
                 <div className="project-detail-actions">
                   <button
                     type="button"
                     className="project-ghost-btn"
-                    onClick={() => void handleRenameSelectedProject()}
-                    disabled={updateProject.isPending}
+                    onClick={handleStartEditingSelectedProject}
+                    disabled={updateProject.isPending || isEditingDetails}
                   >
                     <Pencil size={12} />
-                    Rename
+                    {isEditingDetails ? "Editing..." : "Edit"}
                   </button>
                   <button
                     type="button"
                     className="project-ghost-btn"
                     onClick={() => void handleToggleProjectCompleted()}
-                    disabled={updateProject.isPending}
+                    disabled={updateProject.isPending || isEditingDetails}
                   >
                     <CheckCircle2 size={12} />
                     {selectedProject.status === "COMPLETED"
@@ -375,7 +656,7 @@ export function ProjectView({
                     type="button"
                     className="project-ghost-btn danger"
                     onClick={() => void handleDeleteSelectedProject()}
-                    disabled={deleteProject.isPending}
+                    disabled={deleteProject.isPending || isEditingDetails}
                   >
                     <Trash2 size={12} />
                     Delete
@@ -383,6 +664,7 @@ export function ProjectView({
                   <button
                     className="project-primary-btn"
                     onClick={() => onCreateClick(selectedProject.id)}
+                    disabled={isEditingDetails}
                   >
                     <Plus size={14} />
                     New Task
@@ -511,6 +793,80 @@ export function ProjectView({
           font-size: 12px;
           padding: 8px 10px;
         }
+        .project-editor-card {
+          border: 1px solid var(--border-default);
+          border-radius: var(--radius-md);
+          background: var(--bg-surface);
+          padding: 10px;
+          display: flex;
+          flex-direction: column;
+          gap: 8px;
+        }
+        .project-empty-editor {
+          width: min(560px, 100%);
+          margin-top: 8px;
+          text-align: left;
+        }
+        .project-editor-grid {
+          display: grid;
+          grid-template-columns: 1fr auto;
+          gap: 8px;
+        }
+        .project-editor-field {
+          display: flex;
+          flex-direction: column;
+          gap: 4px;
+        }
+        .project-editor-field span {
+          font-size: 11px;
+          font-weight: 600;
+          color: var(--text-muted);
+        }
+        .project-editor-input,
+        .project-editor-textarea {
+          width: 100%;
+          border: 1px solid var(--border-default);
+          border-radius: var(--radius-sm);
+          background: var(--bg-elevated);
+          color: var(--text-primary);
+          font-size: 12px;
+          font-family: inherit;
+          outline: none;
+          transition: border-color var(--duration) var(--ease);
+        }
+        .project-editor-input {
+          height: 32px;
+          padding: 0 10px;
+        }
+        .project-editor-textarea {
+          padding: 8px 10px;
+          min-height: 64px;
+          resize: vertical;
+          line-height: 1.45;
+        }
+        .project-editor-input:focus,
+        .project-editor-textarea:focus {
+          border-color: var(--border-focus);
+        }
+        .project-color-input-row {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+        }
+        .project-color-input {
+          width: 34px;
+          height: 32px;
+          border: 1px solid var(--border-default);
+          border-radius: var(--radius-sm);
+          background: var(--bg-elevated);
+          cursor: pointer;
+          padding: 2px;
+        }
+        .project-editor-actions {
+          display: flex;
+          justify-content: flex-end;
+          gap: 8px;
+        }
         .project-view-layout {
           flex: 1;
           min-height: 0;
@@ -563,10 +919,27 @@ export function ProjectView({
           justify-content: space-between;
           gap: 8px;
         }
+        .project-list-name-wrap {
+          display: inline-flex;
+          align-items: center;
+          gap: 8px;
+          min-width: 0;
+        }
+        .project-color-dot {
+          width: 10px;
+          height: 10px;
+          border-radius: 9999px;
+          flex-shrink: 0;
+          border: 1px solid rgba(255, 255, 255, 0.24);
+          box-shadow: 0 0 0 1px rgba(0, 0, 0, 0.22) inset;
+        }
         .project-list-name {
           font-size: 13px;
           font-weight: 600;
           color: var(--text-primary);
+          white-space: nowrap;
+          overflow: hidden;
+          text-overflow: ellipsis;
         }
         .project-status-badge {
           font-size: 10px;
@@ -610,6 +983,10 @@ export function ProjectView({
           justify-content: space-between;
           gap: 12px;
         }
+        .project-detail-title-wrap {
+          flex: 1;
+          min-width: 0;
+        }
         .project-detail-header h2 {
           font-size: 17px;
           font-weight: 700;
@@ -619,6 +996,14 @@ export function ProjectView({
           margin-top: 2px;
           font-size: 12px;
           color: var(--text-muted);
+        }
+        .project-detail-description {
+          margin-top: 6px;
+          font-size: 12px;
+          color: var(--text-secondary);
+          line-height: 1.5;
+          white-space: pre-wrap;
+          word-break: break-word;
         }
         .project-detail-actions {
           display: flex;
@@ -787,6 +1172,9 @@ export function ProjectView({
           }
           .project-list {
             max-height: 200px;
+          }
+          .project-editor-grid {
+            grid-template-columns: 1fr;
           }
         }
         @media (max-width: 640px) {
