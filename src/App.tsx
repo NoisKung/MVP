@@ -7,6 +7,7 @@ import { QuickCapture } from "./components/QuickCapture";
 import { Dashboard } from "./components/Dashboard";
 import { TaskScheduleView } from "./components/TaskScheduleView";
 import { ProjectView } from "./components/ProjectView";
+import { CalendarView } from "./components/CalendarView";
 import { ReminderSettings } from "./components/ReminderSettings";
 import { TaskFiltersBar } from "./components/TaskFiltersBar";
 import {
@@ -404,6 +405,81 @@ function AppContent() {
       onDelete={handleDelete}
       onCreateClick={openCreateModal}
     />
+  ) : activeView === "calendar" ? (
+    isLoadingAllTasks ? (
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          height: "100%",
+          color: "var(--text-muted)",
+        }}
+      >
+        <div
+          style={{
+            width: 32,
+            height: 32,
+            border: "3px solid var(--border-default)",
+            borderTopColor: "var(--accent)",
+            borderRadius: "50%",
+            animation: "spin 0.8s linear infinite",
+          }}
+        />
+      </div>
+    ) : isAllTasksError ? (
+      <div
+        style={{
+          margin: 24,
+          padding: "16px 18px",
+          border: "1px solid var(--danger)",
+          borderRadius: 10,
+          background: "var(--danger-subtle)",
+        }}
+      >
+        <h2
+          style={{
+            fontSize: 16,
+            marginBottom: 6,
+            color: "var(--text-primary)",
+          }}
+        >
+          Failed to load calendar
+        </h2>
+        <p
+          style={{
+            fontSize: 13,
+            marginBottom: 12,
+            color: "var(--text-secondary)",
+          }}
+        >
+          {getErrorMessage(allTasksError)}
+        </p>
+        <button
+          style={{
+            padding: "7px 12px",
+            border: "1px solid var(--border-strong)",
+            borderRadius: 8,
+            background: "var(--bg-elevated)",
+            color: "var(--text-primary)",
+            fontSize: 12,
+            cursor: "pointer",
+          }}
+          onClick={() => void refetchAllTasks()}
+        >
+          Retry
+        </button>
+      </div>
+    ) : (
+      <CalendarView
+        tasks={allTasks}
+        projectNameById={projectNameById}
+        onEdit={handleEditTask}
+        onStatusChange={handleStatusChange}
+        onDelete={handleDelete}
+        onCreateClick={() => openCreateModal(null)}
+      />
+    )
   ) : activeView === "settings" ? (
     <ReminderSettings
       remindersEnabled={remindersEnabled}

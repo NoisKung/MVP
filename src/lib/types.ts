@@ -227,6 +227,7 @@ export interface SavedTaskView {
 export type ViewMode =
   | "board"
   | "projects"
+  | "calendar"
   | "today"
   | "upcoming"
   | "dashboard"

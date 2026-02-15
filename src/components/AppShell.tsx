@@ -6,6 +6,7 @@ import {
   LayoutDashboard,
   FolderKanban,
   KanbanSquare,
+  CalendarRange,
   CalendarCheck2,
   CalendarDays,
   Settings2,
@@ -26,6 +27,7 @@ interface NavItem {
 const NAV_ITEMS: NavItem[] = [
   { view: "board", label: "Board", icon: <KanbanSquare size={18} /> },
   { view: "projects", label: "Projects", icon: <FolderKanban size={18} /> },
+  { view: "calendar", label: "Calendar", icon: <CalendarRange size={18} /> },
   { view: "today", label: "Today", icon: <CalendarCheck2 size={18} /> },
   { view: "upcoming", label: "Upcoming", icon: <CalendarDays size={18} /> },
   {
