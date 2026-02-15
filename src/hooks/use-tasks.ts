@@ -6,16 +6,24 @@ import {
   createTask,
   updateTask,
   deleteTask,
+  getTaskTemplates,
+  upsertTaskTemplate,
+  deleteTaskTemplate,
   getTaskDashboardStats,
   getTaskChangelogs,
 } from "@/lib/database";
-import type { CreateTaskInput, UpdateTaskInput } from "@/lib/types";
+import type {
+  CreateTaskInput,
+  UpdateTaskInput,
+  UpsertTaskTemplateInput,
+} from "@/lib/types";
 
 const TASKS_KEY = ["tasks"] as const;
 const TODAY_TASKS_KEY = ["tasks", "today"] as const;
 const UPCOMING_TASKS_KEY = ["tasks", "upcoming"] as const;
 const STATS_KEY = ["task-stats"] as const;
 const CHANGELOGS_KEY = ["task-changelogs"] as const;
+const TASK_TEMPLATES_KEY = ["task-templates"] as const;
 
 /** Fetch all tasks */
 export function useTasks() {
@@ -102,6 +110,39 @@ export function useDeleteTask() {
       queryClient.invalidateQueries({ queryKey: UPCOMING_TASKS_KEY });
       queryClient.invalidateQueries({ queryKey: STATS_KEY });
       queryClient.invalidateQueries({ queryKey: CHANGELOGS_KEY });
+    },
+  });
+}
+
+/** Fetch reusable task templates */
+export function useTaskTemplates(enabled = true) {
+  return useQuery({
+    queryKey: TASK_TEMPLATES_KEY,
+    queryFn: getTaskTemplates,
+    enabled,
+  });
+}
+
+/** Create or update a task template */
+export function useUpsertTaskTemplate() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (input: UpsertTaskTemplateInput) => upsertTaskTemplate(input),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: TASK_TEMPLATES_KEY });
+    },
+  });
+}
+
+/** Delete a task template */
+export function useDeleteTaskTemplate() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (id: string) => deleteTaskTemplate(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: TASK_TEMPLATES_KEY });
     },
   });
 }

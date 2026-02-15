@@ -5,7 +5,9 @@ import type {
   TaskChangelogAction,
   TaskRecurrence,
   TaskDashboardStats,
+  TaskTemplate,
   CreateTaskInput,
+  UpsertTaskTemplateInput,
   UpdateTaskInput,
 } from "./types";
 import { v4 as uuidv4 } from "uuid";
@@ -94,7 +96,29 @@ async function initSchema(db: Database): Promise<void> {
     ON task_changelogs(task_id, created_at DESC)
   `);
 
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS task_templates (
+      id TEXT PRIMARY KEY,
+      name TEXT NOT NULL UNIQUE,
+      title_template TEXT,
+      description TEXT,
+      priority TEXT NOT NULL CHECK(priority IN ('URGENT', 'NORMAL', 'LOW')),
+      is_important BOOLEAN DEFAULT 0,
+      due_offset_minutes INTEGER,
+      remind_offset_minutes INTEGER,
+      recurrence TEXT NOT NULL DEFAULT 'NONE' CHECK(recurrence IN ('NONE', 'DAILY', 'WEEKLY', 'MONTHLY')),
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  await db.execute(`
+    CREATE INDEX IF NOT EXISTS idx_task_templates_updated_at
+    ON task_templates(updated_at DESC)
+  `);
+
   await ensureTaskColumns(db);
+  await ensureTaskTemplateColumns(db);
   await db.execute(`
     CREATE INDEX IF NOT EXISTS idx_tasks_due_at
     ON tasks(due_at)
@@ -122,6 +146,25 @@ async function ensureTaskColumns(db: Database): Promise<void> {
   if (!existingColumns.has("recurrence")) {
     await db.execute(
       "ALTER TABLE tasks ADD COLUMN recurrence TEXT NOT NULL DEFAULT 'NONE' CHECK(recurrence IN ('NONE', 'DAILY', 'WEEKLY', 'MONTHLY'))",
+    );
+  }
+}
+
+async function ensureTaskTemplateColumns(db: Database): Promise<void> {
+  const tableInfo = await db.select<SQLiteTableInfoRow[]>(
+    "PRAGMA table_info(task_templates)",
+  );
+  const existingColumns = new Set(tableInfo.map((column) => column.name));
+
+  if (!existingColumns.has("due_offset_minutes")) {
+    await db.execute(
+      "ALTER TABLE task_templates ADD COLUMN due_offset_minutes INTEGER",
+    );
+  }
+
+  if (!existingColumns.has("remind_offset_minutes")) {
+    await db.execute(
+      "ALTER TABLE task_templates ADD COLUMN remind_offset_minutes INTEGER",
     );
   }
 }
@@ -233,6 +276,15 @@ function shiftReminderWithDueDate(
 
   const offsetFromDue = remindDate.getTime() - dueDate.getTime();
   return new Date(nextDueDate.getTime() + offsetFromDue).toISOString();
+}
+
+function normalizeTemplateOffset(
+  offsetInMinutes: number | null,
+): number | null {
+  if (offsetInMinutes === null || Number.isNaN(offsetInMinutes)) {
+    return null;
+  }
+  return Math.max(0, Math.round(offsetInMinutes));
 }
 
 /** Fetch all non-archived tasks, newest first */
@@ -633,4 +685,133 @@ export async function getUpcomingTasks(
       return dueAt >= dayEnd && dueAt < rangeEnd;
     })
     .sort(compareByDueDateAscending);
+}
+
+/** Fetch task templates ordered by latest update */
+export async function getTaskTemplates(): Promise<TaskTemplate[]> {
+  const db = await getDb();
+  return db.select<TaskTemplate[]>(
+    `SELECT *
+       FROM task_templates
+      ORDER BY updated_at DESC, name COLLATE NOCASE ASC`,
+  );
+}
+
+/** Create or update a task template by id (or name when id is absent) */
+export async function upsertTaskTemplate(
+  input: UpsertTaskTemplateInput,
+): Promise<TaskTemplate> {
+  const db = await getDb();
+  const now = new Date().toISOString();
+  const normalizedName = input.name.trim();
+  if (!normalizedName) {
+    throw new Error("Template name is required.");
+  }
+
+  const normalizedDueOffset = normalizeTemplateOffset(
+    input.due_offset_minutes ?? null,
+  );
+  const normalizedRemindOffset = normalizeTemplateOffset(
+    input.remind_offset_minutes ?? null,
+  );
+  const normalizedRecurrence = input.recurrence ?? "NONE";
+
+  if (normalizedRecurrence !== "NONE" && normalizedDueOffset === null) {
+    throw new Error("Recurring templates require a due offset.");
+  }
+
+  if (
+    normalizedDueOffset !== null &&
+    normalizedRemindOffset !== null &&
+    normalizedRemindOffset > normalizedDueOffset
+  ) {
+    throw new Error("Reminder offset must be earlier than due offset.");
+  }
+
+  const existingByNameRows = await db.select<{ id: string }[]>(
+    "SELECT id FROM task_templates WHERE LOWER(name) = LOWER($1) LIMIT 1",
+    [normalizedName],
+  );
+  const existingByNameId = existingByNameRows[0]?.id ?? null;
+
+  if (input.id && existingByNameId && existingByNameId !== input.id) {
+    throw new Error("Template name already exists.");
+  }
+
+  const targetTemplateId = input.id ?? existingByNameId ?? uuidv4();
+  const existingByIdRows = await db.select<{ id: string }[]>(
+    "SELECT id FROM task_templates WHERE id = $1 LIMIT 1",
+    [targetTemplateId],
+  );
+  const hasExistingTemplate = existingByIdRows.length > 0;
+
+  if (hasExistingTemplate) {
+    await db.execute(
+      `UPDATE task_templates
+          SET name = $1,
+              title_template = $2,
+              description = $3,
+              priority = $4,
+              is_important = $5,
+              due_offset_minutes = $6,
+              remind_offset_minutes = $7,
+              recurrence = $8,
+              updated_at = $9
+        WHERE id = $10`,
+      [
+        normalizedName,
+        input.title_template?.trim() || null,
+        input.description?.trim() || null,
+        input.priority,
+        input.is_important ? 1 : 0,
+        normalizedDueOffset,
+        normalizedRemindOffset,
+        normalizedRecurrence,
+        now,
+        targetTemplateId,
+      ],
+    );
+  } else {
+    await db.execute(
+      `INSERT INTO task_templates (
+          id,
+          name,
+          title_template,
+          description,
+          priority,
+          is_important,
+          due_offset_minutes,
+          remind_offset_minutes,
+          recurrence,
+          created_at,
+          updated_at
+        )
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+      [
+        targetTemplateId,
+        normalizedName,
+        input.title_template?.trim() || null,
+        input.description?.trim() || null,
+        input.priority,
+        input.is_important ? 1 : 0,
+        normalizedDueOffset,
+        normalizedRemindOffset,
+        normalizedRecurrence,
+        now,
+        now,
+      ],
+    );
+  }
+
+  const rows = await db.select<TaskTemplate[]>(
+    "SELECT * FROM task_templates WHERE id = $1",
+    [targetTemplateId],
+  );
+  return rows[0];
+}
+
+/** Delete a task template by id */
+export async function deleteTaskTemplate(id: string): Promise<void> {
+  const db = await getDb();
+  await db.execute("DELETE FROM task_templates WHERE id = $1", [id]);
 }

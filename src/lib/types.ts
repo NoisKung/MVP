@@ -59,6 +59,34 @@ export interface UpdateTaskInput {
   recurrence?: TaskRecurrence;
 }
 
+/** A reusable preset for creating tasks quickly */
+export interface TaskTemplate {
+  id: string;
+  name: string;
+  title_template: string | null;
+  description: string | null;
+  priority: TaskPriority;
+  is_important: number; // SQLite stores booleans as 0/1
+  due_offset_minutes: number | null;
+  remind_offset_minutes: number | null;
+  recurrence: TaskRecurrence;
+  created_at: string;
+  updated_at: string;
+}
+
+/** Input for creating/updating a task template */
+export interface UpsertTaskTemplateInput {
+  id?: string;
+  name: string;
+  title_template?: string | null;
+  description?: string | null;
+  priority: TaskPriority;
+  is_important: boolean;
+  due_offset_minutes?: number | null;
+  remind_offset_minutes?: number | null;
+  recurrence?: TaskRecurrence;
+}
+
 /** A single changelog record for a task */
 export interface TaskChangelog {
   id: string;

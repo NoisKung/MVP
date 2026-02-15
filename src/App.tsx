@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { AppShell } from "./components/AppShell";
 import { TaskBoard } from "./components/TaskBoard";
 import { TaskForm } from "./components/TaskForm";
+import { QuickCapture } from "./components/QuickCapture";
 import { Dashboard } from "./components/Dashboard";
 import { TaskScheduleView } from "./components/TaskScheduleView";
 import { ReminderSettings } from "./components/ReminderSettings";
@@ -16,9 +17,15 @@ import {
   useDeleteTask,
 } from "./hooks/use-tasks";
 import { useReminderNotifications } from "./hooks/use-reminder-notifications";
+import { useQuickCaptureShortcut } from "./hooks/use-quick-capture-shortcut";
 import { useTaskFilters } from "./hooks/use-task-filters";
 import { useAppStore } from "./store/app-store";
-import type { CreateTaskInput, UpdateTaskInput, TaskStatus } from "./lib/types";
+import type {
+  CreateTaskInput,
+  UpdateTaskInput,
+  TaskStatus,
+  Task,
+} from "./lib/types";
 import {
   getRemindersEnabledPreference,
   setRemindersEnabledPreference,
@@ -104,14 +111,34 @@ function AppContent() {
     deleteSavedView,
   } = useTaskFilters(activeView);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [isQuickCaptureOpen, setIsQuickCaptureOpen] = useState(false);
+  const [quickCaptureError, setQuickCaptureError] = useState<string | null>(
+    null,
+  );
   const [remindersEnabled, setRemindersEnabled] = useState<boolean>(() =>
     getRemindersEnabledPreference(),
   );
 
+  const closeQuickCapture = useCallback(() => {
+    setQuickCaptureError(null);
+    setIsQuickCaptureOpen(false);
+  }, []);
+
+  const openQuickCapture = useCallback(() => {
+    setActionError(null);
+    setQuickCaptureError(null);
+    setEditingTask(null);
+    setIsCreateOpen(false);
+    setIsQuickCaptureOpen(true);
+  }, [setEditingTask, setIsCreateOpen]);
+
+  useQuickCaptureShortcut(openQuickCapture);
+
   const openCreateModal = useCallback(() => {
+    closeQuickCapture();
     setEditingTask(null);
     setIsCreateOpen(true);
-  }, [setEditingTask, setIsCreateOpen]);
+  }, [closeQuickCapture, setEditingTask, setIsCreateOpen]);
 
   const handleRemindersEnabledChange = useCallback((enabled: boolean) => {
     setRemindersEnabled(enabled);
@@ -123,11 +150,26 @@ function AppContent() {
       const matchedTask = allTasks.find((task) => task.id === taskId);
       if (!matchedTask) return;
 
+      closeQuickCapture();
       setIsCreateOpen(false);
       setEditingTask(matchedTask);
       setActiveView("board");
     },
-    [allTasks, setActiveView, setEditingTask, setIsCreateOpen],
+    [
+      allTasks,
+      closeQuickCapture,
+      setActiveView,
+      setEditingTask,
+      setIsCreateOpen,
+    ],
+  );
+
+  const handleEditTask = useCallback(
+    (task: Task) => {
+      closeQuickCapture();
+      setEditingTask(task);
+    },
+    [closeQuickCapture, setEditingTask],
   );
 
   useReminderNotifications(
@@ -140,6 +182,8 @@ function AppContent() {
     const handleCreateShortcut = (event: KeyboardEvent) => {
       if (
         !(event.metaKey || event.ctrlKey) ||
+        event.shiftKey ||
+        event.altKey ||
         event.key.toLowerCase() !== "n"
       ) {
         return;
@@ -186,6 +230,26 @@ function AppContent() {
       .mutateAsync(taskId)
       .catch((error) => setActionError(getErrorMessage(error)));
   };
+
+  const handleQuickCaptureCreate = useCallback(
+    async (title: string): Promise<void> => {
+      setQuickCaptureError(null);
+      try {
+        await createTask.mutateAsync({
+          title,
+          priority: "NORMAL",
+          is_important: false,
+          due_at: null,
+          remind_at: null,
+          recurrence: "NONE",
+        });
+        setIsQuickCaptureOpen(false);
+      } catch (error) {
+        setQuickCaptureError(getErrorMessage(error));
+      }
+    },
+    [createTask],
+  );
 
   const taskViewState =
     activeView === "board"
@@ -286,7 +350,7 @@ function AppContent() {
   ) : activeView === "board" ? (
     <TaskBoard
       tasks={filteredTaskViewTasks}
-      onEdit={(task) => setEditingTask(task)}
+      onEdit={handleEditTask}
       onStatusChange={handleStatusChange}
       onDelete={handleDelete}
       onCreateClick={openCreateModal}
@@ -295,7 +359,7 @@ function AppContent() {
     <TaskScheduleView
       view={activeView}
       tasks={filteredTaskViewTasks}
-      onEdit={(task) => setEditingTask(task)}
+      onEdit={handleEditTask}
       onStatusChange={handleStatusChange}
       onDelete={handleDelete}
       onCreateClick={openCreateModal}
@@ -347,6 +411,15 @@ function AppContent() {
         </div>
       )}
       {content}
+
+      {isQuickCaptureOpen && (
+        <QuickCapture
+          isSubmitting={createTask.isPending}
+          error={quickCaptureError}
+          onSubmit={handleQuickCaptureCreate}
+          onClose={closeQuickCapture}
+        />
+      )}
 
       {/* Create Task Modal */}
       {isCreateOpen && (

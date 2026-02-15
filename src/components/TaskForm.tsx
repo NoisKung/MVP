@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import type {
   Task,
+  TaskTemplate,
   TaskChangelog,
   CreateTaskInput,
   UpdateTaskInput,
@@ -17,8 +18,15 @@ import {
   CalendarClock,
   Bell,
   Repeat2,
+  BookmarkPlus,
+  Trash2,
 } from "lucide-react";
-import { useTaskChangelogs } from "@/hooks/use-tasks";
+import {
+  useDeleteTaskTemplate,
+  useTaskChangelogs,
+  useTaskTemplates,
+  useUpsertTaskTemplate,
+} from "@/hooks/use-tasks";
 
 const PRIORITIES: {
   value: TaskPriority;
@@ -73,7 +81,7 @@ function getErrorMessage(error: unknown): string {
   if (typeof error === "string" && error.trim()) {
     return error;
   }
-  return "Unable to load changelog.";
+  return "Unable to complete the request.";
 }
 
 function formatChangelogValue(
@@ -177,6 +185,28 @@ function toIsoDateTime(dateTimeInput: string): string | null {
   return parsedDate.toISOString();
 }
 
+function getOffsetMinutesFromIsoDateTime(
+  isoDateTime: string | null,
+  referenceDate: Date,
+): number | null {
+  if (!isoDateTime) return null;
+  const parsedDate = new Date(isoDateTime);
+  if (Number.isNaN(parsedDate.getTime())) return null;
+  return Math.max(
+    0,
+    Math.round((parsedDate.getTime() - referenceDate.getTime()) / 60000),
+  );
+}
+
+function toInputDateTimeFromOffset(
+  offsetMinutes: number | null,
+  referenceDate: Date,
+): string {
+  if (offsetMinutes === null) return "";
+  const offsetDate = new Date(referenceDate.getTime() + offsetMinutes * 60000);
+  return toInputDateTime(offsetDate.toISOString());
+}
+
 interface TaskFormProps {
   task?: Task | null;
   onSubmit: (input: CreateTaskInput | UpdateTaskInput) => void;
@@ -192,14 +222,23 @@ export function TaskForm({ task, onSubmit, onClose }: TaskFormProps) {
   const [remindAt, setRemindAt] = useState("");
   const [recurrence, setRecurrence] = useState<TaskRecurrence>("NONE");
   const [timeError, setTimeError] = useState<string | null>(null);
+  const [selectedTemplateId, setSelectedTemplateId] = useState("");
+  const [templateError, setTemplateError] = useState<string | null>(null);
 
   const isEditing = !!task;
+  const { data: taskTemplates = [], isLoading: isLoadingTaskTemplates } =
+    useTaskTemplates(!isEditing);
+  const upsertTaskTemplate = useUpsertTaskTemplate();
+  const deleteTaskTemplate = useDeleteTaskTemplate();
   const {
     data: changelogs = [],
     isLoading: isLoadingChangelog,
     isError: isChangelogError,
     error: changelogError,
   } = useTaskChangelogs(task?.id);
+  const selectedTemplate =
+    taskTemplates.find((template) => template.id === selectedTemplateId) ??
+    null;
 
   useEffect(() => {
     if (task) {
@@ -210,6 +249,8 @@ export function TaskForm({ task, onSubmit, onClose }: TaskFormProps) {
       setDueAt(toInputDateTime(task.due_at));
       setRemindAt(toInputDateTime(task.remind_at));
       setRecurrence(task.recurrence ?? "NONE");
+      setSelectedTemplateId("");
+      setTemplateError(null);
       return;
     }
 
@@ -220,7 +261,9 @@ export function TaskForm({ task, onSubmit, onClose }: TaskFormProps) {
     setDueAt("");
     setRemindAt("");
     setRecurrence("NONE");
+    setSelectedTemplateId("");
     setTimeError(null);
+    setTemplateError(null);
   }, [task]);
 
   // Keyboard shortcut: Escape to close
@@ -284,6 +327,103 @@ export function TaskForm({ task, onSubmit, onClose }: TaskFormProps) {
     }
   };
 
+  const applyTaskTemplate = (template: TaskTemplate) => {
+    const now = new Date();
+    setTitle(template.title_template ?? "");
+    setDescription(template.description ?? "");
+    setPriority(template.priority);
+    setIsImportant(Boolean(template.is_important));
+    setDueAt(toInputDateTimeFromOffset(template.due_offset_minutes, now));
+    setRemindAt(toInputDateTimeFromOffset(template.remind_offset_minutes, now));
+    setRecurrence(template.recurrence ?? "NONE");
+    setTimeError(null);
+    setTemplateError(null);
+  };
+
+  const handleApplyTemplate = () => {
+    if (!selectedTemplate) return;
+    applyTaskTemplate(selectedTemplate);
+  };
+
+  const handleSaveTemplate = async () => {
+    if (isEditing) return;
+
+    const suggestedName =
+      selectedTemplate?.name ??
+      (title.trim() ? `${title.trim().slice(0, 40)} Template` : "My Template");
+    const inputName = window.prompt("Template name", suggestedName);
+    if (!inputName) return;
+
+    const normalizedName = inputName.trim();
+    if (!normalizedName) return;
+
+    const dueAtIso = toIsoDateTime(dueAt);
+    const remindAtIso = toIsoDateTime(remindAt);
+
+    if (dueAt && !dueAtIso) {
+      setTemplateError("Due date format is invalid.");
+      return;
+    }
+    if (remindAt && !remindAtIso) {
+      setTemplateError("Reminder format is invalid.");
+      return;
+    }
+    if (dueAtIso && remindAtIso && remindAtIso > dueAtIso) {
+      setTemplateError("Reminder must be set before the due date.");
+      return;
+    }
+    if (recurrence !== "NONE" && !dueAtIso) {
+      setTemplateError("Recurring templates require a due date.");
+      return;
+    }
+
+    const now = new Date();
+    const dueOffsetMinutes = getOffsetMinutesFromIsoDateTime(dueAtIso, now);
+    let remindOffsetMinutes = getOffsetMinutesFromIsoDateTime(remindAtIso, now);
+    if (
+      dueOffsetMinutes !== null &&
+      remindOffsetMinutes !== null &&
+      remindOffsetMinutes > dueOffsetMinutes
+    ) {
+      remindOffsetMinutes = dueOffsetMinutes;
+    }
+
+    try {
+      const savedTemplate = await upsertTaskTemplate.mutateAsync({
+        id: selectedTemplateId || undefined,
+        name: normalizedName,
+        title_template: title.trim() || null,
+        description: description.trim() || null,
+        priority,
+        is_important: isImportant,
+        due_offset_minutes: dueOffsetMinutes,
+        remind_offset_minutes: remindOffsetMinutes,
+        recurrence,
+      });
+      setSelectedTemplateId(savedTemplate.id);
+      setTemplateError(null);
+    } catch (error) {
+      setTemplateError(getErrorMessage(error));
+    }
+  };
+
+  const handleDeleteTemplate = async () => {
+    if (!selectedTemplate) return;
+    if (
+      !window.confirm(`Delete template "${selectedTemplate.name}" permanently?`)
+    ) {
+      return;
+    }
+
+    try {
+      await deleteTaskTemplate.mutateAsync(selectedTemplate.id);
+      setSelectedTemplateId("");
+      setTemplateError(null);
+    } catch (error) {
+      setTemplateError(getErrorMessage(error));
+    }
+  };
+
   return (
     <div className="overlay" onClick={onClose}>
       <div
@@ -332,6 +472,59 @@ export function TaskForm({ task, onSubmit, onClose }: TaskFormProps) {
               rows={3}
             />
           </div>
+
+          {!isEditing && (
+            <div className="template-section">
+              <label className="field-label" htmlFor="task-template">
+                Template
+              </label>
+              <div className="template-row">
+                <select
+                  id="task-template"
+                  className="input"
+                  value={selectedTemplateId}
+                  onChange={(event) =>
+                    setSelectedTemplateId(event.target.value)
+                  }
+                >
+                  <option value="">Select a template...</option>
+                  {taskTemplates.map((template) => (
+                    <option key={template.id} value={template.id}>
+                      {template.name}
+                    </option>
+                  ))}
+                </select>
+                <button
+                  type="button"
+                  className="template-btn"
+                  onClick={handleApplyTemplate}
+                  disabled={!selectedTemplate || isLoadingTaskTemplates}
+                >
+                  Apply
+                </button>
+              </div>
+              <div className="template-actions">
+                <button
+                  type="button"
+                  className="template-btn"
+                  onClick={() => void handleSaveTemplate()}
+                  disabled={upsertTaskTemplate.isPending}
+                >
+                  <BookmarkPlus size={12} />
+                  {upsertTaskTemplate.isPending ? "Saving..." : "Save Template"}
+                </button>
+                <button
+                  type="button"
+                  className="template-btn template-btn-danger"
+                  onClick={() => void handleDeleteTemplate()}
+                  disabled={!selectedTemplate || deleteTaskTemplate.isPending}
+                >
+                  <Trash2 size={12} />
+                  {deleteTaskTemplate.isPending ? "Deleting..." : "Delete"}
+                </button>
+              </div>
+            </div>
+          )}
 
           <div className="field-row">
             <div className="field" style={{ flex: 1 }}>
@@ -424,6 +617,7 @@ export function TaskForm({ task, onSubmit, onClose }: TaskFormProps) {
           </div>
 
           {timeError && <p className="form-error">{timeError}</p>}
+          {templateError && <p className="form-error">{templateError}</p>}
 
           {isEditing && (
             <div className="changelog-section">
@@ -571,6 +765,55 @@ export function TaskForm({ task, onSubmit, onClose }: TaskFormProps) {
         .textarea {
           resize: vertical;
           min-height: 72px;
+        }
+
+        .template-section {
+          margin-bottom: 16px;
+          padding: 10px;
+          border: 1px solid var(--border-default);
+          border-radius: var(--radius-md);
+          background: var(--bg-elevated);
+        }
+        .template-row {
+          display: flex;
+          gap: 8px;
+          align-items: center;
+        }
+        .template-actions {
+          margin-top: 8px;
+          display: flex;
+          gap: 8px;
+          flex-wrap: wrap;
+        }
+        .template-btn {
+          height: 30px;
+          border: 1px solid var(--border-default);
+          border-radius: var(--radius-sm);
+          padding: 0 10px;
+          background: var(--bg-surface);
+          color: var(--text-secondary);
+          font-size: 12px;
+          font-weight: 600;
+          font-family: inherit;
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          cursor: pointer;
+          transition: all var(--duration) var(--ease);
+        }
+        .template-btn:hover:not(:disabled) {
+          color: var(--text-primary);
+          border-color: var(--border-strong);
+          background: var(--bg-hover);
+        }
+        .template-btn:disabled {
+          opacity: 0.55;
+          cursor: not-allowed;
+        }
+        .template-btn-danger:hover:not(:disabled) {
+          color: var(--danger);
+          border-color: var(--danger);
+          background: var(--danger-subtle);
         }
 
         .field-row {
@@ -754,6 +997,17 @@ export function TaskForm({ task, onSubmit, onClose }: TaskFormProps) {
           .field-row {
             flex-direction: column;
             gap: 0;
+          }
+          .template-row {
+            flex-direction: column;
+            align-items: stretch;
+          }
+          .template-actions {
+            flex-direction: column;
+          }
+          .template-btn {
+            width: 100%;
+            justify-content: center;
           }
         }
 

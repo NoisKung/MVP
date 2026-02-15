@@ -9,6 +9,7 @@ Designed for individual developers who want a distraction-free, lightning-fast k
 - 📋 **Kanban Board** — Drag-and-drop tasks across To Do, In Progress, and Done columns
 - 🔎 **Search + Filters + Sort** — Quickly narrow tasks by text, status, priority, importance, due window, and per-view ordering
 - 💾 **Saved Views** — Save and reapply custom filter combinations
+- 🧩 **Task Templates** — Save reusable presets for recurring task patterns
 - 🗓️ **Today & Upcoming Views** — Focus on overdue/today tasks and the next 7 days at a glance
 - ⏰ **Due Dates & Reminders** — Add schedule metadata directly in task form
 - 🔁 **Recurring Tasks** — Repeat tasks daily, weekly, or monthly
@@ -19,7 +20,7 @@ Designed for individual developers who want a distraction-free, lightning-fast k
 - 💾 **Local-first** — All data stored locally via SQLite, no account needed
 - ⚡ **Blazing fast** — Powered by Tauri for near-native performance
 - 🎨 **Beautiful UI** — Dark-themed, modern design with smooth animations
-- ⌨️ **Keyboard shortcuts** — `⌘N` to quickly create tasks
+- ⌨️ **Keyboard shortcuts** — `⌘/Ctrl + N` for full form and `⌘/Ctrl + Shift + N` for Quick Capture
 
 ## 🛠️ Tech Stack
 
