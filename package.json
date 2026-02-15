@@ -8,6 +8,9 @@
     "build": "tsc && vite build",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
+    "test:e2e": "playwright test",
+    "test:e2e:headed": "playwright test --headed",
+    "test:e2e:ui": "playwright test --ui",
     "preview": "vite preview",
     "tauri": "tauri",
     "mvp-cli": "node --no-warnings scripts/mvp-cli.mjs"
@@ -27,6 +30,7 @@
     "zustand": "^5.0.11"
   },
   "devDependencies": {
+    "@playwright/test": "^1.58.2",
     "@tauri-apps/cli": "^2",
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.3.2",
