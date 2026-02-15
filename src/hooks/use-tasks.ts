@@ -6,6 +6,11 @@ import {
   createTask,
   updateTask,
   deleteTask,
+  getTaskSubtasks,
+  getTaskSubtaskStats,
+  createTaskSubtask,
+  updateTaskSubtask,
+  deleteTaskSubtask,
   getTaskTemplates,
   upsertTaskTemplate,
   deleteTaskTemplate,
@@ -14,6 +19,8 @@ import {
 } from "@/lib/database";
 import type {
   CreateTaskInput,
+  CreateTaskSubtaskInput,
+  UpdateTaskSubtaskInput,
   UpdateTaskInput,
   UpsertTaskTemplateInput,
 } from "@/lib/types";
@@ -23,6 +30,8 @@ const TODAY_TASKS_KEY = ["tasks", "today"] as const;
 const UPCOMING_TASKS_KEY = ["tasks", "upcoming"] as const;
 const STATS_KEY = ["task-stats"] as const;
 const CHANGELOGS_KEY = ["task-changelogs"] as const;
+const TASK_SUBTASKS_KEY = ["task-subtasks"] as const;
+const TASK_SUBTASK_STATS_KEY = ["task-subtask-stats"] as const;
 const TASK_TEMPLATES_KEY = ["task-templates"] as const;
 
 /** Fetch all tasks */
@@ -66,6 +75,28 @@ export function useTaskChangelogs(taskId?: string) {
   });
 }
 
+/** Fetch checklist items for a specific task */
+export function useTaskSubtasks(taskId?: string, enabled = true) {
+  return useQuery({
+    queryKey: [...TASK_SUBTASKS_KEY, taskId],
+    queryFn: () => getTaskSubtasks(taskId as string),
+    enabled: Boolean(taskId) && enabled,
+  });
+}
+
+/** Fetch checklist progress stats for a task list */
+export function useTaskSubtaskStats(taskIds: string[], enabled = true) {
+  const normalizedTaskIds = Array.from(
+    new Set(taskIds.map((taskId) => taskId.trim()).filter(Boolean)),
+  ).sort();
+
+  return useQuery({
+    queryKey: [...TASK_SUBTASK_STATS_KEY, normalizedTaskIds.join(",")],
+    queryFn: () => getTaskSubtaskStats(normalizedTaskIds),
+    enabled: enabled && normalizedTaskIds.length > 0,
+  });
+}
+
 /** Create a new task */
 export function useCreateTask() {
   const queryClient = useQueryClient();
@@ -78,6 +109,8 @@ export function useCreateTask() {
       queryClient.invalidateQueries({ queryKey: UPCOMING_TASKS_KEY });
       queryClient.invalidateQueries({ queryKey: STATS_KEY });
       queryClient.invalidateQueries({ queryKey: CHANGELOGS_KEY });
+      queryClient.invalidateQueries({ queryKey: TASK_SUBTASKS_KEY });
+      queryClient.invalidateQueries({ queryKey: TASK_SUBTASK_STATS_KEY });
     },
   });
 }
@@ -94,6 +127,8 @@ export function useUpdateTask() {
       queryClient.invalidateQueries({ queryKey: UPCOMING_TASKS_KEY });
       queryClient.invalidateQueries({ queryKey: STATS_KEY });
       queryClient.invalidateQueries({ queryKey: CHANGELOGS_KEY });
+      queryClient.invalidateQueries({ queryKey: TASK_SUBTASKS_KEY });
+      queryClient.invalidateQueries({ queryKey: TASK_SUBTASK_STATS_KEY });
     },
   });
 }
@@ -110,6 +145,56 @@ export function useDeleteTask() {
       queryClient.invalidateQueries({ queryKey: UPCOMING_TASKS_KEY });
       queryClient.invalidateQueries({ queryKey: STATS_KEY });
       queryClient.invalidateQueries({ queryKey: CHANGELOGS_KEY });
+      queryClient.invalidateQueries({ queryKey: TASK_SUBTASKS_KEY });
+      queryClient.invalidateQueries({ queryKey: TASK_SUBTASK_STATS_KEY });
+    },
+  });
+}
+
+/** Create a checklist item */
+export function useCreateTaskSubtask() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (input: CreateTaskSubtaskInput) => createTaskSubtask(input),
+    onSuccess: (subtask) => {
+      queryClient.invalidateQueries({
+        queryKey: [...TASK_SUBTASKS_KEY, subtask.task_id],
+      });
+      queryClient.invalidateQueries({ queryKey: TASK_SUBTASK_STATS_KEY });
+    },
+  });
+}
+
+/** Update a checklist item */
+export function useUpdateTaskSubtask() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (input: UpdateTaskSubtaskInput) => updateTaskSubtask(input),
+    onSuccess: (subtask) => {
+      queryClient.invalidateQueries({
+        queryKey: [...TASK_SUBTASKS_KEY, subtask.task_id],
+      });
+      queryClient.invalidateQueries({ queryKey: TASK_SUBTASK_STATS_KEY });
+    },
+  });
+}
+
+/** Delete a checklist item */
+export function useDeleteTaskSubtask() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: async (input: { id: string; taskId: string }) => {
+      await deleteTaskSubtask(input.id);
+      return input;
+    },
+    onSuccess: (payload) => {
+      queryClient.invalidateQueries({
+        queryKey: [...TASK_SUBTASKS_KEY, payload.taskId],
+      });
+      queryClient.invalidateQueries({ queryKey: TASK_SUBTASK_STATS_KEY });
     },
   });
 }

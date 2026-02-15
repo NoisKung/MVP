@@ -1,12 +1,16 @@
 import Database from "@tauri-apps/plugin-sql";
 import type {
   Task,
+  TaskSubtask,
+  TaskSubtaskStats,
   TaskChangelog,
   TaskChangelogAction,
   TaskRecurrence,
   TaskDashboardStats,
   TaskTemplate,
+  CreateTaskSubtaskInput,
   CreateTaskInput,
+  UpdateTaskSubtaskInput,
   UpsertTaskTemplateInput,
   UpdateTaskInput,
 } from "./types";
@@ -115,6 +119,23 @@ async function initSchema(db: Database): Promise<void> {
   await db.execute(`
     CREATE INDEX IF NOT EXISTS idx_task_templates_updated_at
     ON task_templates(updated_at DESC)
+  `);
+
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS task_subtasks (
+      id TEXT PRIMARY KEY,
+      task_id TEXT NOT NULL,
+      title TEXT NOT NULL,
+      is_done BOOLEAN DEFAULT 0,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY(task_id) REFERENCES tasks(id) ON DELETE CASCADE
+    )
+  `);
+
+  await db.execute(`
+    CREATE INDEX IF NOT EXISTS idx_task_subtasks_task_created_at
+    ON task_subtasks(task_id, created_at ASC)
   `);
 
   await ensureTaskColumns(db);
@@ -287,6 +308,39 @@ function normalizeTemplateOffset(
   return Math.max(0, Math.round(offsetInMinutes));
 }
 
+function normalizeSubtaskTitle(title: string): string {
+  return title.trim();
+}
+
+async function insertTaskSubtask(
+  db: Database,
+  input: CreateTaskSubtaskInput,
+  nowIso = new Date().toISOString(),
+): Promise<void> {
+  const normalizedTitle = normalizeSubtaskTitle(input.title);
+  if (!normalizedTitle) return;
+
+  await db.execute(
+    `INSERT INTO task_subtasks (
+        id,
+        task_id,
+        title,
+        is_done,
+        created_at,
+        updated_at
+      )
+       VALUES ($1, $2, $3, $4, $5, $6)`,
+    [
+      uuidv4(),
+      input.task_id,
+      normalizedTitle,
+      input.is_done ? 1 : 0,
+      nowIso,
+      nowIso,
+    ],
+  );
+}
+
 /** Fetch all non-archived tasks, newest first */
 export async function getAllTasks(): Promise<Task[]> {
   const db = await getDb();
@@ -337,6 +391,25 @@ export async function createTask(input: CreateTaskInput): Promise<Task> {
     newValue: input.title,
     createdAt: now,
   });
+
+  const subtasks = (input.subtasks ?? [])
+    .map((subtask) => ({
+      title: normalizeSubtaskTitle(subtask.title),
+      is_done: Boolean(subtask.is_done),
+    }))
+    .filter((subtask) => subtask.title.length > 0);
+
+  for (const subtask of subtasks) {
+    await insertTaskSubtask(
+      db,
+      {
+        task_id: id,
+        title: subtask.title,
+        is_done: subtask.is_done,
+      },
+      now,
+    );
+  }
 
   const rows = await db.select<Task[]>("SELECT * FROM tasks WHERE id = $1", [
     id,
@@ -685,6 +758,144 @@ export async function getUpcomingTasks(
       return dueAt >= dayEnd && dueAt < rangeEnd;
     })
     .sort(compareByDueDateAscending);
+}
+
+/** Fetch checklist progress stats for a set of task ids */
+export async function getTaskSubtaskStats(
+  taskIds: string[],
+): Promise<TaskSubtaskStats[]> {
+  const normalizedTaskIds = Array.from(
+    new Set(taskIds.map((taskId) => taskId.trim()).filter(Boolean)),
+  );
+  if (normalizedTaskIds.length === 0) return [];
+
+  const db = await getDb();
+  const placeholders = normalizedTaskIds
+    .map((_, index) => `$${index + 1}`)
+    .join(", ");
+
+  return db.select<TaskSubtaskStats[]>(
+    `SELECT
+        task_id,
+        COALESCE(SUM(CASE WHEN is_done = 1 THEN 1 ELSE 0 END), 0) as done_count,
+        COUNT(*) as total_count
+      FROM task_subtasks
+      WHERE task_id IN (${placeholders})
+      GROUP BY task_id`,
+    normalizedTaskIds,
+  );
+}
+
+/** Fetch checklist items for a task */
+export async function getTaskSubtasks(taskId: string): Promise<TaskSubtask[]> {
+  const db = await getDb();
+  return db.select<TaskSubtask[]>(
+    `SELECT *
+       FROM task_subtasks
+      WHERE task_id = $1
+      ORDER BY created_at ASC`,
+    [taskId],
+  );
+}
+
+/** Create a checklist item under a task */
+export async function createTaskSubtask(
+  input: CreateTaskSubtaskInput,
+): Promise<TaskSubtask> {
+  const db = await getDb();
+  const now = new Date().toISOString();
+  const normalizedTitle = normalizeSubtaskTitle(input.title);
+  if (!normalizedTitle) {
+    throw new Error("Subtask title is required.");
+  }
+
+  const subtaskId = uuidv4();
+  await db.execute(
+    `INSERT INTO task_subtasks (
+        id,
+        task_id,
+        title,
+        is_done,
+        created_at,
+        updated_at
+      )
+       VALUES ($1, $2, $3, $4, $5, $6)`,
+    [
+      subtaskId,
+      input.task_id,
+      normalizedTitle,
+      input.is_done ? 1 : 0,
+      now,
+      now,
+    ],
+  );
+
+  const rows = await db.select<TaskSubtask[]>(
+    "SELECT * FROM task_subtasks WHERE id = $1",
+    [subtaskId],
+  );
+  return rows[0];
+}
+
+/** Update a checklist item */
+export async function updateTaskSubtask(
+  input: UpdateTaskSubtaskInput,
+): Promise<TaskSubtask> {
+  const db = await getDb();
+  const existingRows = await db.select<TaskSubtask[]>(
+    "SELECT * FROM task_subtasks WHERE id = $1",
+    [input.id],
+  );
+  const existingSubtask = existingRows[0];
+
+  if (!existingSubtask) {
+    throw new Error("Subtask not found.");
+  }
+
+  const setClauses: string[] = [];
+  const params: unknown[] = [];
+  let paramIndex = 1;
+
+  if (input.title !== undefined) {
+    const normalizedTitle = normalizeSubtaskTitle(input.title);
+    if (!normalizedTitle) {
+      throw new Error("Subtask title is required.");
+    }
+    setClauses.push(`title = $${paramIndex++}`);
+    params.push(normalizedTitle);
+  }
+
+  if (input.is_done !== undefined) {
+    setClauses.push(`is_done = $${paramIndex++}`);
+    params.push(input.is_done ? 1 : 0);
+  }
+
+  if (setClauses.length === 0) {
+    return existingSubtask;
+  }
+
+  setClauses.push(`updated_at = $${paramIndex++}`);
+  params.push(new Date().toISOString());
+  params.push(input.id);
+
+  await db.execute(
+    `UPDATE task_subtasks
+        SET ${setClauses.join(", ")}
+      WHERE id = $${paramIndex}`,
+    params,
+  );
+
+  const rows = await db.select<TaskSubtask[]>(
+    "SELECT * FROM task_subtasks WHERE id = $1",
+    [input.id],
+  );
+  return rows[0];
+}
+
+/** Delete a checklist item */
+export async function deleteTaskSubtask(id: string): Promise<void> {
+  const db = await getDb();
+  await db.execute("DELETE FROM task_subtasks WHERE id = $1", [id]);
 }
 
 /** Fetch task templates ordered by latest update */

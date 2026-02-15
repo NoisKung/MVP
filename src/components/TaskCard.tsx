@@ -45,6 +45,10 @@ interface TaskCardProps {
   onEdit: (task: Task) => void;
   onStatusChange: (taskId: string, newStatus: TaskStatus) => void;
   onDelete: (taskId: string) => void;
+  subtaskProgress?: {
+    done: number;
+    total: number;
+  };
   onDragStart?: (taskId: string) => void;
   onDragEnd?: () => void;
   isDragging?: boolean;
@@ -55,6 +59,7 @@ export function TaskCard({
   onEdit,
   onStatusChange,
   onDelete,
+  subtaskProgress,
   onDragStart,
   onDragEnd,
   isDragging = false,
@@ -65,6 +70,7 @@ export function TaskCard({
   const prevStatus = getPrevStatus(task.status);
   const dueBadge = getDueBadge(task);
   const recurrenceLabel = getRecurrenceLabel(task.recurrence);
+  const checklistProgressLabel = getChecklistProgressLabel(subtaskProgress);
 
   const relativeDate = getRelativeDate(task.created_at);
 
@@ -123,7 +129,7 @@ export function TaskCard({
       {/* Description */}
       {task.description && <p className="card-desc">{task.description}</p>}
 
-      {(dueBadge || recurrenceLabel) && (
+      {(dueBadge || recurrenceLabel || checklistProgressLabel) && (
         <div className="card-meta-row">
           {dueBadge && (
             <span className={`card-due-badge card-due-${dueBadge.tone}`}>
@@ -133,6 +139,11 @@ export function TaskCard({
           )}
           {recurrenceLabel && (
             <span className="card-recurrence-badge">{recurrenceLabel}</span>
+          )}
+          {checklistProgressLabel && (
+            <span className="card-checklist-badge">
+              {checklistProgressLabel}
+            </span>
           )}
         </div>
       )}
@@ -249,4 +260,12 @@ function getRecurrenceLabel(taskRecurrence: Task["recurrence"]): string | null {
   if (taskRecurrence === "WEEKLY") return "Repeats weekly";
   if (taskRecurrence === "MONTHLY") return "Repeats monthly";
   return null;
+}
+
+function getChecklistProgressLabel(
+  progress: TaskCardProps["subtaskProgress"],
+): string | null {
+  if (!progress) return null;
+  if (progress.total <= 0) return null;
+  return `Checklist ${progress.done}/${progress.total}`;
 }

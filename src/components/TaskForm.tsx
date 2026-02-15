@@ -20,11 +20,17 @@ import {
   Repeat2,
   BookmarkPlus,
   Trash2,
+  Plus,
+  Check,
 } from "lucide-react";
 import {
+  useCreateTaskSubtask,
   useDeleteTaskTemplate,
+  useDeleteTaskSubtask,
+  useTaskSubtasks,
   useTaskChangelogs,
   useTaskTemplates,
+  useUpdateTaskSubtask,
   useUpsertTaskTemplate,
 } from "@/hooks/use-tasks";
 
@@ -207,6 +213,16 @@ function toInputDateTimeFromOffset(
   return toInputDateTime(offsetDate.toISOString());
 }
 
+interface DraftSubtask {
+  id: string;
+  title: string;
+  is_done: boolean;
+}
+
+function createDraftSubtaskId(): string {
+  return `draft-subtask-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
+}
+
 interface TaskFormProps {
   task?: Task | null;
   onSubmit: (input: CreateTaskInput | UpdateTaskInput) => void;
@@ -224,12 +240,20 @@ export function TaskForm({ task, onSubmit, onClose }: TaskFormProps) {
   const [timeError, setTimeError] = useState<string | null>(null);
   const [selectedTemplateId, setSelectedTemplateId] = useState("");
   const [templateError, setTemplateError] = useState<string | null>(null);
+  const [draftSubtasks, setDraftSubtasks] = useState<DraftSubtask[]>([]);
+  const [newSubtaskTitle, setNewSubtaskTitle] = useState("");
+  const [subtaskError, setSubtaskError] = useState<string | null>(null);
 
   const isEditing = !!task;
   const { data: taskTemplates = [], isLoading: isLoadingTaskTemplates } =
     useTaskTemplates(!isEditing);
+  const { data: persistedSubtasks = [], isLoading: isLoadingSubtasks } =
+    useTaskSubtasks(task?.id, isEditing);
   const upsertTaskTemplate = useUpsertTaskTemplate();
   const deleteTaskTemplate = useDeleteTaskTemplate();
+  const createTaskSubtask = useCreateTaskSubtask();
+  const updateTaskSubtask = useUpdateTaskSubtask();
+  const deleteTaskSubtask = useDeleteTaskSubtask();
   const {
     data: changelogs = [],
     isLoading: isLoadingChangelog,
@@ -239,6 +263,20 @@ export function TaskForm({ task, onSubmit, onClose }: TaskFormProps) {
   const selectedTemplate =
     taskTemplates.find((template) => template.id === selectedTemplateId) ??
     null;
+  const checklistItems = isEditing
+    ? persistedSubtasks.map((subtask) => ({
+        id: subtask.id,
+        title: subtask.title,
+        is_done: Boolean(subtask.is_done),
+      }))
+    : draftSubtasks;
+  const completedSubtaskCount = checklistItems.filter(
+    (subtask) => subtask.is_done,
+  ).length;
+  const isSubtaskMutating =
+    createTaskSubtask.isPending ||
+    updateTaskSubtask.isPending ||
+    deleteTaskSubtask.isPending;
 
   useEffect(() => {
     if (task) {
@@ -251,6 +289,9 @@ export function TaskForm({ task, onSubmit, onClose }: TaskFormProps) {
       setRecurrence(task.recurrence ?? "NONE");
       setSelectedTemplateId("");
       setTemplateError(null);
+      setDraftSubtasks([]);
+      setNewSubtaskTitle("");
+      setSubtaskError(null);
       return;
     }
 
@@ -264,6 +305,9 @@ export function TaskForm({ task, onSubmit, onClose }: TaskFormProps) {
     setSelectedTemplateId("");
     setTimeError(null);
     setTemplateError(null);
+    setDraftSubtasks([]);
+    setNewSubtaskTitle("");
+    setSubtaskError(null);
   }, [task]);
 
   // Keyboard shortcut: Escape to close
@@ -322,6 +366,12 @@ export function TaskForm({ task, onSubmit, onClose }: TaskFormProps) {
         due_at: dueAtIso,
         remind_at: remindAtIso,
         recurrence,
+        subtasks: draftSubtasks
+          .map((subtask) => ({
+            title: subtask.title.trim(),
+            is_done: subtask.is_done,
+          }))
+          .filter((subtask) => subtask.title.length > 0),
       };
       onSubmit(input);
     }
@@ -422,6 +472,76 @@ export function TaskForm({ task, onSubmit, onClose }: TaskFormProps) {
     } catch (error) {
       setTemplateError(getErrorMessage(error));
     }
+  };
+
+  const handleAddSubtask = async () => {
+    const normalizedTitle = newSubtaskTitle.trim();
+    if (!normalizedTitle) return;
+
+    if (isEditing && task) {
+      try {
+        await createTaskSubtask.mutateAsync({
+          task_id: task.id,
+          title: normalizedTitle,
+          is_done: false,
+        });
+        setNewSubtaskTitle("");
+        setSubtaskError(null);
+      } catch (error) {
+        setSubtaskError(getErrorMessage(error));
+      }
+      return;
+    }
+
+    setDraftSubtasks((prevSubtasks) => [
+      ...prevSubtasks,
+      {
+        id: createDraftSubtaskId(),
+        title: normalizedTitle,
+        is_done: false,
+      },
+    ]);
+    setNewSubtaskTitle("");
+    setSubtaskError(null);
+  };
+
+  const handleToggleSubtask = async (subtaskId: string, isDone: boolean) => {
+    if (isEditing) {
+      try {
+        await updateTaskSubtask.mutateAsync({
+          id: subtaskId,
+          is_done: !isDone,
+        });
+        setSubtaskError(null);
+      } catch (error) {
+        setSubtaskError(getErrorMessage(error));
+      }
+      return;
+    }
+
+    setDraftSubtasks((prevSubtasks) =>
+      prevSubtasks.map((subtask) =>
+        subtask.id === subtaskId
+          ? { ...subtask, is_done: !subtask.is_done }
+          : subtask,
+      ),
+    );
+  };
+
+  const handleDeleteSubtask = async (subtaskId: string) => {
+    if (isEditing && task) {
+      try {
+        await deleteTaskSubtask.mutateAsync({ id: subtaskId, taskId: task.id });
+        setSubtaskError(null);
+      } catch (error) {
+        setSubtaskError(getErrorMessage(error));
+      }
+      return;
+    }
+
+    setDraftSubtasks((prevSubtasks) =>
+      prevSubtasks.filter((subtask) => subtask.id !== subtaskId),
+    );
   };
 
   return (
@@ -526,6 +646,84 @@ export function TaskForm({ task, onSubmit, onClose }: TaskFormProps) {
             </div>
           )}
 
+          <div className="checklist-section">
+            <div className="checklist-header">
+              <label
+                className="field-label checklist-label"
+                htmlFor="new-subtask"
+              >
+                Checklist
+              </label>
+              <span className="checklist-progress">
+                {completedSubtaskCount} / {checklistItems.length} done
+              </span>
+            </div>
+
+            <div className="checklist-create-row">
+              <input
+                id="new-subtask"
+                className="input"
+                value={newSubtaskTitle}
+                onChange={(event) => {
+                  setNewSubtaskTitle(event.target.value);
+                  if (subtaskError) setSubtaskError(null);
+                }}
+                onKeyDown={(event) => {
+                  if (event.key !== "Enter") return;
+                  event.preventDefault();
+                  void handleAddSubtask();
+                }}
+                placeholder="Add checklist item..."
+                disabled={isSubtaskMutating}
+              />
+              <button
+                type="button"
+                className="checklist-add-btn"
+                onClick={() => void handleAddSubtask()}
+                disabled={!newSubtaskTitle.trim() || isSubtaskMutating}
+              >
+                <Plus size={12} />
+                Add
+              </button>
+            </div>
+
+            {isEditing && isLoadingSubtasks ? (
+              <p className="checklist-empty">Loading checklist...</p>
+            ) : checklistItems.length === 0 ? (
+              <p className="checklist-empty">No checklist items yet.</p>
+            ) : (
+              <div className="checklist-list">
+                {checklistItems.map((subtask) => (
+                  <div key={subtask.id} className="checklist-item">
+                    <button
+                      type="button"
+                      className={`checklist-toggle${subtask.is_done ? " done" : ""}`}
+                      onClick={() =>
+                        void handleToggleSubtask(subtask.id, subtask.is_done)
+                      }
+                      disabled={isSubtaskMutating}
+                    >
+                      {subtask.is_done && <Check size={11} />}
+                    </button>
+                    <span
+                      className={`checklist-title${subtask.is_done ? " done" : ""}`}
+                    >
+                      {subtask.title}
+                    </span>
+                    <button
+                      type="button"
+                      className="checklist-delete"
+                      onClick={() => void handleDeleteSubtask(subtask.id)}
+                      disabled={isSubtaskMutating}
+                    >
+                      <Trash2 size={12} />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
           <div className="field-row">
             <div className="field" style={{ flex: 1 }}>
               <label className="field-label" htmlFor="task-due-at">
@@ -618,6 +816,7 @@ export function TaskForm({ task, onSubmit, onClose }: TaskFormProps) {
 
           {timeError && <p className="form-error">{timeError}</p>}
           {templateError && <p className="form-error">{templateError}</p>}
+          {subtaskError && <p className="form-error">{subtaskError}</p>}
 
           {isEditing && (
             <div className="changelog-section">
@@ -816,6 +1015,136 @@ export function TaskForm({ task, onSubmit, onClose }: TaskFormProps) {
           background: var(--danger-subtle);
         }
 
+        .checklist-section {
+          margin-bottom: 16px;
+          padding: 10px;
+          border: 1px solid var(--border-default);
+          border-radius: var(--radius-md);
+          background: var(--bg-elevated);
+        }
+        .checklist-header {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 8px;
+          margin-bottom: 8px;
+        }
+        .checklist-label {
+          margin-bottom: 0;
+        }
+        .checklist-progress {
+          font-size: 11px;
+          color: var(--text-muted);
+          font-weight: 600;
+        }
+        .checklist-create-row {
+          display: flex;
+          gap: 8px;
+          align-items: center;
+        }
+        .checklist-add-btn {
+          height: 34px;
+          padding: 0 10px;
+          border: 1px solid var(--border-default);
+          border-radius: var(--radius-sm);
+          background: var(--bg-surface);
+          color: var(--text-secondary);
+          font-size: 12px;
+          font-weight: 600;
+          font-family: inherit;
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          cursor: pointer;
+          transition: all var(--duration) var(--ease);
+        }
+        .checklist-add-btn:hover:not(:disabled) {
+          color: var(--text-primary);
+          border-color: var(--border-strong);
+          background: var(--bg-hover);
+        }
+        .checklist-add-btn:disabled {
+          opacity: 0.55;
+          cursor: not-allowed;
+        }
+        .checklist-empty {
+          margin-top: 8px;
+          font-size: 12px;
+          color: var(--text-muted);
+        }
+        .checklist-list {
+          margin-top: 8px;
+          display: flex;
+          flex-direction: column;
+          gap: 6px;
+          max-height: 136px;
+          overflow-y: auto;
+          padding-right: 2px;
+        }
+        .checklist-item {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          padding: 7px 8px;
+          border: 1px solid var(--border-default);
+          border-radius: var(--radius-sm);
+          background: var(--bg-surface);
+        }
+        .checklist-toggle {
+          width: 18px;
+          height: 18px;
+          flex-shrink: 0;
+          border: 1px solid var(--border-strong);
+          border-radius: 5px;
+          background: transparent;
+          color: transparent;
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          cursor: pointer;
+          transition: all var(--duration) var(--ease);
+        }
+        .checklist-toggle.done {
+          background: var(--accent);
+          border-color: var(--accent);
+          color: #fff;
+        }
+        .checklist-title {
+          flex: 1;
+          font-size: 12px;
+          color: var(--text-primary);
+          line-height: 1.4;
+          word-break: break-word;
+        }
+        .checklist-title.done {
+          color: var(--text-muted);
+          text-decoration: line-through;
+        }
+        .checklist-delete {
+          width: 24px;
+          height: 24px;
+          flex-shrink: 0;
+          border: 1px solid transparent;
+          border-radius: var(--radius-sm);
+          background: transparent;
+          color: var(--text-muted);
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          cursor: pointer;
+          transition: all var(--duration) var(--ease);
+        }
+        .checklist-delete:hover:not(:disabled) {
+          color: var(--danger);
+          background: var(--danger-subtle);
+          border-color: var(--danger);
+        }
+        .checklist-delete:disabled,
+        .checklist-toggle:disabled {
+          opacity: 0.55;
+          cursor: not-allowed;
+        }
+
         .field-row {
           display: flex;
           gap: 16px;
@@ -1006,6 +1335,14 @@ export function TaskForm({ task, onSubmit, onClose }: TaskFormProps) {
             flex-direction: column;
           }
           .template-btn {
+            width: 100%;
+            justify-content: center;
+          }
+          .checklist-create-row {
+            flex-direction: column;
+            align-items: stretch;
+          }
+          .checklist-add-btn {
             width: 100%;
             justify-content: center;
           }

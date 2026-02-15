@@ -44,6 +44,10 @@ export interface CreateTaskInput {
   due_at?: string | null;
   remind_at?: string | null;
   recurrence?: TaskRecurrence;
+  subtasks?: Array<{
+    title: string;
+    is_done?: boolean;
+  }>;
 }
 
 /** Input for updating an existing task */
@@ -85,6 +89,37 @@ export interface UpsertTaskTemplateInput {
   due_offset_minutes?: number | null;
   remind_offset_minutes?: number | null;
   recurrence?: TaskRecurrence;
+}
+
+/** A checklist item under a task */
+export interface TaskSubtask {
+  id: string;
+  task_id: string;
+  title: string;
+  is_done: number; // SQLite stores booleans as 0/1
+  created_at: string;
+  updated_at: string;
+}
+
+/** Aggregated checklist progress per task */
+export interface TaskSubtaskStats {
+  task_id: string;
+  done_count: number;
+  total_count: number;
+}
+
+/** Input for creating a task subtask */
+export interface CreateTaskSubtaskInput {
+  task_id: string;
+  title: string;
+  is_done?: boolean;
+}
+
+/** Input for updating a task subtask */
+export interface UpdateTaskSubtaskInput {
+  id: string;
+  title?: string;
+  is_done?: boolean;
 }
 
 /** A single changelog record for a task */

@@ -1,6 +1,8 @@
 import type { Task, TaskStatus, ViewMode } from "@/lib/types";
 import { CalendarDays, CalendarRange, Plus } from "lucide-react";
 import { TaskCard } from "./TaskCard";
+import { useMemo } from "react";
+import { useTaskSubtaskStats } from "@/hooks/use-tasks";
 
 interface TaskScheduleViewProps {
   view: Extract<ViewMode, "today" | "upcoming">;
@@ -25,6 +27,19 @@ export function TaskScheduleView({
   onDelete,
   onCreateClick,
 }: TaskScheduleViewProps) {
+  const visibleTaskIds = useMemo(() => tasks.map((task) => task.id), [tasks]);
+  const { data: subtaskStats = [] } = useTaskSubtaskStats(visibleTaskIds);
+  const subtaskProgressByTaskId = useMemo(() => {
+    const progressMap = new Map<string, { done: number; total: number }>();
+    for (const stats of subtaskStats) {
+      progressMap.set(stats.task_id, {
+        done: Number(stats.done_count ?? 0),
+        total: Number(stats.total_count ?? 0),
+      });
+    }
+    return progressMap;
+  }, [subtaskStats]);
+
   const sections = buildSections(view, tasks);
   const isTodayView = view === "today";
   const title = isTodayView ? "Today" : "Upcoming";
@@ -86,6 +101,7 @@ export function TaskScheduleView({
                       onEdit={onEdit}
                       onStatusChange={onStatusChange}
                       onDelete={onDelete}
+                      subtaskProgress={subtaskProgressByTaskId.get(task.id)}
                     />
                   </div>
                 ))}
