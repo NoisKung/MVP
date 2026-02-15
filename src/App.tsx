@@ -8,6 +8,7 @@ import { Dashboard } from "./components/Dashboard";
 import { TaskScheduleView } from "./components/TaskScheduleView";
 import { ProjectView } from "./components/ProjectView";
 import { CalendarView } from "./components/CalendarView";
+import { WeeklyReviewView } from "./components/WeeklyReviewView";
 import { ReminderSettings } from "./components/ReminderSettings";
 import { TaskFiltersBar } from "./components/TaskFiltersBar";
 import { CommandPalette } from "./components/CommandPalette";
@@ -518,6 +519,13 @@ function AppContent() {
         onCreateClick={() => openCreateModal(null)}
       />
     )
+  ) : activeView === "review" ? (
+    <WeeklyReviewView
+      projectNameById={projectNameById}
+      onEdit={handleEditTask}
+      onStatusChange={handleStatusChange}
+      onCreateClick={() => openCreateModal(null)}
+    />
   ) : activeView === "settings" ? (
     <ReminderSettings
       remindersEnabled={remindersEnabled}

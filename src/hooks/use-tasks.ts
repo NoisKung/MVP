@@ -20,6 +20,7 @@ import {
   deleteTaskTemplate,
   getTaskDashboardStats,
   getTaskChangelogs,
+  getWeeklyReviewSnapshot,
   exportBackupPayload,
   importBackupPayload,
 } from "@/lib/database";
@@ -38,6 +39,7 @@ const TASKS_KEY = ["tasks"] as const;
 const TODAY_TASKS_KEY = ["tasks", "today"] as const;
 const UPCOMING_TASKS_KEY = ["tasks", "upcoming"] as const;
 const STATS_KEY = ["task-stats"] as const;
+const WEEKLY_REVIEW_KEY = ["weekly-review"] as const;
 const CHANGELOGS_KEY = ["task-changelogs"] as const;
 const TASK_SUBTASKS_KEY = ["task-subtasks"] as const;
 const TASK_SUBTASK_STATS_KEY = ["task-subtask-stats"] as const;
@@ -84,6 +86,14 @@ export function useTaskStats() {
   });
 }
 
+/** Fetch current-week review summary and focus lists */
+export function useWeeklyReview() {
+  return useQuery({
+    queryKey: WEEKLY_REVIEW_KEY,
+    queryFn: () => getWeeklyReviewSnapshot(),
+  });
+}
+
 /** Fetch changelog history for a specific task */
 export function useTaskChangelogs(taskId?: string) {
   return useQuery({
@@ -126,6 +136,7 @@ export function useCreateTask() {
       queryClient.invalidateQueries({ queryKey: TODAY_TASKS_KEY });
       queryClient.invalidateQueries({ queryKey: UPCOMING_TASKS_KEY });
       queryClient.invalidateQueries({ queryKey: STATS_KEY });
+      queryClient.invalidateQueries({ queryKey: WEEKLY_REVIEW_KEY });
       queryClient.invalidateQueries({ queryKey: CHANGELOGS_KEY });
       queryClient.invalidateQueries({ queryKey: TASK_SUBTASKS_KEY });
       queryClient.invalidateQueries({ queryKey: TASK_SUBTASK_STATS_KEY });
@@ -169,6 +180,7 @@ export function useDeleteProject() {
       queryClient.invalidateQueries({ queryKey: TODAY_TASKS_KEY });
       queryClient.invalidateQueries({ queryKey: UPCOMING_TASKS_KEY });
       queryClient.invalidateQueries({ queryKey: STATS_KEY });
+      queryClient.invalidateQueries({ queryKey: WEEKLY_REVIEW_KEY });
     },
   });
 }
@@ -184,6 +196,7 @@ export function useUpdateTask() {
       queryClient.invalidateQueries({ queryKey: TODAY_TASKS_KEY });
       queryClient.invalidateQueries({ queryKey: UPCOMING_TASKS_KEY });
       queryClient.invalidateQueries({ queryKey: STATS_KEY });
+      queryClient.invalidateQueries({ queryKey: WEEKLY_REVIEW_KEY });
       queryClient.invalidateQueries({ queryKey: CHANGELOGS_KEY });
       queryClient.invalidateQueries({ queryKey: TASK_SUBTASKS_KEY });
       queryClient.invalidateQueries({ queryKey: TASK_SUBTASK_STATS_KEY });
@@ -202,6 +215,7 @@ export function useDeleteTask() {
       queryClient.invalidateQueries({ queryKey: TODAY_TASKS_KEY });
       queryClient.invalidateQueries({ queryKey: UPCOMING_TASKS_KEY });
       queryClient.invalidateQueries({ queryKey: STATS_KEY });
+      queryClient.invalidateQueries({ queryKey: WEEKLY_REVIEW_KEY });
       queryClient.invalidateQueries({ queryKey: CHANGELOGS_KEY });
       queryClient.invalidateQueries({ queryKey: TASK_SUBTASKS_KEY });
       queryClient.invalidateQueries({ queryKey: TASK_SUBTASK_STATS_KEY });
@@ -310,6 +324,7 @@ export function useImportBackup() {
       queryClient.invalidateQueries({ queryKey: TODAY_TASKS_KEY });
       queryClient.invalidateQueries({ queryKey: UPCOMING_TASKS_KEY });
       queryClient.invalidateQueries({ queryKey: STATS_KEY });
+      queryClient.invalidateQueries({ queryKey: WEEKLY_REVIEW_KEY });
       queryClient.invalidateQueries({ queryKey: CHANGELOGS_KEY });
       queryClient.invalidateQueries({ queryKey: TASK_SUBTASKS_KEY });
       queryClient.invalidateQueries({ queryKey: TASK_SUBTASK_STATS_KEY });

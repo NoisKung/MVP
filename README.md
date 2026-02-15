@@ -16,6 +16,8 @@ Designed for individual developers who want a distraction-free, lightning-fast k
 - 🧠 **Natural Language Due Date** — Parse phrases like `tomorrow 9am`, `next monday`, and `in 3 days`
 - 🔁 **Recurring Tasks** — Repeat tasks daily, weekly, or monthly
 - 🔔 **Desktop Notifications** — Native reminder notifications via Tauri plugin (click to open task)
+- ⌨️ **Command Palette** — `⌘/Ctrl + K` to jump views, create, quick capture, and update task status fast
+- 🗂️ **Weekly Review** — Auto-summarize completed, pending, and overdue workload for the current week
 - 📊 **Dashboard** — Visualize your productivity at a glance
 - 📈 **Momentum Metrics** — Track due today, overdue, and completed-this-week trends
 - ⚙️ **Reminder Settings** — Toggle reminders and reset permission/history from Settings

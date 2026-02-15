@@ -15,6 +15,8 @@ import type {
   ProjectStatus,
   TaskRecurrence,
   TaskDashboardStats,
+  WeeklyReviewSnapshot,
+  WeeklyReviewCompletedTask,
   TaskTemplate,
   CreateProjectInput,
   CreateTaskSubtaskInput,
@@ -46,7 +48,23 @@ interface TaskChangeDiff {
   newValue: string | null;
 }
 
+interface WeeklyReviewAggregateRow {
+  pending_count: number;
+  overdue_count: number;
+  carry_over_count: number;
+  due_this_week_open_count: number;
+}
+
+interface WeeklyReviewCountRow {
+  count: number;
+}
+
+interface WeeklyReviewCompletedTaskRow extends Task {
+  completed_at: string;
+}
+
 const MILLISECONDS_PER_DAY = 24 * 60 * 60 * 1000;
+const DEFAULT_WEEKLY_REVIEW_LIST_LIMIT = 8;
 const TASK_STATUSES: TaskStatus[] = ["TODO", "DOING", "DONE", "ARCHIVED"];
 const TASK_PRIORITIES: TaskPriority[] = ["URGENT", "NORMAL", "LOW"];
 const PROJECT_STATUSES: ProjectStatus[] = ["ACTIVE", "COMPLETED", "ARCHIVED"];
@@ -1080,6 +1098,145 @@ export async function getTaskDashboardStats(
     dueToday: Number(dueRows[0]?.due_today ?? 0),
     overdue: Number(dueRows[0]?.overdue ?? 0),
     completedThisWeek: Number(completedRows[0]?.count ?? 0),
+  };
+}
+
+/** Fetch current-week review snapshot with momentum counters and focused task lists */
+export async function getWeeklyReviewSnapshot(
+  referenceDate = new Date(),
+  listLimit = DEFAULT_WEEKLY_REVIEW_LIST_LIMIT,
+): Promise<WeeklyReviewSnapshot> {
+  const db = await getDb();
+  const weekStart = getLocalWeekStart(referenceDate);
+  const weekEnd = new Date(weekStart.getTime() + 7 * MILLISECONDS_PER_DAY);
+  const periodEnd = new Date(Math.min(Date.now(), weekEnd.getTime()));
+  const normalizedLimit = Math.max(3, Math.min(Math.trunc(listLimit), 30));
+
+  const weekStartIso = weekStart.toISOString();
+  const weekEndIso = weekEnd.toISOString();
+  const periodEndIso = periodEnd.toISOString();
+
+  const aggregateRows = await db.select<WeeklyReviewAggregateRow[]>(
+    `SELECT
+        COALESCE(SUM(CASE
+          WHEN status NOT IN ('DONE', 'ARCHIVED')
+            AND created_at <= $1
+            AND (due_at IS NULL OR due_at >= $1)
+          THEN 1 ELSE 0 END), 0) as pending_count,
+        COALESCE(SUM(CASE
+          WHEN status NOT IN ('DONE', 'ARCHIVED')
+            AND created_at <= $1
+            AND due_at IS NOT NULL
+            AND due_at < $1
+          THEN 1 ELSE 0 END), 0) as overdue_count,
+        COALESCE(SUM(CASE
+          WHEN status NOT IN ('DONE', 'ARCHIVED')
+            AND created_at < $2
+          THEN 1 ELSE 0 END), 0) as carry_over_count,
+        COALESCE(SUM(CASE
+          WHEN status NOT IN ('DONE', 'ARCHIVED')
+            AND created_at <= $1
+            AND due_at IS NOT NULL
+            AND due_at >= $2
+            AND due_at < $3
+          THEN 1 ELSE 0 END), 0) as due_this_week_open_count
+      FROM tasks`,
+    [periodEndIso, weekStartIso, weekEndIso],
+  );
+
+  const createdRows = await db.select<WeeklyReviewCountRow[]>(
+    `SELECT COALESCE(COUNT(*), 0) as count
+       FROM tasks
+      WHERE created_at >= $1
+        AND created_at < $2`,
+    [weekStartIso, periodEndIso],
+  );
+
+  const completedCountRows = await db.select<WeeklyReviewCountRow[]>(
+    `SELECT COALESCE(COUNT(DISTINCT task_id), 0) as count
+       FROM task_changelogs
+      WHERE action = 'STATUS_CHANGED'
+        AND field_name = 'status'
+        AND new_value = 'DONE'
+        AND created_at >= $1
+        AND created_at < $2`,
+    [weekStartIso, periodEndIso],
+  );
+
+  const completedTaskRows = await db.select<WeeklyReviewCompletedTaskRow[]>(
+    `SELECT t.*, completed_log.completed_at
+       FROM tasks t
+       INNER JOIN (
+         SELECT task_id, MAX(created_at) as completed_at
+           FROM task_changelogs
+          WHERE action = 'STATUS_CHANGED'
+            AND field_name = 'status'
+            AND new_value = 'DONE'
+            AND created_at >= $1
+            AND created_at < $2
+          GROUP BY task_id
+       ) completed_log ON completed_log.task_id = t.id
+      ORDER BY completed_log.completed_at DESC
+      LIMIT $3`,
+    [weekStartIso, periodEndIso, normalizedLimit],
+  );
+
+  const overdueTasks = await db.select<Task[]>(
+    `SELECT *
+       FROM tasks
+      WHERE status NOT IN ('DONE', 'ARCHIVED')
+        AND created_at <= $1
+        AND due_at IS NOT NULL
+        AND due_at < $1
+      ORDER BY due_at ASC, updated_at DESC
+      LIMIT $2`,
+    [periodEndIso, normalizedLimit],
+  );
+
+  const pendingTasks = await db.select<Task[]>(
+    `SELECT *
+       FROM tasks
+      WHERE status NOT IN ('DONE', 'ARCHIVED')
+        AND created_at <= $1
+        AND (due_at IS NULL OR due_at >= $1)
+      ORDER BY
+        CASE WHEN due_at IS NULL THEN 1 ELSE 0 END ASC,
+        due_at ASC,
+        CASE priority
+          WHEN 'URGENT' THEN 0
+          WHEN 'NORMAL' THEN 1
+          ELSE 2
+        END ASC,
+        updated_at DESC
+      LIMIT $2`,
+    [periodEndIso, normalizedLimit],
+  );
+
+  const completedTasks: WeeklyReviewCompletedTask[] = completedTaskRows.map(
+    (row) => {
+      const { completed_at: completedAt, ...task } = row;
+      return {
+        task: task as Task,
+        completedAt,
+      };
+    },
+  );
+
+  return {
+    weekStart: weekStartIso,
+    weekEnd: weekEndIso,
+    periodEnd: periodEndIso,
+    completedCount: Number(completedCountRows[0]?.count ?? 0),
+    createdCount: Number(createdRows[0]?.count ?? 0),
+    pendingCount: Number(aggregateRows[0]?.pending_count ?? 0),
+    overdueCount: Number(aggregateRows[0]?.overdue_count ?? 0),
+    carryOverCount: Number(aggregateRows[0]?.carry_over_count ?? 0),
+    dueThisWeekOpenCount: Number(
+      aggregateRows[0]?.due_this_week_open_count ?? 0,
+    ),
+    completedTasks,
+    pendingTasks,
+    overdueTasks,
   };
 }
 

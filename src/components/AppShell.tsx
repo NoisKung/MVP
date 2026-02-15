@@ -9,6 +9,7 @@ import {
   CalendarRange,
   CalendarCheck2,
   CalendarDays,
+  ClipboardCheck,
   Settings2,
   Plus,
   Zap,
@@ -30,6 +31,11 @@ const NAV_ITEMS: NavItem[] = [
   { view: "calendar", label: "Calendar", icon: <CalendarRange size={18} /> },
   { view: "today", label: "Today", icon: <CalendarCheck2 size={18} /> },
   { view: "upcoming", label: "Upcoming", icon: <CalendarDays size={18} /> },
+  {
+    view: "review",
+    label: "Weekly Review",
+    icon: <ClipboardCheck size={18} />,
+  },
   {
     view: "dashboard",
     label: "Dashboard",

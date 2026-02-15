@@ -20,6 +20,28 @@ export interface TaskDashboardStats {
   completedThisWeek: number;
 }
 
+/** Completed task entry captured in a weekly review window */
+export interface WeeklyReviewCompletedTask {
+  task: Task;
+  completedAt: string;
+}
+
+/** Aggregated weekly review snapshot */
+export interface WeeklyReviewSnapshot {
+  weekStart: string;
+  weekEnd: string;
+  periodEnd: string;
+  completedCount: number;
+  createdCount: number;
+  pendingCount: number;
+  overdueCount: number;
+  carryOverCount: number;
+  dueThisWeekOpenCount: number;
+  completedTasks: WeeklyReviewCompletedTask[];
+  pendingTasks: Task[];
+  overdueTasks: Task[];
+}
+
 /** Task change event types */
 export type TaskChangelogAction = "CREATED" | "UPDATED" | "STATUS_CHANGED";
 
@@ -273,5 +295,6 @@ export type ViewMode =
   | "calendar"
   | "today"
   | "upcoming"
+  | "review"
   | "dashboard"
   | "settings";

@@ -30,6 +30,7 @@ const VIEW_COMMANDS: Array<{ view: ViewMode; label: string }> = [
   { view: "calendar", label: "Calendar" },
   { view: "today", label: "Today" },
   { view: "upcoming", label: "Upcoming" },
+  { view: "review", label: "Weekly Review" },
   { view: "dashboard", label: "Dashboard" },
   { view: "settings", label: "Settings" },
 ];
@@ -257,7 +258,10 @@ export function CommandPalette({
         onClose();
       }}
     >
-      <div className="command-panel" onMouseDown={(event) => event.stopPropagation()}>
+      <div
+        className="command-panel"
+        onMouseDown={(event) => event.stopPropagation()}
+      >
         <div className="command-input-wrap">
           <Search size={15} />
           <input
@@ -309,7 +313,9 @@ export function CommandPalette({
           )}
         </div>
 
-        <p className="command-footer">Enter to run • Arrow keys to navigate • Esc to close</p>
+        <p className="command-footer">
+          Enter to run • Arrow keys to navigate • Esc to close
+        </p>
       </div>
 
       <style>{`
