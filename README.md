@@ -18,6 +18,7 @@ Designed for individual developers who want a distraction-free, lightning-fast k
 - 🔔 **Desktop Notifications** — Native reminder notifications via Tauri plugin (click to open task)
 - ⌨️ **Command Palette** — `⌘/Ctrl + K` to jump views, create, quick capture, and update task status fast
 - 🗂️ **Weekly Review** — Auto-summarize completed, pending, and overdue workload for the current week
+- 🧰 **MVP CLI** — Manage projects/tasks from terminal (`list/create/update/done/quick-capture`)
 - 📊 **Dashboard** — Visualize your productivity at a glance
 - 📈 **Momentum Metrics** — Track due today, overdue, and completed-this-week trends
 - ⚙️ **Reminder Settings** — Toggle reminders and reset permission/history from Settings
@@ -54,6 +55,29 @@ npm install
 # Run in development mode
 npm run tauri dev
 ```
+
+### MVP CLI
+
+```bash
+# Show help
+npm run mvp-cli -- help
+
+# Create a project
+npm run mvp-cli -- project create --name "Client A" --color "#3B82F6"
+
+# Quick capture a task
+npm run mvp-cli -- quick-capture "Fix login race condition"
+
+# Create a task in a project
+npm run mvp-cli -- task create --title "Draft release note" --project "Client A" --priority NORMAL --due 2026-02-20
+
+# Mark a task done
+npm run mvp-cli -- task done --id <task-id>
+```
+
+CLI options:
+- Use `--json` for machine-readable output.
+- Use `--db <path>` to target a specific SQLite file.
 
 ### Build for Production
 
