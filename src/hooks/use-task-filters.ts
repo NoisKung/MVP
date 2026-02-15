@@ -20,7 +20,10 @@ import {
 } from "@/lib/task-filters";
 
 function createSavedViewId(): string {
-  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+  if (
+    typeof crypto !== "undefined" &&
+    typeof crypto.randomUUID === "function"
+  ) {
     return crypto.randomUUID();
   }
   return `saved-view-${Date.now()}-${Math.floor(Math.random() * 10000)}`;
@@ -37,6 +40,7 @@ function hasFiltersApplied(
 ): boolean {
   return (
     filters.search.trim().length > 0 ||
+    filters.projectIds.length > 0 ||
     filters.statuses.length > 0 ||
     filters.priorities.length > 0 ||
     filters.importantOnly ||
@@ -59,6 +63,7 @@ interface UseTaskFiltersResult {
   activeSavedViewId: string | null;
   hasActiveFilters: boolean;
   setSearch: (search: string) => void;
+  toggleProject: (projectId: string) => void;
   toggleStatus: (status: TaskStatus) => void;
   togglePriority: (priority: TaskPriority) => void;
   setImportantOnly: (importantOnly: boolean) => void;
@@ -73,15 +78,14 @@ interface UseTaskFiltersResult {
 export function useTaskFilters(activeView: ViewMode): UseTaskFiltersResult {
   const currentSortableView = toSortableView(activeView);
 
-  const [viewFilters, setViewFilters] = useState<TaskViewFilterPreferences>(() =>
-    loadTaskViewFiltersFromStorage(),
+  const [viewFilters, setViewFilters] = useState<TaskViewFilterPreferences>(
+    () => loadTaskViewFiltersFromStorage(),
   );
   const [savedViews, setSavedViews] = useState<SavedTaskView[]>(() =>
     loadSavedTaskViewsFromStorage(),
   );
-  const [activeSavedViewIds, setActiveSavedViewIds] = useState<ActiveSavedViewIds>(
-    INITIAL_ACTIVE_SAVED_VIEW_IDS,
-  );
+  const [activeSavedViewIds, setActiveSavedViewIds] =
+    useState<ActiveSavedViewIds>(INITIAL_ACTIVE_SAVED_VIEW_IDS);
 
   useEffect(() => {
     saveTaskViewFiltersToStorage(viewFilters);
@@ -109,7 +113,9 @@ export function useTaskFilters(activeView: ViewMode): UseTaskFiltersResult {
 
   const currentViewSavedViews = useMemo(() => {
     if (!currentSortableView) return [];
-    return savedViews.filter((savedView) => savedView.scope === currentSortableView);
+    return savedViews.filter(
+      (savedView) => savedView.scope === currentSortableView,
+    );
   }, [currentSortableView, savedViews]);
 
   const activeSavedViewId = currentSortableView
@@ -137,6 +143,19 @@ export function useTaskFilters(activeView: ViewMode): UseTaskFiltersResult {
   const setSearch = useCallback(
     (search: string) => {
       updateCurrentFilters((prevFilters) => ({ ...prevFilters, search }));
+    },
+    [updateCurrentFilters],
+  );
+
+  const toggleProject = useCallback(
+    (projectId: string) => {
+      updateCurrentFilters((prevFilters) => {
+        const hasProjectId = prevFilters.projectIds.includes(projectId);
+        const nextProjectIds = hasProjectId
+          ? prevFilters.projectIds.filter((item) => item !== projectId)
+          : [...prevFilters.projectIds, projectId];
+        return { ...prevFilters, projectIds: nextProjectIds };
+      });
     },
     [updateCurrentFilters],
   );
@@ -169,7 +188,10 @@ export function useTaskFilters(activeView: ViewMode): UseTaskFiltersResult {
 
   const setImportantOnly = useCallback(
     (importantOnly: boolean) => {
-      updateCurrentFilters((prevFilters) => ({ ...prevFilters, importantOnly }));
+      updateCurrentFilters((prevFilters) => ({
+        ...prevFilters,
+        importantOnly,
+      }));
     },
     [updateCurrentFilters],
   );
@@ -193,7 +215,9 @@ export function useTaskFilters(activeView: ViewMode): UseTaskFiltersResult {
 
     setViewFilters((prevFilters) => ({
       ...prevFilters,
-      [currentSortableView]: { ...DEFAULT_TASK_VIEW_FILTERS[currentSortableView] },
+      [currentSortableView]: {
+        ...DEFAULT_TASK_VIEW_FILTERS[currentSortableView],
+      },
     }));
     setActiveSavedViewIds((prevIds) => ({
       ...prevIds,
@@ -209,7 +233,9 @@ export function useTaskFilters(activeView: ViewMode): UseTaskFiltersResult {
       if (!normalizedName) return null;
 
       const nowIso = new Date().toISOString();
-      const normalizedFilters = normalizeTaskFilters(viewFilters[currentSortableView]);
+      const normalizedFilters = normalizeTaskFilters(
+        viewFilters[currentSortableView],
+      );
 
       const existingView = savedViews.find(
         (savedView) =>
@@ -262,7 +288,8 @@ export function useTaskFilters(activeView: ViewMode): UseTaskFiltersResult {
 
       const targetView = savedViews.find(
         (savedView) =>
-          savedView.id === savedViewId && savedView.scope === currentSortableView,
+          savedView.id === savedViewId &&
+          savedView.scope === currentSortableView,
       );
       if (!targetView) return;
 
@@ -295,6 +322,7 @@ export function useTaskFilters(activeView: ViewMode): UseTaskFiltersResult {
     activeSavedViewId,
     hasActiveFilters,
     setSearch,
+    toggleProject,
     toggleStatus,
     togglePriority,
     setImportantOnly,

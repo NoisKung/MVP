@@ -12,6 +12,7 @@ import { FolderKanban, Plus, Pencil, Trash2, CheckCircle2 } from "lucide-react";
 
 interface ProjectViewProps {
   tasks: Task[];
+  projectNameById: Record<string, string>;
   isLoadingTasks: boolean;
   isTasksError: boolean;
   tasksError: unknown;
@@ -88,6 +89,7 @@ function sortProjectTasks(tasks: Task[]): Task[] {
 
 export function ProjectView({
   tasks,
+  projectNameById,
   isLoadingTasks,
   isTasksError,
   tasksError,
@@ -447,6 +449,11 @@ export function ProjectView({
                               <TaskCard
                                 key={task.id}
                                 task={task}
+                                projectName={
+                                  task.project_id
+                                    ? projectNameById[task.project_id]
+                                    : null
+                                }
                                 onEdit={onEdit}
                                 onStatusChange={onStatusChange}
                                 onDelete={onDelete}

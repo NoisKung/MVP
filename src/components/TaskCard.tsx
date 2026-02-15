@@ -42,6 +42,7 @@ const PRIORITY_CONFIG: Record<
 
 interface TaskCardProps {
   task: Task;
+  projectName?: string | null;
   onEdit: (task: Task) => void;
   onStatusChange: (taskId: string, newStatus: TaskStatus) => void;
   onDelete: (taskId: string) => void;
@@ -56,6 +57,7 @@ interface TaskCardProps {
 
 export function TaskCard({
   task,
+  projectName = null,
   onEdit,
   onStatusChange,
   onDelete,
@@ -129,8 +131,14 @@ export function TaskCard({
       {/* Description */}
       {task.description && <p className="card-desc">{task.description}</p>}
 
-      {(dueBadge || recurrenceLabel || checklistProgressLabel) && (
+      {(projectName ||
+        dueBadge ||
+        recurrenceLabel ||
+        checklistProgressLabel) && (
         <div className="card-meta-row">
+          {projectName && (
+            <span className="card-project-badge">{projectName}</span>
+          )}
           {dueBadge && (
             <span className={`card-due-badge card-due-${dueBadge.tone}`}>
               <Clock3 size={11} />

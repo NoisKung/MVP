@@ -38,12 +38,14 @@ const SORT_OPTIONS: Array<{ value: TaskSortBy; label: string }> = [
 
 interface TaskFiltersBarProps {
   filters: TaskFilterState;
+  availableProjects: Array<{ id: string; name: string }>;
   savedViews: SavedTaskView[];
   activeSavedViewId: string | null;
   hasActiveFilters: boolean;
   visibleTasks: number;
   totalTasks: number;
   onSearchChange: (search: string) => void;
+  onToggleProject: (projectId: string) => void;
   onToggleStatus: (status: TaskStatus) => void;
   onTogglePriority: (priority: TaskPriority) => void;
   onSetImportantOnly: (importantOnly: boolean) => void;
@@ -57,12 +59,14 @@ interface TaskFiltersBarProps {
 
 export function TaskFiltersBar({
   filters,
+  availableProjects,
   savedViews,
   activeSavedViewId,
   hasActiveFilters,
   visibleTasks,
   totalTasks,
   onSearchChange,
+  onToggleProject,
   onToggleStatus,
   onTogglePriority,
   onSetImportantOnly,
@@ -116,6 +120,28 @@ export function TaskFiltersBar({
             <FilterX size={13} />
             Clear
           </button>
+        </div>
+      </div>
+
+      <div className="filters-row">
+        <span className="filters-label">Project</span>
+        <div className="chip-row">
+          {availableProjects.length === 0 ? (
+            <span className="saved-view-empty">
+              No projects available for filtering.
+            </span>
+          ) : (
+            availableProjects.map((project) => (
+              <button
+                key={project.id}
+                type="button"
+                className={`filter-chip${filters.projectIds.includes(project.id) ? " active" : ""}`}
+                onClick={() => onToggleProject(project.id)}
+              >
+                {project.name}
+              </button>
+            ))
+          )}
         </div>
       </div>
 

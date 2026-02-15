@@ -7,6 +7,7 @@ import { useTaskSubtaskStats } from "@/hooks/use-tasks";
 interface TaskScheduleViewProps {
   view: Extract<ViewMode, "today" | "upcoming">;
   tasks: Task[];
+  projectNameById: Record<string, string>;
   onEdit: (task: Task) => void;
   onStatusChange: (taskId: string, newStatus: TaskStatus) => void;
   onDelete: (taskId: string) => void;
@@ -22,6 +23,7 @@ interface TaskSection {
 export function TaskScheduleView({
   view,
   tasks,
+  projectNameById,
   onEdit,
   onStatusChange,
   onDelete,
@@ -98,6 +100,11 @@ export function TaskScheduleView({
                   >
                     <TaskCard
                       task={task}
+                      projectName={
+                        task.project_id
+                          ? projectNameById[task.project_id]
+                          : null
+                      }
                       onEdit={onEdit}
                       onStatusChange={onStatusChange}
                       onDelete={onDelete}

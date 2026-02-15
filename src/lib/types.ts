@@ -205,6 +205,7 @@ export type TaskViewFilterPreferences = Record<
 /** Search/filter state for task lists */
 export interface TaskFilterState {
   search: string;
+  projectIds: string[];
   statuses: TaskStatus[];
   priorities: TaskPriority[];
   importantOnly: boolean;

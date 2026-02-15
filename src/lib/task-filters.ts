@@ -36,6 +36,7 @@ const ALLOWED_SORT_OPTIONS: TaskSortBy[] = [
 
 export const DEFAULT_TASK_FILTERS: TaskFilterState = {
   search: "",
+  projectIds: [],
   statuses: [],
   priorities: [],
   importantOnly: false,
@@ -92,6 +93,16 @@ function normalizePriorities(priorities: unknown): TaskPriority[] {
   );
 }
 
+function normalizeProjectIds(projectIds: unknown): string[] {
+  if (!Array.isArray(projectIds)) return [];
+  const normalizedProjectIds = projectIds
+    .filter((projectId): projectId is string => typeof projectId === "string")
+    .map((projectId) => projectId.trim())
+    .filter(Boolean);
+
+  return Array.from(new Set(normalizedProjectIds));
+}
+
 function normalizeTaskSortableView(value: unknown): TaskSortableView {
   if (value === "today" || value === "upcoming") return value;
   return "board";
@@ -129,6 +140,7 @@ export function normalizeTaskFilters(input: unknown): TaskFilterState {
       typeof maybeFilters.search === "string"
         ? maybeFilters.search.trimStart()
         : DEFAULT_TASK_FILTERS.search,
+    projectIds: normalizeProjectIds(maybeFilters.projectIds),
     statuses: normalizeStatuses(maybeFilters.statuses),
     priorities: normalizePriorities(maybeFilters.priorities),
     importantOnly: Boolean(maybeFilters.importantOnly),
@@ -179,6 +191,14 @@ export function applyTaskFilters(
   const normalizedQuery = normalizedFilters.search.trim().toLowerCase();
 
   const filteredTasks = tasks.filter((task) => {
+    if (
+      normalizedFilters.projectIds.length > 0 &&
+      (!task.project_id ||
+        !normalizedFilters.projectIds.includes(task.project_id))
+    ) {
+      return false;
+    }
+
     if (
       normalizedFilters.statuses.length > 0 &&
       !normalizedFilters.statuses.includes(task.status)

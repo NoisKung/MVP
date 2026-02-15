@@ -38,6 +38,7 @@ const COLUMNS: KanbanColumnDef[] = [
 
 interface TaskBoardProps {
   tasks: Task[];
+  projectNameById: Record<string, string>;
   onEdit: (task: Task) => void;
   onStatusChange: (taskId: string, newStatus: TaskStatus) => void;
   onDelete: (taskId: string) => void;
@@ -46,6 +47,7 @@ interface TaskBoardProps {
 
 export function TaskBoard({
   tasks,
+  projectNameById,
   onEdit,
   onStatusChange,
   onDelete,
@@ -238,6 +240,11 @@ export function TaskBoard({
                     >
                       <TaskCard
                         task={task}
+                        projectName={
+                          task.project_id
+                            ? projectNameById[task.project_id]
+                            : null
+                        }
                         onEdit={onEdit}
                         onStatusChange={onStatusChange}
                         onDelete={onDelete}

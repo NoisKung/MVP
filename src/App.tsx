@@ -11,6 +11,7 @@ import { ReminderSettings } from "./components/ReminderSettings";
 import { TaskFiltersBar } from "./components/TaskFiltersBar";
 import {
   useTasks,
+  useProjects,
   useTodayTasks,
   useUpcomingTasks,
   useCreateTask,
@@ -78,6 +79,7 @@ function AppContent() {
     error: allTasksError,
     refetch: refetchAllTasks,
   } = useTasks();
+  const { data: projects = [] } = useProjects();
   const {
     data: todayTasks = [],
     isLoading: isLoadingTodayTasks,
@@ -101,6 +103,7 @@ function AppContent() {
     activeSavedViewId,
     hasActiveFilters,
     setSearch,
+    toggleProject,
     toggleStatus,
     togglePriority,
     setImportantOnly,
@@ -296,6 +299,16 @@ function AppContent() {
     return applyTaskFilters(taskViewState.tasks, filters);
   }, [taskViewState, filters]);
 
+  const availableProjects = useMemo(
+    () => projects.map((project) => ({ id: project.id, name: project.name })),
+    [projects],
+  );
+  const projectNameById = useMemo(() => {
+    return Object.fromEntries(
+      projects.map((project) => [project.id, project.name]),
+    ) as Record<string, string>;
+  }, [projects]);
+
   const content = taskViewState?.isLoading ? (
     <div
       style={{
@@ -363,6 +376,7 @@ function AppContent() {
   ) : activeView === "board" ? (
     <TaskBoard
       tasks={filteredTaskViewTasks}
+      projectNameById={projectNameById}
       onEdit={handleEditTask}
       onStatusChange={handleStatusChange}
       onDelete={handleDelete}
@@ -372,6 +386,7 @@ function AppContent() {
     <TaskScheduleView
       view={activeView}
       tasks={filteredTaskViewTasks}
+      projectNameById={projectNameById}
       onEdit={handleEditTask}
       onStatusChange={handleStatusChange}
       onDelete={handleDelete}
@@ -380,6 +395,7 @@ function AppContent() {
   ) : activeView === "projects" ? (
     <ProjectView
       tasks={allTasks}
+      projectNameById={projectNameById}
       isLoadingTasks={isLoadingAllTasks}
       isTasksError={isAllTasksError}
       tasksError={allTasksError}
@@ -402,12 +418,14 @@ function AppContent() {
       {taskViewState && !taskViewState.isLoading && !taskViewState.isError && (
         <TaskFiltersBar
           filters={filters}
+          availableProjects={availableProjects}
           savedViews={savedViews}
           activeSavedViewId={activeSavedViewId}
           hasActiveFilters={hasActiveFilters}
           visibleTasks={filteredTaskViewTasks.length}
           totalTasks={taskViewState.tasks.length}
           onSearchChange={setSearch}
+          onToggleProject={toggleProject}
           onToggleStatus={toggleStatus}
           onTogglePriority={togglePriority}
           onSetImportantOnly={setImportantOnly}
