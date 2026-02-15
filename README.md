@@ -13,6 +13,7 @@ Designed for individual developers who want a distraction-free, lightning-fast k
 - ✅ **Subtasks / Checklist** — Break tasks into actionable checklist items with progress tracking
 - 🗓️ **Today & Upcoming Views** — Focus on overdue/today tasks and the next 7 days at a glance
 - ⏰ **Due Dates & Reminders** — Add schedule metadata directly in task form
+- 🧠 **Natural Language Due Date** — Parse phrases like `tomorrow 9am`, `next monday`, and `in 3 days`
 - 🔁 **Recurring Tasks** — Repeat tasks daily, weekly, or monthly
 - 🔔 **Desktop Notifications** — Native reminder notifications via Tauri plugin (click to open task)
 - 📊 **Dashboard** — Visualize your productivity at a glance

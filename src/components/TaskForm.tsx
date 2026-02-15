@@ -33,6 +33,7 @@ import {
   useUpdateTaskSubtask,
   useUpsertTaskTemplate,
 } from "@/hooks/use-tasks";
+import { parseNaturalDueDate } from "@/lib/natural-date";
 
 const PRIORITIES: {
   value: TaskPriority;
@@ -237,6 +238,7 @@ export function TaskForm({ task, onSubmit, onClose }: TaskFormProps) {
   const [dueAt, setDueAt] = useState("");
   const [remindAt, setRemindAt] = useState("");
   const [recurrence, setRecurrence] = useState<TaskRecurrence>("NONE");
+  const [naturalDueText, setNaturalDueText] = useState("");
   const [timeError, setTimeError] = useState<string | null>(null);
   const [selectedTemplateId, setSelectedTemplateId] = useState("");
   const [templateError, setTemplateError] = useState<string | null>(null);
@@ -287,11 +289,13 @@ export function TaskForm({ task, onSubmit, onClose }: TaskFormProps) {
       setDueAt(toInputDateTime(task.due_at));
       setRemindAt(toInputDateTime(task.remind_at));
       setRecurrence(task.recurrence ?? "NONE");
+      setTimeError(null);
       setSelectedTemplateId("");
       setTemplateError(null);
       setDraftSubtasks([]);
       setNewSubtaskTitle("");
       setSubtaskError(null);
+      setNaturalDueText("");
       return;
     }
 
@@ -308,6 +312,7 @@ export function TaskForm({ task, onSubmit, onClose }: TaskFormProps) {
     setDraftSubtasks([]);
     setNewSubtaskTitle("");
     setSubtaskError(null);
+    setNaturalDueText("");
   }, [task]);
 
   // Keyboard shortcut: Escape to close
@@ -544,6 +549,23 @@ export function TaskForm({ task, onSubmit, onClose }: TaskFormProps) {
     );
   };
 
+  const handleApplyNaturalDueDate = () => {
+    const normalizedInput = naturalDueText.trim();
+    if (!normalizedInput) return;
+
+    const parsedDueDate = parseNaturalDueDate(normalizedInput, new Date());
+    if (!parsedDueDate) {
+      setTimeError(
+        "Could not parse due date. Try phrases like 'tomorrow 9am' or 'next monday'.",
+      );
+      return;
+    }
+
+    setDueAt(toInputDateTime(parsedDueDate.toISOString()));
+    setNaturalDueText("");
+    setTimeError(null);
+  };
+
   return (
     <div className="overlay" onClick={onClose}>
       <div
@@ -735,7 +757,10 @@ export function TaskForm({ task, onSubmit, onClose }: TaskFormProps) {
                 type="datetime-local"
                 className="input"
                 value={dueAt}
-                onChange={(event) => setDueAt(event.target.value)}
+                onChange={(event) => {
+                  setDueAt(event.target.value);
+                  if (timeError) setTimeError(null);
+                }}
               />
             </div>
 
@@ -749,9 +774,47 @@ export function TaskForm({ task, onSubmit, onClose }: TaskFormProps) {
                 type="datetime-local"
                 className="input"
                 value={remindAt}
-                onChange={(event) => setRemindAt(event.target.value)}
+                onChange={(event) => {
+                  setRemindAt(event.target.value);
+                  if (timeError) setTimeError(null);
+                }}
               />
             </div>
+          </div>
+
+          <div className="field">
+            <label className="field-label" htmlFor="task-natural-due">
+              Smart due input <span className="optional">(beta)</span>
+            </label>
+            <div className="natural-due-row">
+              <input
+                id="task-natural-due"
+                type="text"
+                className="input"
+                value={naturalDueText}
+                onChange={(event) => {
+                  setNaturalDueText(event.target.value);
+                  if (timeError) setTimeError(null);
+                }}
+                onKeyDown={(event) => {
+                  if (event.key !== "Enter") return;
+                  event.preventDefault();
+                  handleApplyNaturalDueDate();
+                }}
+                placeholder="tomorrow 9am, next monday, in 3 days..."
+              />
+              <button
+                type="button"
+                className="natural-due-btn"
+                onClick={handleApplyNaturalDueDate}
+                disabled={!naturalDueText.trim()}
+              >
+                Apply
+              </button>
+            </div>
+            <p className="field-help">
+              Examples: tomorrow 9am, next monday, in 3 days, 2026-03-01 14:30
+            </p>
           </div>
 
           <div className="field">
@@ -931,6 +994,11 @@ export function TaskForm({ task, onSubmit, onClose }: TaskFormProps) {
           font-weight: 400;
           color: var(--text-disabled);
         }
+        .field-help {
+          margin-top: 6px;
+          font-size: 11px;
+          color: var(--text-muted);
+        }
         .input {
           width: 100%;
           background: var(--bg-elevated);
@@ -1013,6 +1081,34 @@ export function TaskForm({ task, onSubmit, onClose }: TaskFormProps) {
           color: var(--danger);
           border-color: var(--danger);
           background: var(--danger-subtle);
+        }
+
+        .natural-due-row {
+          display: flex;
+          gap: 8px;
+          align-items: center;
+        }
+        .natural-due-btn {
+          height: 34px;
+          padding: 0 12px;
+          border: 1px solid var(--border-default);
+          border-radius: var(--radius-sm);
+          background: var(--bg-surface);
+          color: var(--text-secondary);
+          font-size: 12px;
+          font-weight: 600;
+          font-family: inherit;
+          cursor: pointer;
+          transition: all var(--duration) var(--ease);
+        }
+        .natural-due-btn:hover:not(:disabled) {
+          color: var(--text-primary);
+          border-color: var(--border-strong);
+          background: var(--bg-hover);
+        }
+        .natural-due-btn:disabled {
+          opacity: 0.55;
+          cursor: not-allowed;
         }
 
         .checklist-section {
@@ -1345,6 +1441,13 @@ export function TaskForm({ task, onSubmit, onClose }: TaskFormProps) {
           .checklist-add-btn {
             width: 100%;
             justify-content: center;
+          }
+          .natural-due-row {
+            flex-direction: column;
+            align-items: stretch;
+          }
+          .natural-due-btn {
+            width: 100%;
           }
         }
 
