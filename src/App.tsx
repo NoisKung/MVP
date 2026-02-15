@@ -10,6 +10,7 @@ import { ProjectView } from "./components/ProjectView";
 import { CalendarView } from "./components/CalendarView";
 import { ReminderSettings } from "./components/ReminderSettings";
 import { TaskFiltersBar } from "./components/TaskFiltersBar";
+import { CommandPalette } from "./components/CommandPalette";
 import {
   useTasks,
   useProjects,
@@ -120,6 +121,7 @@ function AppContent() {
   const [quickCaptureError, setQuickCaptureError] = useState<string | null>(
     null,
   );
+  const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
   const [createModalProjectId, setCreateModalProjectId] = useState<
     string | null
   >(null);
@@ -132,9 +134,14 @@ function AppContent() {
     setIsQuickCaptureOpen(false);
   }, []);
 
+  const closeCommandPalette = useCallback(() => {
+    setIsCommandPaletteOpen(false);
+  }, []);
+
   const openQuickCapture = useCallback(() => {
     setActionError(null);
     setQuickCaptureError(null);
+    setIsCommandPaletteOpen(false);
     setEditingTask(null);
     setCreateModalProjectId(null);
     setIsCreateOpen(false);
@@ -146,6 +153,7 @@ function AppContent() {
   const openCreateModal = useCallback(
     (projectId: string | null = null) => {
       closeQuickCapture();
+      setIsCommandPaletteOpen(false);
       setEditingTask(null);
       setCreateModalProjectId(projectId);
       setIsCreateOpen(true);
@@ -211,6 +219,36 @@ function AppContent() {
     window.addEventListener("keydown", handleCreateShortcut);
     return () => window.removeEventListener("keydown", handleCreateShortcut);
   }, [openCreateModal]);
+
+  useEffect(() => {
+    const handlePaletteShortcut = (event: KeyboardEvent) => {
+      if (
+        !(event.metaKey || event.ctrlKey) ||
+        event.shiftKey ||
+        event.altKey ||
+        event.key.toLowerCase() !== "k"
+      ) {
+        return;
+      }
+
+      if (isCreateOpen || editingTask || isQuickCaptureOpen) {
+        return;
+      }
+
+      event.preventDefault();
+      setIsCommandPaletteOpen((previousState) => !previousState);
+    };
+
+    window.addEventListener("keydown", handlePaletteShortcut);
+    return () => window.removeEventListener("keydown", handlePaletteShortcut);
+  }, [editingTask, isCreateOpen, isQuickCaptureOpen]);
+
+  useEffect(() => {
+    if (!isCommandPaletteOpen) return;
+    if (isCreateOpen || editingTask || isQuickCaptureOpen) {
+      setIsCommandPaletteOpen(false);
+    }
+  }, [editingTask, isCommandPaletteOpen, isCreateOpen, isQuickCaptureOpen]);
 
   const handleCreate = async (input: CreateTaskInput | UpdateTaskInput) => {
     setActionError(null);
@@ -529,6 +567,18 @@ function AppContent() {
         </div>
       )}
       {content}
+
+      <CommandPalette
+        isOpen={isCommandPaletteOpen}
+        activeView={activeView}
+        tasks={allTasks}
+        onClose={closeCommandPalette}
+        onOpenCreate={() => openCreateModal(null)}
+        onOpenQuickCapture={openQuickCapture}
+        onEditTask={handleEditTask}
+        onChangeTaskStatus={handleStatusChange}
+        onChangeView={setActiveView}
+      />
 
       {isQuickCaptureOpen && (
         <QuickCapture
