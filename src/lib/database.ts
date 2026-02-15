@@ -82,6 +82,7 @@ async function initSchema(db: Database): Promise<void> {
       id TEXT PRIMARY KEY,
       title TEXT NOT NULL,
       description TEXT,
+      notes_markdown TEXT,
       project_id TEXT,
       status TEXT NOT NULL CHECK(status IN ('TODO', 'DOING', 'DONE', 'ARCHIVED')),
       priority TEXT NOT NULL CHECK(priority IN ('URGENT', 'NORMAL', 'LOW')),
@@ -199,6 +200,10 @@ async function ensureTaskColumns(db: Database): Promise<void> {
 
   if (!existingColumns.has("project_id")) {
     await db.execute("ALTER TABLE tasks ADD COLUMN project_id TEXT");
+  }
+
+  if (!existingColumns.has("notes_markdown")) {
+    await db.execute("ALTER TABLE tasks ADD COLUMN notes_markdown TEXT");
   }
 }
 
@@ -337,6 +342,16 @@ function normalizeTemplateOffset(
     return null;
   }
   return Math.max(0, Math.round(offsetInMinutes));
+}
+
+function normalizeTaskNotesMarkdown(
+  notesMarkdown: string | null | undefined,
+): string | null {
+  if (typeof notesMarkdown !== "string") return null;
+
+  const normalizedNotes = notesMarkdown.replace(/\r\n/g, "\n");
+  if (!normalizedNotes.trim()) return null;
+  return normalizedNotes;
 }
 
 function normalizeSubtaskTitle(title: string): string {
@@ -568,6 +583,7 @@ export async function createTask(input: CreateTaskInput): Promise<Task> {
       id,
       title,
       description,
+      notes_markdown,
       project_id,
       status,
       priority,
@@ -578,11 +594,12 @@ export async function createTask(input: CreateTaskInput): Promise<Task> {
       created_at,
       updated_at
     )
-     VALUES ($1, $2, $3, $4, 'TODO', $5, $6, $7, $8, $9, $10, $11)`,
+     VALUES ($1, $2, $3, $4, $5, 'TODO', $6, $7, $8, $9, $10, $11, $12)`,
     [
       id,
       input.title,
       input.description ?? null,
+      normalizeTaskNotesMarkdown(input.notes_markdown ?? null),
       input.project_id ?? null,
       input.priority,
       input.is_important ? 1 : 0,
@@ -670,6 +687,23 @@ export async function updateTask(input: UpdateTaskInput): Promise<Task> {
         fieldName: "description",
         oldValue: oldDescription,
         newValue: newDescription,
+      });
+    }
+  }
+  if (input.notes_markdown !== undefined) {
+    const normalizedNotesMarkdown = normalizeTaskNotesMarkdown(
+      input.notes_markdown,
+    );
+    setClauses.push(`notes_markdown = $${paramIndex++}`);
+    params.push(normalizedNotesMarkdown);
+    const oldNotesMarkdown = existingTask.notes_markdown ?? null;
+    const newNotesMarkdown = normalizedNotesMarkdown ?? null;
+    if (oldNotesMarkdown !== newNotesMarkdown) {
+      changes.push({
+        action: "UPDATED",
+        fieldName: "notes_markdown",
+        oldValue: oldNotesMarkdown,
+        newValue: newNotesMarkdown,
       });
     }
   }
@@ -818,6 +852,7 @@ export async function updateTask(input: UpdateTaskInput): Promise<Task> {
           id,
           title,
           description,
+          notes_markdown,
           project_id,
           status,
           priority,
@@ -828,11 +863,12 @@ export async function updateTask(input: UpdateTaskInput): Promise<Task> {
           created_at,
           updated_at
         )
-         VALUES ($1, $2, $3, $4, 'TODO', $5, $6, $7, $8, $9, $10, $11)`,
+         VALUES ($1, $2, $3, $4, $5, 'TODO', $6, $7, $8, $9, $10, $11, $12)`,
         [
           nextTaskId,
           updatedTask.title,
           updatedTask.description ?? null,
+          updatedTask.notes_markdown ?? null,
           updatedTask.project_id ?? null,
           updatedTask.priority,
           updatedTask.is_important,

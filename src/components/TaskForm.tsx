@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import type {
   Task,
   TaskTemplate,
@@ -36,6 +36,7 @@ import {
   useUpsertTaskTemplate,
 } from "@/hooks/use-tasks";
 import { parseNaturalDueDate } from "@/lib/natural-date";
+import { renderMarkdownToHtml } from "@/lib/markdown";
 
 const PRIORITIES: {
   value: TaskPriority;
@@ -103,6 +104,13 @@ function formatChangelogValue(
 
   if (!value) return "Empty";
 
+  if (fieldName === "notes_markdown") {
+    const collapsedValue = value.replace(/\s+/g, " ").trim();
+    if (!collapsedValue) return "Empty";
+    if (collapsedValue.length <= 56) return collapsedValue;
+    return `${collapsedValue.slice(0, 53)}...`;
+  }
+
   if (fieldName === "status" && value in STATUS_LABELS) {
     return STATUS_LABELS[value as TaskStatus];
   }
@@ -143,17 +151,19 @@ function formatChangelogMessage(log: TaskChangelog): string {
           ? "Title"
           : log.field_name === "description"
             ? "Description"
-            : log.field_name === "is_important"
-              ? "Importance"
-              : log.field_name === "due_at"
-                ? "Due date"
-                : log.field_name === "remind_at"
-                  ? "Reminder"
-                  : log.field_name === "recurrence"
-                    ? "Repeat"
-                    : log.field_name === "project_id"
-                      ? "Project"
-                      : "Task";
+            : log.field_name === "notes_markdown"
+              ? "Notes"
+              : log.field_name === "is_important"
+                ? "Importance"
+                : log.field_name === "due_at"
+                  ? "Due date"
+                  : log.field_name === "remind_at"
+                    ? "Reminder"
+                    : log.field_name === "recurrence"
+                      ? "Repeat"
+                      : log.field_name === "project_id"
+                        ? "Project"
+                        : "Task";
 
   return `${fieldLabel} changed from ${formatChangelogValue(log.field_name, log.old_value)} to ${formatChangelogValue(log.field_name, log.new_value)}`;
 }
@@ -198,6 +208,12 @@ function toIsoDateTime(dateTimeInput: string): string | null {
   const parsedDate = new Date(dateTimeInput);
   if (Number.isNaN(parsedDate.getTime())) return null;
   return parsedDate.toISOString();
+}
+
+function normalizeNotesMarkdownInput(notesMarkdown: string): string | null {
+  const normalizedNotes = notesMarkdown.replace(/\r\n/g, "\n");
+  if (!normalizedNotes.trim()) return null;
+  return normalizedNotes;
 }
 
 function getOffsetMinutesFromIsoDateTime(
@@ -247,6 +263,8 @@ export function TaskForm({
 }: TaskFormProps) {
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
+  const [notesMarkdown, setNotesMarkdown] = useState("");
+  const [notesMode, setNotesMode] = useState<"edit" | "preview">("edit");
   const [priority, setPriority] = useState<TaskPriority>("NORMAL");
   const [isImportant, setIsImportant] = useState(false);
   const [dueAt, setDueAt] = useState("");
@@ -297,11 +315,17 @@ export function TaskForm({
     createTaskSubtask.isPending ||
     updateTaskSubtask.isPending ||
     deleteTaskSubtask.isPending;
+  const notesPreviewHtml = useMemo(
+    () => renderMarkdownToHtml(notesMarkdown),
+    [notesMarkdown],
+  );
 
   useEffect(() => {
     if (task) {
       setTitle(task.title);
       setDescription(task.description ?? "");
+      setNotesMarkdown(task.notes_markdown ?? "");
+      setNotesMode("edit");
       setPriority(task.priority);
       setIsImportant(!!task.is_important);
       setDueAt(toInputDateTime(task.due_at));
@@ -321,6 +345,8 @@ export function TaskForm({
 
     setTitle("");
     setDescription("");
+    setNotesMarkdown("");
+    setNotesMode("edit");
     setPriority("NORMAL");
     setIsImportant(false);
     setDueAt("");
@@ -352,6 +378,7 @@ export function TaskForm({
 
     const dueAtIso = toIsoDateTime(dueAt);
     const remindAtIso = toIsoDateTime(remindAt);
+    const normalizedNotesMarkdown = normalizeNotesMarkdownInput(notesMarkdown);
 
     if (dueAt && !dueAtIso) {
       setTimeError("Due date format is invalid.");
@@ -376,6 +403,7 @@ export function TaskForm({
         id: task.id,
         title: title.trim(),
         description: description.trim() || null,
+        notes_markdown: normalizedNotesMarkdown,
         project_id: projectId || null,
         priority,
         is_important: isImportant,
@@ -389,6 +417,7 @@ export function TaskForm({
       const input: CreateTaskInput = {
         title: title.trim(),
         description: description.trim() || undefined,
+        notes_markdown: normalizedNotesMarkdown ?? undefined,
         project_id: projectId || null,
         priority,
         is_important: isImportant,
@@ -657,6 +686,50 @@ export function TaskForm({
               placeholder="Add details..."
               rows={3}
             />
+          </div>
+
+          <div className="field notes-section">
+            <div className="notes-header">
+              <label className="field-label" htmlFor="task-notes-markdown">
+                Notes <span className="optional">(Markdown)</span>
+              </label>
+              <div className="notes-mode-row">
+                <button
+                  type="button"
+                  className={`notes-mode-btn${notesMode === "edit" ? " active" : ""}`}
+                  onClick={() => setNotesMode("edit")}
+                >
+                  Edit
+                </button>
+                <button
+                  type="button"
+                  className={`notes-mode-btn${notesMode === "preview" ? " active" : ""}`}
+                  onClick={() => setNotesMode("preview")}
+                >
+                  Preview
+                </button>
+              </div>
+            </div>
+
+            {notesMode === "edit" ? (
+              <textarea
+                id="task-notes-markdown"
+                className="input textarea notes-textarea"
+                value={notesMarkdown}
+                onChange={(event) => setNotesMarkdown(event.target.value)}
+                placeholder="Use markdown: # heading, - list, **bold**, [link](https://...)"
+                rows={8}
+              />
+            ) : notesPreviewHtml ? (
+              <div
+                className="notes-preview markdown-preview"
+                dangerouslySetInnerHTML={{ __html: notesPreviewHtml }}
+              />
+            ) : (
+              <p className="notes-preview-empty">
+                Nothing to preview yet. Add markdown in Edit mode.
+              </p>
+            )}
           </div>
 
           {!isEditing && (
@@ -1112,6 +1185,154 @@ export function TaskForm({
           resize: vertical;
           min-height: 72px;
         }
+        .notes-section {
+          margin-bottom: 16px;
+        }
+        .notes-header {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 8px;
+          margin-bottom: 6px;
+        }
+        .notes-mode-row {
+          display: inline-flex;
+          border: 1px solid var(--border-default);
+          border-radius: var(--radius-sm);
+          overflow: hidden;
+          background: var(--bg-surface);
+        }
+        .notes-mode-btn {
+          height: 28px;
+          min-width: 58px;
+          border: none;
+          background: transparent;
+          color: var(--text-muted);
+          font-size: 11px;
+          font-weight: 600;
+          font-family: inherit;
+          cursor: pointer;
+          transition: all var(--duration) var(--ease);
+        }
+        .notes-mode-btn:hover {
+          background: var(--bg-hover);
+          color: var(--text-primary);
+        }
+        .notes-mode-btn.active {
+          background: var(--accent-subtle);
+          color: var(--accent);
+        }
+        .notes-textarea {
+          min-height: 150px;
+          font-family: "JetBrains Mono", "Fira Code", ui-monospace, SFMono-Regular, Menlo, Monaco,
+            Consolas, "Liberation Mono", "Courier New", monospace;
+          font-size: 12px;
+          line-height: 1.55;
+        }
+        .notes-preview {
+          min-height: 150px;
+          max-height: 260px;
+          overflow: auto;
+          border: 1px solid var(--border-default);
+          border-radius: var(--radius-md);
+          background: var(--bg-elevated);
+          padding: 10px 12px;
+        }
+        .notes-preview-empty {
+          margin: 0;
+          border: 1px dashed var(--border-default);
+          border-radius: var(--radius-md);
+          background: var(--bg-elevated);
+          min-height: 86px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+          padding: 10px 12px;
+          font-size: 12px;
+          color: var(--text-muted);
+          text-align: center;
+        }
+        .markdown-preview h1,
+        .markdown-preview h2,
+        .markdown-preview h3,
+        .markdown-preview h4,
+        .markdown-preview h5,
+        .markdown-preview h6 {
+          margin: 0 0 8px;
+          color: var(--text-primary);
+          line-height: 1.3;
+        }
+        .markdown-preview h1 {
+          font-size: 18px;
+        }
+        .markdown-preview h2 {
+          font-size: 16px;
+        }
+        .markdown-preview h3 {
+          font-size: 14px;
+        }
+        .markdown-preview p {
+          margin: 0 0 8px;
+          font-size: 12px;
+          color: var(--text-secondary);
+          line-height: 1.6;
+          word-break: break-word;
+        }
+        .markdown-preview ul,
+        .markdown-preview ol {
+          margin: 0 0 8px;
+          padding-left: 20px;
+          color: var(--text-secondary);
+          font-size: 12px;
+          line-height: 1.6;
+        }
+        .markdown-preview li {
+          margin-bottom: 4px;
+        }
+        .markdown-preview blockquote {
+          margin: 0 0 8px;
+          padding: 0 0 0 10px;
+          border-left: 2px solid var(--border-strong);
+        }
+        .markdown-preview blockquote p {
+          margin: 0;
+          color: var(--text-muted);
+        }
+        .markdown-preview pre {
+          margin: 0 0 8px;
+          padding: 10px 12px;
+          border: 1px solid var(--border-default);
+          border-radius: var(--radius-sm);
+          background: var(--bg-surface);
+          overflow-x: auto;
+        }
+        .markdown-preview code {
+          font-family: "JetBrains Mono", "Fira Code", ui-monospace, SFMono-Regular, Menlo, Monaco,
+            Consolas, "Liberation Mono", "Courier New", monospace;
+          font-size: 11px;
+          background: var(--bg-surface);
+          border-radius: 4px;
+          padding: 1px 4px;
+          color: var(--text-primary);
+        }
+        .markdown-preview pre code {
+          padding: 0;
+          background: transparent;
+        }
+        .markdown-preview a {
+          color: var(--accent);
+          text-decoration: none;
+          border-bottom: 1px solid var(--accent);
+        }
+        .markdown-preview a:hover {
+          color: var(--accent-hover);
+          border-bottom-color: var(--accent-hover);
+        }
+        .markdown-preview hr {
+          border: none;
+          border-top: 1px solid var(--border-default);
+          margin: 10px 0;
+        }
 
         .template-section {
           margin-bottom: 16px;
@@ -1514,6 +1735,16 @@ export function TaskForm({
           .project-row {
             flex-direction: column;
             align-items: stretch;
+          }
+          .notes-header {
+            flex-direction: column;
+            align-items: flex-start;
+          }
+          .notes-mode-row {
+            width: 100%;
+          }
+          .notes-mode-btn {
+            flex: 1;
           }
           .template-actions {
             flex-direction: column;

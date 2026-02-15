@@ -28,6 +28,7 @@ export interface Task {
   id: string;
   title: string;
   description: string | null;
+  notes_markdown: string | null;
   project_id: string | null;
   status: TaskStatus;
   priority: TaskPriority;
@@ -43,6 +44,7 @@ export interface Task {
 export interface CreateTaskInput {
   title: string;
   description?: string;
+  notes_markdown?: string | null;
   project_id?: string | null;
   priority: TaskPriority;
   is_important: boolean;
@@ -60,6 +62,7 @@ export interface UpdateTaskInput {
   id: string;
   title?: string;
   description?: string | null;
+  notes_markdown?: string | null;
   project_id?: string | null;
   status?: TaskStatus;
   priority?: TaskPriority;
