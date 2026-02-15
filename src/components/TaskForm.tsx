@@ -1086,22 +1086,29 @@ export function TaskForm({
           display: flex;
           align-items: center;
           justify-content: center;
+          padding: 14px;
           z-index: 100;
         }
         .modal {
           background: var(--bg-surface);
           border: 1px solid var(--border-strong);
           border-radius: var(--radius-xl);
-          width: 460px;
-          max-width: 92vw;
+          width: min(560px, 96vw);
+          max-height: min(92vh, 940px);
           box-shadow: var(--shadow-lg);
+          display: flex;
+          flex-direction: column;
+          overflow: hidden;
         }
 
         .modal-header {
           display: flex;
           justify-content: space-between;
           align-items: center;
-          padding: 20px 24px 0;
+          padding: 14px 20px;
+          border-bottom: 1px solid var(--border-default);
+          background: var(--bg-surface);
+          flex-shrink: 0;
         }
         .modal-title {
           font-size: 16px;
@@ -1128,7 +1135,21 @@ export function TaskForm({
         }
 
         form {
-          padding: 20px 24px 24px;
+          padding: 16px 20px 18px;
+          flex: 1;
+          min-height: 0;
+          overflow-y: auto;
+          overscroll-behavior: contain;
+        }
+        form::-webkit-scrollbar {
+          width: 8px;
+        }
+        form::-webkit-scrollbar-thumb {
+          background: var(--border-strong);
+          border-radius: 9999px;
+        }
+        form::-webkit-scrollbar-track {
+          background: transparent;
         }
         .field {
           margin-bottom: 16px;
@@ -1223,15 +1244,15 @@ export function TaskForm({
           color: var(--accent);
         }
         .notes-textarea {
-          min-height: 150px;
+          min-height: 122px;
           font-family: "JetBrains Mono", "Fira Code", ui-monospace, SFMono-Regular, Menlo, Monaco,
             Consolas, "Liberation Mono", "Courier New", monospace;
           font-size: 12px;
           line-height: 1.55;
         }
         .notes-preview {
-          min-height: 150px;
-          max-height: 260px;
+          min-height: 122px;
+          max-height: 220px;
           overflow: auto;
           border: 1px solid var(--border-default);
           border-radius: var(--radius-md);
@@ -1658,7 +1679,16 @@ export function TaskForm({
           display: flex;
           justify-content: flex-end;
           gap: 8px;
-          margin-top: 8px;
+          margin-top: 10px;
+          position: sticky;
+          bottom: 0;
+          z-index: 2;
+          background: linear-gradient(
+            180deg,
+            rgba(12, 14, 20, 0),
+            var(--bg-surface) 26%
+          );
+          padding-bottom: 2px;
           padding-top: 16px;
           border-top: 1px solid var(--border-default);
         }
@@ -1705,16 +1735,17 @@ export function TaskForm({
             width: 100%;
             max-width: 100%;
             height: 100%;
+            max-height: 100%;
             border-radius: 0;
             border: none;
             display: flex;
             flex-direction: column;
           }
           .modal-header {
-            padding: 16px 16px 0;
+            padding: 12px 14px;
           }
           form {
-            padding: 16px;
+            padding: 14px 14px 16px;
             flex: 1;
             overflow-y: auto;
             display: flex;
@@ -1722,7 +1753,7 @@ export function TaskForm({
           }
           .modal-actions {
             margin-top: auto;
-            padding-top: 16px;
+            padding-top: 14px;
           }
           .field-row {
             flex-direction: column;
