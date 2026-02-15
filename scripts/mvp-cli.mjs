@@ -5,7 +5,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
-import { DatabaseSync } from "node:sqlite";
+
+let DatabaseSync = null;
 
 const APP_IDENTIFIER = "com.antigravity.solostack";
 const DB_FILE_NAME = "solostack.db";
@@ -23,7 +24,8 @@ class CliError extends Error {
 }
 
 function printHelp() {
-  console.log(`
+  console.log(
+    `
 SoloStack MVP CLI
 
 Usage:
@@ -59,7 +61,8 @@ Examples:
   npm run mvp-cli -- task list --status TODO
   npm run mvp-cli -- quick-capture "Follow up client feedback"
   npm run mvp-cli -- project create --name "Q2 Launch" --color "#7C69FF"
-`.trim());
+`.trim(),
+  );
 }
 
 function parseGlobalOptions(argv) {
@@ -138,7 +141,22 @@ function resolveDatabasePath(dbPathOverride) {
     fs.existsSync(candidatePath),
   );
 
-  return existingPath ?? candidates[0] ?? path.resolve(process.cwd(), DB_FILE_NAME);
+  return (
+    existingPath ?? candidates[0] ?? path.resolve(process.cwd(), DB_FILE_NAME)
+  );
+}
+
+async function ensureSqliteSupport() {
+  if (DatabaseSync) return;
+
+  try {
+    const sqliteModule = await import("node:sqlite");
+    DatabaseSync = sqliteModule.DatabaseSync;
+  } catch (_error) {
+    throw new CliError(
+      "MVP CLI requires Node.js 22+ (built-in node:sqlite not available).",
+    );
+  }
 }
 
 function getDefaultDatabaseCandidates() {
@@ -171,6 +189,9 @@ function getDefaultDatabaseCandidates() {
 }
 
 function openDatabase(dbPath) {
+  if (!DatabaseSync) {
+    throw new CliError("SQLite runtime is not initialized.");
+  }
   fs.mkdirSync(path.dirname(dbPath), { recursive: true });
   const db = new DatabaseSync(dbPath);
   db.exec("PRAGMA foreign_keys = ON");
@@ -254,7 +275,12 @@ function initializeSchema(db) {
     ON task_subtasks(task_id, created_at ASC);
   `);
 
-  ensureColumn(db, "tasks", "due_at", "ALTER TABLE tasks ADD COLUMN due_at DATETIME");
+  ensureColumn(
+    db,
+    "tasks",
+    "due_at",
+    "ALTER TABLE tasks ADD COLUMN due_at DATETIME",
+  );
   ensureColumn(
     db,
     "tasks",
@@ -384,9 +410,7 @@ function insertTaskChangelog(
 
 function getTaskById(db, taskId) {
   return (
-    db.prepare(
-      "SELECT * FROM tasks WHERE id = ? LIMIT 1",
-    ).get(taskId) ?? null
+    db.prepare("SELECT * FROM tasks WHERE id = ? LIMIT 1").get(taskId) ?? null
   );
 }
 
@@ -396,14 +420,15 @@ function getProjectByRef(db, ref) {
   if (!normalizedRef) return null;
 
   const byId =
-    db.prepare("SELECT * FROM projects WHERE id = ? LIMIT 1").get(normalizedRef) ??
-    null;
+    db
+      .prepare("SELECT * FROM projects WHERE id = ? LIMIT 1")
+      .get(normalizedRef) ?? null;
   if (byId) return byId;
 
   return (
-    db.prepare("SELECT * FROM projects WHERE LOWER(name) = LOWER(?) LIMIT 1").get(
-      normalizedRef,
-    ) ?? null
+    db
+      .prepare("SELECT * FROM projects WHERE LOWER(name) = LOWER(?) LIMIT 1")
+      .get(normalizedRef) ?? null
   );
 }
 
@@ -466,7 +491,9 @@ function printTaskRows(rows) {
   for (const row of rows) {
     const important = row.is_important ? " !important" : "";
     const dueLabel = formatDateTime(row.due_at);
-    const projectLabel = row.project_name ? ` | project: ${row.project_name}` : "";
+    const projectLabel = row.project_name
+      ? ` | project: ${row.project_name}`
+      : "";
     console.log(
       `${row.id} | [${row.status}] [${row.priority}]${important} ${row.title} | due: ${dueLabel}${projectLabel}`,
     );
@@ -482,7 +509,9 @@ function printProjectRows(rows) {
   for (const row of rows) {
     const description = row.description ? ` | ${row.description}` : "";
     const color = row.color ? ` | ${row.color}` : "";
-    console.log(`${row.id} | [${row.status}] ${row.name}${color}${description}`);
+    console.log(
+      `${row.id} | [${row.status}] ${row.name}${color}${description}`,
+    );
   }
 }
 
@@ -496,11 +525,14 @@ function outputPayload(payload, jsonOutput, printer) {
 
 function handleQuickCapture(db, tokens, jsonOutput) {
   const { flags, positional } = parseCommandArgs(tokens);
-  const titleFromFlag = typeof flags.get("title") === "string" ? flags.get("title") : "";
+  const titleFromFlag =
+    typeof flags.get("title") === "string" ? flags.get("title") : "";
   const titleFromPositional = positional.join(" ").trim();
   const title = (titleFromFlag || titleFromPositional).trim();
   if (!title) {
-    throw new CliError('Missing title. Example: quick-capture "Plan sprint retrospective"');
+    throw new CliError(
+      'Missing title. Example: quick-capture "Plan sprint retrospective"',
+    );
   }
 
   const now = nowIso();
@@ -532,14 +564,10 @@ function handleQuickCapture(db, tokens, jsonOutput) {
   });
 
   const task = getTaskById(db, taskId);
-  outputPayload(
-    task,
-    jsonOutput,
-    (item) => {
-      console.log(`Created task ${item.id}`);
-      printTaskRows([{ ...item, project_name: null }]);
-    },
-  );
+  outputPayload(task, jsonOutput, (item) => {
+    console.log(`Created task ${item.id}`);
+    printTaskRows([{ ...item, project_name: null }]);
+  });
 }
 
 function handleProjectCommand(db, subcommand, tokens, jsonOutput) {
@@ -569,7 +597,8 @@ function handleProjectCommand(db, subcommand, tokens, jsonOutput) {
 
   if (subcommand === "create") {
     const { flags, positional } = parseCommandArgs(tokens);
-    const nameFlag = typeof flags.get("name") === "string" ? flags.get("name") : "";
+    const nameFlag =
+      typeof flags.get("name") === "string" ? flags.get("name") : "";
     const nameFromPositional = positional.join(" ").trim();
     const name = (nameFlag || nameFromPositional).trim();
     if (!name) {
@@ -611,14 +640,10 @@ function handleProjectCommand(db, subcommand, tokens, jsonOutput) {
     const createdProject = db
       .prepare("SELECT * FROM projects WHERE id = ? LIMIT 1")
       .get(id);
-    outputPayload(
-      createdProject,
-      jsonOutput,
-      (project) => {
-        console.log(`Created project ${project.id}`);
-        printProjectRows([project]);
-      },
-    );
+    outputPayload(createdProject, jsonOutput, (project) => {
+      console.log(`Created project ${project.id}`);
+      printProjectRows([project]);
+    });
     return;
   }
 
@@ -793,11 +818,7 @@ function applyTaskUpdate(db, existingTask, patch) {
   for (const field of comparableFields) {
     if (!(field in patch)) continue;
     const nextValue =
-      field === "is_important"
-        ? patch[field]
-          ? 1
-          : 0
-        : patch[field];
+      field === "is_important" ? (patch[field] ? 1 : 0) : patch[field];
     const previousValue = existingTask[field];
     if ((previousValue ?? null) === (nextValue ?? null)) continue;
 
@@ -907,7 +928,8 @@ function createNextRecurringTask(db, completedTask, createdAt) {
 
 function handleTaskCreate(db, tokens, jsonOutput) {
   const { flags, positional } = parseCommandArgs(tokens);
-  const titleFlag = typeof flags.get("title") === "string" ? flags.get("title") : "";
+  const titleFlag =
+    typeof flags.get("title") === "string" ? flags.get("title") : "";
   const titlePositional = positional.join(" ").trim();
   const title = (titleFlag || titlePositional).trim();
   if (!title) {
@@ -926,7 +948,11 @@ function handleTaskCreate(db, tokens, jsonOutput) {
       ? "NONE"
       : normalizeEnum(recurrenceValue, TASK_RECURRENCES, "task recurrence");
 
-  const isImportant = parseBoolean(flags.get("important"), "important flag", false);
+  const isImportant = parseBoolean(
+    flags.get("important"),
+    "important flag",
+    false,
+  );
   const dueAt = parseDateInput(flags.get("due"), "due");
   const remindAt = parseDateInput(flags.get("remind"), "remind");
   const description =
@@ -989,17 +1015,13 @@ function handleTaskCreate(db, tokens, jsonOutput) {
   });
 
   const createdTask = getTaskById(db, taskId);
-  outputPayload(
-    createdTask,
-    jsonOutput,
-    (task) => {
-      console.log(`Created task ${task.id}`);
-      const projectName = task.project_id
-        ? getProjectByRef(db, task.project_id)?.name ?? null
-        : null;
-      printTaskRows([{ ...task, project_name: projectName }]);
-    },
-  );
+  outputPayload(createdTask, jsonOutput, (task) => {
+    console.log(`Created task ${task.id}`);
+    const projectName = task.project_id
+      ? (getProjectByRef(db, task.project_id)?.name ?? null)
+      : null;
+    printTaskRows([{ ...task, project_name: projectName }]);
+  });
 }
 
 function resolveTaskId(flags, positional) {
@@ -1021,7 +1043,11 @@ function handleTaskUpdate(db, tokens, jsonOutput) {
   }
 
   const patch = normalizeTaskPatch(db, existingTask, flags);
-  const { changedFields, updatedTask } = applyTaskUpdate(db, existingTask, patch);
+  const { changedFields, updatedTask } = applyTaskUpdate(
+    db,
+    existingTask,
+    patch,
+  );
   outputPayload(
     {
       task: updatedTask,
@@ -1037,7 +1063,7 @@ function handleTaskUpdate(db, tokens, jsonOutput) {
         );
       }
       const projectName = result.task.project_id
-        ? getProjectByRef(db, result.task.project_id)?.name ?? null
+        ? (getProjectByRef(db, result.task.project_id)?.name ?? null)
         : null;
       printTaskRows([{ ...result.task, project_name: projectName }]);
     },
@@ -1072,7 +1098,7 @@ function handleTaskDone(db, tokens, jsonOutput) {
         console.log(`Marked task ${result.task.id} as DONE.`);
       }
       const projectName = result.task.project_id
-        ? getProjectByRef(db, result.task.project_id)?.name ?? null
+        ? (getProjectByRef(db, result.task.project_id)?.name ?? null)
         : null;
       printTaskRows([{ ...result.task, project_name: projectName }]);
     },
@@ -1100,7 +1126,9 @@ function handleTaskCommand(db, subcommand, tokens, jsonOutput) {
   throw new CliError(`Unknown task subcommand: ${subcommand}`);
 }
 
-function run() {
+async function run() {
+  await ensureSqliteSupport();
+
   const { dbPathOverride, jsonOutput, rest } = parseGlobalOptions(
     process.argv.slice(2),
   );
@@ -1150,7 +1178,7 @@ function run() {
 }
 
 try {
-  run();
+  await run();
 } catch (error) {
   if (error instanceof CliError) {
     console.error(`Error: ${error.message}`);

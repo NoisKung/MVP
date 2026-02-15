@@ -78,6 +78,7 @@ npm run mvp-cli -- task done --id <task-id>
 CLI options:
 - Use `--json` for machine-readable output.
 - Use `--db <path>` to target a specific SQLite file.
+- `mvp-cli` requires Node.js 22+ (uses built-in `node:sqlite`).
 
 ### Build for Production
 
