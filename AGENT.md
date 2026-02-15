@@ -41,6 +41,7 @@ Your current mission is to build **SoloStack**, a high-performance, local-first 
 2.  **No Magic Numbers:** Define constants for all hardcoded values.
 3.  **Comments:** Explain *WHY*, not *HOW*. The code should explain *HOW*.
 4.  **Early Returns:** Use guard clauses to reduce nesting depth.
+5.  **Best-Practice First (Mandatory):** Before writing or changing code, define the applicable best-practice approach (architecture, typing, error handling, security, test strategy, and maintainability) and implement against that plan every time.
 
 ### **Rust (Backend)**
 - **Safety First:** NEVER use `.unwrap()` in production code. Always handle errors using `Result<T, E>` or `Option<T>` with `match` or `?` operator.
@@ -90,3 +91,18 @@ CREATE TABLE IF NOT EXISTS sessions (
     completed_at DATETIME DEFAULT CURRENT_TIMESTAMP,
     FOREIGN KEY(task_id) REFERENCES tasks(id)
 );
+```
+
+---
+
+## 5. Testing & Release Gates (Mandatory)
+
+- **Feature Test Requirement:** Every new feature or behavior change MUST include automated tests (unit/integration) in the same change set.
+- **New Page Requirement:** Every new page/view/screen MUST include Playwright E2E coverage for that page, and existing Playwright specs MUST be updated when navigation/UI flow changes.
+- **Pre-Build Gate:** Before every build, tests MUST run first and pass. Build is not allowed if tests fail.
+- **Pre-Release Gate:** Before every release, run the full test suite (including Playwright) and release only when all tests pass.
+
+### Required execution order
+1. `npm run test`
+2. `npm run test:e2e`
+3. `npm run build`
