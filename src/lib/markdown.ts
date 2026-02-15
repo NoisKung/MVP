@@ -1,5 +1,5 @@
 const CODE_BLOCK_TOKEN_PREFIX = "@@SOLSTACK_CODE_BLOCK_";
-const INLINE_CODE_TOKEN_PREFIX = "@@SOLSTACK_INLINE_CODE_";
+const INLINE_CODE_TOKEN_PREFIX = "@@SOLSTACKINLINECODETOKEN";
 const ALLOWED_LINK_PROTOCOLS = new Set(["http:", "https:", "mailto:", "tel:"]);
 
 function escapeHtml(input: string): string {
@@ -66,13 +66,15 @@ function applyInlineMarkdown(escapedContent: string): string {
   );
 
   return withStrikethrough.replace(
-    /@@SOLSTACK_INLINE_CODE_(\d+)@@/g,
-    (_match, indexValue: string) =>
-      inlineCodeBlocks[Number(indexValue)] ?? "",
+    /@@SOLSTACKINLINECODETOKEN(\d+)@@/g,
+    (_match, indexValue: string) => inlineCodeBlocks[Number(indexValue)] ?? "",
   );
 }
 
-function renderLinesToHtml(escapedMarkdown: string, codeBlocks: string[]): string {
+function renderLinesToHtml(
+  escapedMarkdown: string,
+  codeBlocks: string[],
+): string {
   const htmlParts: string[] = [];
   const paragraphLines: string[] = [];
   const listItems: string[] = [];
@@ -155,7 +157,7 @@ function renderLinesToHtml(escapedMarkdown: string, codeBlocks: string[]): strin
       continue;
     }
 
-    const blockquoteMatch = trimmedLine.match(/^>\s?(.*)$/);
+    const blockquoteMatch = trimmedLine.match(/^(?:>\s?|&gt;\s?)(.*)$/);
     if (blockquoteMatch) {
       flushParagraph();
       flushList();

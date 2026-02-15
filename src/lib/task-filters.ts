@@ -157,29 +157,32 @@ function matchesDueFilter(
   if (dueFilter === "ALL") return true;
 
   const dueDate = parseDateTime(task.due_at);
-  if (dueFilter === "NO_DUE") return dueDate === null;
-  if (!dueDate) return false;
-
-  const startOfToday = getStartOfDay(referenceDate);
-  const endOfToday = getEndOfDay(referenceDate);
-  const endOfNext7Days = new Date(
-    endOfToday.getTime() + 7 * DAY_IN_MILLISECONDS,
-  );
-
-  if (dueFilter === "OVERDUE") {
-    return (
-      task.status !== "DONE" &&
-      task.status !== "ARCHIVED" &&
-      dueDate.getTime() < referenceDate.getTime()
-    );
+  switch (dueFilter) {
+    case "NO_DUE":
+      return dueDate === null;
+    case "OVERDUE": {
+      if (!dueDate) return false;
+      return (
+        task.status !== "DONE" &&
+        task.status !== "ARCHIVED" &&
+        dueDate.getTime() < referenceDate.getTime()
+      );
+    }
+    case "TODAY": {
+      if (!dueDate) return false;
+      const startOfToday = getStartOfDay(referenceDate);
+      const endOfToday = getEndOfDay(referenceDate);
+      return dueDate >= startOfToday && dueDate < endOfToday;
+    }
+    case "NEXT_7_DAYS": {
+      if (!dueDate) return false;
+      const endOfToday = getEndOfDay(referenceDate);
+      const endOfNext7Days = new Date(
+        endOfToday.getTime() + 7 * DAY_IN_MILLISECONDS,
+      );
+      return dueDate >= endOfToday && dueDate < endOfNext7Days;
+    }
   }
-  if (dueFilter === "TODAY") {
-    return dueDate >= startOfToday && dueDate < endOfToday;
-  }
-  if (dueFilter === "NEXT_7_DAYS") {
-    return dueDate >= endOfToday && dueDate < endOfNext7Days;
-  }
-  return true;
 }
 
 export function applyTaskFilters(
@@ -302,10 +305,6 @@ function normalizeTaskViewFilters(
 }
 
 function migrateLegacyTaskViewFilters(): TaskViewFilterPreferences {
-  if (typeof window === "undefined") {
-    return { ...DEFAULT_TASK_VIEW_FILTERS };
-  }
-
   let legacyBoardFilters = { ...DEFAULT_TASK_VIEW_FILTERS.board };
   let legacySorts: Record<TaskSortableView, TaskSortBy> = {
     board: DEFAULT_TASK_VIEW_FILTERS.board.sortBy,

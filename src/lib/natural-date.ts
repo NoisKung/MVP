@@ -39,9 +39,11 @@ function withTime(referenceDate: Date, time: ParsedTime): Date {
 }
 
 function parseTimeExpression(value: string | undefined): ParsedTime | null {
+  /* c8 ignore start -- defensive guard for direct internal misuse */
   if (!value) return null;
   const normalizedValue = value.trim().toLowerCase();
   if (!normalizedValue) return null;
+  /* c8 ignore stop */
 
   if (normalizedValue === "noon") {
     return { hours: 12, minutes: 0 };
