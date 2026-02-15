@@ -148,7 +148,7 @@ export function AppShell({ children, onCreateClick }: AppShellProps) {
             <HardDrive size={13} />
             <span>Local Storage</span>
           </div>
-          <span className="footer-version">v0.1.0</span>
+          <span className="footer-version">v0.1.1</span>
         </div>
       </aside>
 
