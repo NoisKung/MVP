@@ -8,9 +8,11 @@ import type {
   Project,
   SessionRecord,
   SyncCheckpoint,
+  SyncEndpointSettings,
   SyncEntityType,
   SyncOperation,
   SyncOutboxRecord,
+  SyncPushChange,
   TaskStatus,
   TaskPriority,
   TaskSubtask,
@@ -28,6 +30,7 @@ import type {
   CreateTaskInput,
   UpdateProjectInput,
   UpdateTaskSubtaskInput,
+  UpdateSyncEndpointSettingsInput,
   UpsertTaskTemplateInput,
   UpdateTaskInput,
 } from "./types";
@@ -93,6 +96,9 @@ const SYNC_ENTITY_TYPES: SyncEntityType[] = [
 ];
 const SYNC_OPERATIONS: SyncOperation[] = ["UPSERT", "DELETE"];
 const SYNC_SETTINGS_DEVICE_ID_KEY = "sync.device_id";
+const SYNC_SETTINGS_PUSH_URL_KEY = "local.sync.push_url";
+const SYNC_SETTINGS_PULL_URL_KEY = "local.sync.pull_url";
+const LOCAL_ONLY_SETTING_PREFIX = "local.";
 
 /** Get or create the database connection singleton */
 async function getDb(): Promise<Database> {
@@ -681,10 +687,13 @@ async function assertProjectExists(
 async function insertTaskSubtask(
   db: Database,
   input: CreateTaskSubtaskInput,
+  deviceId: string,
   nowIso = new Date().toISOString(),
-): Promise<void> {
+): Promise<TaskSubtask | null> {
   const normalizedTitle = normalizeSubtaskTitle(input.title);
-  if (!normalizedTitle) return;
+  if (!normalizedTitle) return null;
+
+  const subtaskId = uuidv4();
 
   await db.execute(
     `INSERT INTO task_subtasks (
@@ -693,18 +702,27 @@ async function insertTaskSubtask(
         title,
         is_done,
         created_at,
-        updated_at
+        updated_at,
+        sync_version,
+        updated_by_device
       )
-       VALUES ($1, $2, $3, $4, $5, $6)`,
+       VALUES ($1, $2, $3, $4, $5, $6, 1, $7)`,
     [
-      uuidv4(),
+      subtaskId,
       input.task_id,
       normalizedTitle,
       input.is_done ? 1 : 0,
       nowIso,
       nowIso,
+      deviceId,
     ],
   );
+
+  const rows = await db.select<TaskSubtask[]>(
+    "SELECT * FROM task_subtasks WHERE id = $1 LIMIT 1",
+    [subtaskId],
+  );
+  return rows[0] ?? null;
 }
 
 export async function getOrCreateDeviceId(): Promise<string> {
@@ -726,6 +744,121 @@ export async function getOrCreateDeviceId(): Promise<string> {
     [SYNC_SETTINGS_DEVICE_ID_KEY, generatedDeviceId],
   );
   return generatedDeviceId;
+}
+
+export async function getSyncEndpointSettings(): Promise<SyncEndpointSettings> {
+  const db = await getDb();
+  const rows = await db.select<AppSettingRecord[]>(
+    "SELECT key, value FROM settings WHERE key IN ($1, $2)",
+    [SYNC_SETTINGS_PUSH_URL_KEY, SYNC_SETTINGS_PULL_URL_KEY],
+  );
+
+  let pushUrl: string | null = null;
+  let pullUrl: string | null = null;
+  for (const row of rows) {
+    if (row.key === SYNC_SETTINGS_PUSH_URL_KEY) {
+      pushUrl = normalizeSyncEndpointUrl(row.value);
+    } else if (row.key === SYNC_SETTINGS_PULL_URL_KEY) {
+      pullUrl = normalizeSyncEndpointUrl(row.value);
+    }
+  }
+
+  return {
+    push_url: pushUrl,
+    pull_url: pullUrl,
+  };
+}
+
+export async function updateSyncEndpointSettings(
+  input: UpdateSyncEndpointSettingsInput,
+): Promise<SyncEndpointSettings> {
+  const db = await getDb();
+  const pushUrl = normalizeSyncEndpointUrl(input.push_url);
+  const pullUrl = normalizeSyncEndpointUrl(input.pull_url);
+  const hasPushUrl = Boolean(pushUrl);
+  const hasPullUrl = Boolean(pullUrl);
+
+  if (hasPushUrl !== hasPullUrl) {
+    throw new Error(
+      "Both sync push URL and sync pull URL must be set together.",
+    );
+  }
+
+  if (
+    pushUrl &&
+    (!isValidSyncEndpointUrl(pushUrl) || !isValidSyncEndpointUrl(pullUrl ?? ""))
+  ) {
+    throw new Error("Sync endpoints must be valid http(s) URLs.");
+  }
+
+  await db.execute("BEGIN IMMEDIATE");
+  try {
+    if (pushUrl) {
+      await db.execute(
+        `INSERT INTO settings (key, value)
+             VALUES ($1, $2)
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+        [SYNC_SETTINGS_PUSH_URL_KEY, pushUrl],
+      );
+      await db.execute(
+        `INSERT INTO settings (key, value)
+             VALUES ($1, $2)
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+        [SYNC_SETTINGS_PULL_URL_KEY, pullUrl],
+      );
+    } else {
+      await db.execute("DELETE FROM settings WHERE key IN ($1, $2)", [
+        SYNC_SETTINGS_PUSH_URL_KEY,
+        SYNC_SETTINGS_PULL_URL_KEY,
+      ]);
+    }
+    await db.execute("COMMIT");
+  } catch (error) {
+    await db.execute("ROLLBACK");
+    throw error;
+  }
+
+  return {
+    push_url: pushUrl,
+    pull_url: pullUrl,
+  };
+}
+
+async function enqueueEntityUpsert(
+  entityType: SyncEntityType,
+  entityId: string,
+  payload: unknown,
+  createdAt?: string,
+): Promise<void> {
+  const normalizedPayload = isPlainObject(payload) ? payload : {};
+  await enqueueSyncOutboxChange({
+    entity_type: entityType,
+    entity_id: entityId,
+    operation: "UPSERT",
+    payload: normalizedPayload,
+    created_at: createdAt,
+  });
+}
+
+async function enqueueEntityDelete(
+  entityType: SyncEntityType,
+  entityId: string,
+  deviceId: string,
+  deletedAt: string,
+): Promise<void> {
+  await upsertDeletedRecord({
+    entity_type: entityType,
+    entity_id: entityId,
+    deleted_by_device: deviceId,
+    deleted_at: deletedAt,
+  });
+  await enqueueSyncOutboxChange({
+    entity_type: entityType,
+    entity_id: entityId,
+    operation: "DELETE",
+    payload: null,
+    created_at: deletedAt,
+  });
 }
 
 export async function getSyncCheckpoint(): Promise<SyncCheckpoint> {
@@ -928,6 +1061,429 @@ export async function listDeletedRecords(
   );
 }
 
+interface SyncEntityVersionState {
+  exists: boolean;
+  updated_at: string | null;
+  updated_by_device: string | null;
+}
+
+function normalizeDeviceIdForLww(value: string | null | undefined): string {
+  return value?.trim().toLowerCase() ?? "";
+}
+
+function toComparableTimestamp(
+  value: string | null | undefined,
+): number | null {
+  if (!value) return null;
+  const parsedDate = new Date(value);
+  if (Number.isNaN(parsedDate.getTime())) return null;
+  return parsedDate.getTime();
+}
+
+function shouldApplyIncomingLww(
+  existing: SyncEntityVersionState,
+  incoming: Pick<SyncPushChange, "updated_at" | "updated_by_device">,
+): boolean {
+  if (!existing.exists) return true;
+
+  const incomingTime = toComparableTimestamp(incoming.updated_at);
+  if (incomingTime === null) return false;
+
+  const existingTime = toComparableTimestamp(existing.updated_at);
+  if (existingTime === null) return true;
+
+  if (incomingTime > existingTime) return true;
+  if (incomingTime < existingTime) return false;
+
+  return (
+    normalizeDeviceIdForLww(incoming.updated_by_device) >=
+    normalizeDeviceIdForLww(existing.updated_by_device)
+  );
+}
+
+function normalizeSyncVersion(value: number): number {
+  if (!Number.isFinite(value) || value <= 0) return 1;
+  return Math.floor(value);
+}
+
+function normalizeOptionalText(value: unknown): string | null {
+  const text = asNullableString(value)?.trim() ?? "";
+  return text || null;
+}
+
+function normalizeSyncEndpointUrl(
+  value: string | null | undefined,
+): string | null {
+  if (typeof value !== "string") return null;
+  const normalized = value.trim();
+  return normalized || null;
+}
+
+function isValidSyncEndpointUrl(value: string): boolean {
+  try {
+    const parsedUrl = new URL(value);
+    return parsedUrl.protocol === "http:" || parsedUrl.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+async function getSyncEntityVersionState(
+  db: Database,
+  entityType: SyncEntityType,
+  entityId: string,
+): Promise<SyncEntityVersionState> {
+  if (entityType === "PROJECT") {
+    const rows = await db.select<
+      Array<{ updated_at: string; updated_by_device: string | null }>
+    >(
+      "SELECT updated_at, updated_by_device FROM projects WHERE id = $1 LIMIT 1",
+      [entityId],
+    );
+    const row = rows[0];
+    return {
+      exists: Boolean(row),
+      updated_at: row?.updated_at ?? null,
+      updated_by_device: row?.updated_by_device ?? null,
+    };
+  }
+
+  if (entityType === "TASK") {
+    const rows = await db.select<
+      Array<{ updated_at: string; updated_by_device: string | null }>
+    >("SELECT updated_at, updated_by_device FROM tasks WHERE id = $1 LIMIT 1", [
+      entityId,
+    ]);
+    const row = rows[0];
+    return {
+      exists: Boolean(row),
+      updated_at: row?.updated_at ?? null,
+      updated_by_device: row?.updated_by_device ?? null,
+    };
+  }
+
+  if (entityType === "TASK_SUBTASK") {
+    const rows = await db.select<
+      Array<{ updated_at: string; updated_by_device: string | null }>
+    >(
+      "SELECT updated_at, updated_by_device FROM task_subtasks WHERE id = $1 LIMIT 1",
+      [entityId],
+    );
+    const row = rows[0];
+    return {
+      exists: Boolean(row),
+      updated_at: row?.updated_at ?? null,
+      updated_by_device: row?.updated_by_device ?? null,
+    };
+  }
+
+  if (entityType === "TASK_TEMPLATE") {
+    const rows = await db.select<
+      Array<{ updated_at: string; updated_by_device: string | null }>
+    >(
+      "SELECT updated_at, updated_by_device FROM task_templates WHERE id = $1 LIMIT 1",
+      [entityId],
+    );
+    const row = rows[0];
+    return {
+      exists: Boolean(row),
+      updated_at: row?.updated_at ?? null,
+      updated_by_device: row?.updated_by_device ?? null,
+    };
+  }
+
+  const rows = await db.select<Array<{ key: string }>>(
+    "SELECT key FROM settings WHERE key = $1 LIMIT 1",
+    [entityId],
+  );
+  return {
+    exists: rows.length > 0,
+    updated_at: null,
+    updated_by_device: null,
+  };
+}
+
+export async function applyIncomingSyncChange(
+  change: SyncPushChange,
+): Promise<"applied" | "skipped" | "conflict"> {
+  const db = await getDb();
+  const entityId = change.entity_id.trim();
+  if (!entityId) return "skipped";
+
+  const isSettingEntity = change.entity_type === "SETTING";
+  if (
+    isSettingEntity &&
+    (entityId === SYNC_SETTINGS_DEVICE_ID_KEY ||
+      entityId.startsWith(LOCAL_ONLY_SETTING_PREFIX))
+  ) {
+    // Keep local-only settings stable per installation.
+    return "skipped";
+  }
+
+  const payload =
+    change.operation === "UPSERT" && isPlainObject(change.payload)
+      ? change.payload
+      : {};
+
+  if (!isSettingEntity) {
+    const existingState = await getSyncEntityVersionState(
+      db,
+      change.entity_type,
+      entityId,
+    );
+    if (!shouldApplyIncomingLww(existingState, change)) {
+      return "skipped";
+    }
+  }
+
+  const normalizedSyncVersion = normalizeSyncVersion(change.sync_version);
+
+  if (change.operation === "UPSERT") {
+    if (change.entity_type === "PROJECT") {
+      const name = normalizeProjectName(asNullableString(payload.name) ?? "");
+      if (!name) return "conflict";
+
+      await db.execute(
+        `INSERT INTO projects (
+            id,
+            name,
+            description,
+            color,
+            status,
+            created_at,
+            updated_at,
+            sync_version,
+            updated_by_device
+          )
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+        ON CONFLICT(id) DO UPDATE SET
+          name = excluded.name,
+          description = excluded.description,
+          color = excluded.color,
+          status = excluded.status,
+          created_at = excluded.created_at,
+          updated_at = excluded.updated_at,
+          sync_version = excluded.sync_version,
+          updated_by_device = excluded.updated_by_device`,
+        [
+          entityId,
+          name,
+          normalizeOptionalText(payload.description),
+          normalizeOptionalText(payload.color),
+          asProjectStatus(payload.status),
+          asIsoDateStringOrNow(payload.created_at),
+          change.updated_at,
+          normalizedSyncVersion,
+          change.updated_by_device,
+        ],
+      );
+    } else if (change.entity_type === "TASK") {
+      const title = asNullableString(payload.title)?.trim() ?? "";
+      if (!title) return "conflict";
+
+      const incomingProjectId = normalizeOptionalText(payload.project_id);
+      let projectId: string | null = incomingProjectId;
+      if (incomingProjectId) {
+        const projectRows = await db.select<Array<{ id: string }>>(
+          "SELECT id FROM projects WHERE id = $1 LIMIT 1",
+          [incomingProjectId],
+        );
+        if (projectRows.length === 0) {
+          return "conflict";
+        }
+      } else {
+        projectId = null;
+      }
+
+      await db.execute(
+        `INSERT INTO tasks (
+            id,
+            title,
+            description,
+            notes_markdown,
+            project_id,
+            status,
+            priority,
+            is_important,
+            due_at,
+            remind_at,
+            recurrence,
+            created_at,
+            updated_at,
+            sync_version,
+            updated_by_device
+          )
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+        ON CONFLICT(id) DO UPDATE SET
+          title = excluded.title,
+          description = excluded.description,
+          notes_markdown = excluded.notes_markdown,
+          project_id = excluded.project_id,
+          status = excluded.status,
+          priority = excluded.priority,
+          is_important = excluded.is_important,
+          due_at = excluded.due_at,
+          remind_at = excluded.remind_at,
+          recurrence = excluded.recurrence,
+          created_at = excluded.created_at,
+          updated_at = excluded.updated_at,
+          sync_version = excluded.sync_version,
+          updated_by_device = excluded.updated_by_device`,
+        [
+          entityId,
+          title,
+          normalizeOptionalText(payload.description),
+          normalizeTaskNotesMarkdown(asNullableString(payload.notes_markdown)),
+          projectId,
+          asTaskStatus(payload.status),
+          asTaskPriority(payload.priority),
+          asBooleanSqliteNumber(payload.is_important),
+          normalizeOptionalText(payload.due_at),
+          normalizeOptionalText(payload.remind_at),
+          asTaskRecurrence(payload.recurrence),
+          asIsoDateStringOrNow(payload.created_at),
+          change.updated_at,
+          normalizedSyncVersion,
+          change.updated_by_device,
+        ],
+      );
+    } else if (change.entity_type === "TASK_SUBTASK") {
+      const taskId = normalizeOptionalText(payload.task_id);
+      const title = asNullableString(payload.title)?.trim() ?? "";
+      if (!taskId || !title) return "conflict";
+
+      const taskRows = await db.select<Array<{ id: string }>>(
+        "SELECT id FROM tasks WHERE id = $1 LIMIT 1",
+        [taskId],
+      );
+      if (taskRows.length === 0) {
+        return "conflict";
+      }
+
+      await db.execute(
+        `INSERT INTO task_subtasks (
+            id,
+            task_id,
+            title,
+            is_done,
+            created_at,
+            updated_at,
+            sync_version,
+            updated_by_device
+          )
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        ON CONFLICT(id) DO UPDATE SET
+          task_id = excluded.task_id,
+          title = excluded.title,
+          is_done = excluded.is_done,
+          created_at = excluded.created_at,
+          updated_at = excluded.updated_at,
+          sync_version = excluded.sync_version,
+          updated_by_device = excluded.updated_by_device`,
+        [
+          entityId,
+          taskId,
+          title,
+          asBooleanSqliteNumber(payload.is_done),
+          asIsoDateStringOrNow(payload.created_at),
+          change.updated_at,
+          normalizedSyncVersion,
+          change.updated_by_device,
+        ],
+      );
+    } else if (change.entity_type === "TASK_TEMPLATE") {
+      const name = asNullableString(payload.name)?.trim() ?? "";
+      if (!name) return "conflict";
+
+      await db.execute(
+        `INSERT INTO task_templates (
+            id,
+            name,
+            title_template,
+            description,
+            priority,
+            is_important,
+            due_offset_minutes,
+            remind_offset_minutes,
+            recurrence,
+            created_at,
+            updated_at,
+            sync_version,
+            updated_by_device
+          )
+           VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
+        ON CONFLICT(id) DO UPDATE SET
+          name = excluded.name,
+          title_template = excluded.title_template,
+          description = excluded.description,
+          priority = excluded.priority,
+          is_important = excluded.is_important,
+          due_offset_minutes = excluded.due_offset_minutes,
+          remind_offset_minutes = excluded.remind_offset_minutes,
+          recurrence = excluded.recurrence,
+          created_at = excluded.created_at,
+          updated_at = excluded.updated_at,
+          sync_version = excluded.sync_version,
+          updated_by_device = excluded.updated_by_device`,
+        [
+          entityId,
+          name,
+          normalizeOptionalText(payload.title_template),
+          normalizeOptionalText(payload.description),
+          asTaskPriority(payload.priority),
+          asBooleanSqliteNumber(payload.is_important),
+          asNullableInteger(payload.due_offset_minutes),
+          asNullableInteger(payload.remind_offset_minutes),
+          asTaskRecurrence(payload.recurrence),
+          asIsoDateStringOrNow(payload.created_at),
+          change.updated_at,
+          normalizedSyncVersion,
+          change.updated_by_device,
+        ],
+      );
+    } else {
+      const value =
+        typeof payload.value === "string"
+          ? payload.value
+          : payload.value === undefined || payload.value === null
+            ? ""
+            : JSON.stringify(payload.value);
+      await db.execute(
+        `INSERT INTO settings (key, value)
+             VALUES ($1, $2)
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+        [entityId, value],
+      );
+    }
+
+    await db.execute(
+      "DELETE FROM deleted_records WHERE entity_type = $1 AND entity_id = $2",
+      [change.entity_type, entityId],
+    );
+    return "applied";
+  }
+
+  if (change.entity_type === "PROJECT") {
+    await db.execute("DELETE FROM projects WHERE id = $1", [entityId]);
+  } else if (change.entity_type === "TASK") {
+    await db.execute("DELETE FROM tasks WHERE id = $1", [entityId]);
+  } else if (change.entity_type === "TASK_SUBTASK") {
+    await db.execute("DELETE FROM task_subtasks WHERE id = $1", [entityId]);
+  } else if (change.entity_type === "TASK_TEMPLATE") {
+    await db.execute("DELETE FROM task_templates WHERE id = $1", [entityId]);
+  } else {
+    await db.execute("DELETE FROM settings WHERE key = $1", [entityId]);
+  }
+
+  await upsertDeletedRecord({
+    entity_type: change.entity_type,
+    entity_id: entityId,
+    deleted_by_device: change.updated_by_device,
+    deleted_at: change.updated_at,
+  });
+  return "applied";
+}
+
 /** Fetch all non-archived tasks, newest first */
 export async function getAllTasks(): Promise<Task[]> {
   const db = await getDb();
@@ -961,6 +1517,7 @@ export async function createProject(
 ): Promise<Project> {
   const db = await getDb();
   const now = new Date().toISOString();
+  const deviceId = await getOrCreateDeviceId();
   const normalizedName = normalizeProjectName(input.name);
   if (!normalizedName) {
     throw new Error("Project name is required.");
@@ -983,9 +1540,11 @@ export async function createProject(
         color,
         status,
         created_at,
-        updated_at
+        updated_at,
+        sync_version,
+        updated_by_device
       )
-       VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+       VALUES ($1, $2, $3, $4, $5, $6, $7, 1, $8)`,
     [
       projectId,
       normalizedName,
@@ -994,6 +1553,7 @@ export async function createProject(
       normalizeProjectStatus(input.status),
       now,
       now,
+      deviceId,
     ],
   );
 
@@ -1001,7 +1561,9 @@ export async function createProject(
     "SELECT * FROM projects WHERE id = $1 LIMIT 1",
     [projectId],
   );
-  return rows[0];
+  const createdProject = rows[0];
+  await enqueueEntityUpsert("PROJECT", createdProject.id, createdProject, now);
+  return createdProject;
 }
 
 /** Update an existing project */
@@ -1009,6 +1571,8 @@ export async function updateProject(
   input: UpdateProjectInput,
 ): Promise<Project> {
   const db = await getDb();
+  const now = new Date().toISOString();
+  const deviceId = await getOrCreateDeviceId();
   const existingRows = await db.select<Project[]>(
     "SELECT * FROM projects WHERE id = $1 LIMIT 1",
     [input.id],
@@ -1059,8 +1623,11 @@ export async function updateProject(
     return existingProject;
   }
 
+  setClauses.push("sync_version = COALESCE(sync_version, 0) + 1");
+  setClauses.push(`updated_by_device = $${paramIndex++}`);
+  params.push(deviceId);
   setClauses.push(`updated_at = $${paramIndex++}`);
-  params.push(new Date().toISOString());
+  params.push(now);
   params.push(input.id);
 
   await db.execute(
@@ -1074,16 +1641,49 @@ export async function updateProject(
     "SELECT * FROM projects WHERE id = $1 LIMIT 1",
     [input.id],
   );
-  return rows[0];
+  const updatedProject = rows[0];
+  await enqueueEntityUpsert("PROJECT", updatedProject.id, updatedProject, now);
+  return updatedProject;
 }
 
 /** Delete a project and unassign all linked tasks */
 export async function deleteProject(id: string): Promise<void> {
   const db = await getDb();
-  await db.execute("UPDATE tasks SET project_id = NULL WHERE project_id = $1", [
-    id,
-  ]);
+  const now = new Date().toISOString();
+  const deviceId = await getOrCreateDeviceId();
+
+  const projectRows = await db.select<Project[]>(
+    "SELECT * FROM projects WHERE id = $1 LIMIT 1",
+    [id],
+  );
+  const project = projectRows[0];
+  if (!project) return;
+
+  const affectedTasks = await db.select<Task[]>(
+    "SELECT * FROM tasks WHERE project_id = $1",
+    [id],
+  );
+  await db.execute(
+    `UPDATE tasks
+        SET project_id = NULL,
+            sync_version = COALESCE(sync_version, 0) + 1,
+            updated_by_device = $2,
+            updated_at = $3
+      WHERE project_id = $1`,
+    [id, deviceId, now],
+  );
+  for (const task of affectedTasks) {
+    const rows = await db.select<Task[]>(
+      "SELECT * FROM tasks WHERE id = $1 LIMIT 1",
+      [task.id],
+    );
+    const updatedTask = rows[0];
+    if (!updatedTask) continue;
+    await enqueueEntityUpsert("TASK", updatedTask.id, updatedTask, now);
+  }
+
   await db.execute("DELETE FROM projects WHERE id = $1", [id]);
+  await enqueueEntityDelete("PROJECT", project.id, deviceId, now);
 }
 
 /** Create a new task and return it */
@@ -1091,6 +1691,7 @@ export async function createTask(input: CreateTaskInput): Promise<Task> {
   const db = await getDb();
   const id = uuidv4();
   const now = new Date().toISOString();
+  const deviceId = await getOrCreateDeviceId();
 
   await assertProjectExists(db, input.project_id ?? null);
 
@@ -1108,9 +1709,11 @@ export async function createTask(input: CreateTaskInput): Promise<Task> {
       remind_at,
       recurrence,
       created_at,
-      updated_at
+      updated_at,
+      sync_version,
+      updated_by_device
     )
-     VALUES ($1, $2, $3, $4, $5, 'TODO', $6, $7, $8, $9, $10, $11, $12)`,
+     VALUES ($1, $2, $3, $4, $5, 'TODO', $6, $7, $8, $9, $10, $11, $12, 1, $13)`,
     [
       id,
       input.title,
@@ -1124,6 +1727,7 @@ export async function createTask(input: CreateTaskInput): Promise<Task> {
       input.recurrence ?? "NONE",
       now,
       now,
+      deviceId,
     ],
   );
 
@@ -1141,28 +1745,39 @@ export async function createTask(input: CreateTaskInput): Promise<Task> {
     }))
     .filter((subtask) => subtask.title.length > 0);
 
+  const createdSubtasks: TaskSubtask[] = [];
   for (const subtask of subtasks) {
-    await insertTaskSubtask(
+    const createdSubtask = await insertTaskSubtask(
       db,
       {
         task_id: id,
         title: subtask.title,
         is_done: subtask.is_done,
       },
+      deviceId,
       now,
     );
+    if (createdSubtask) {
+      createdSubtasks.push(createdSubtask);
+    }
   }
 
   const rows = await db.select<Task[]>("SELECT * FROM tasks WHERE id = $1", [
     id,
   ]);
-  return rows[0];
+  const createdTask = rows[0];
+  await enqueueEntityUpsert("TASK", createdTask.id, createdTask, now);
+  for (const subtask of createdSubtasks) {
+    await enqueueEntityUpsert("TASK_SUBTASK", subtask.id, subtask, now);
+  }
+  return createdTask;
 }
 
 /** Update an existing task */
 export async function updateTask(input: UpdateTaskInput): Promise<Task> {
   const db = await getDb();
   const now = new Date().toISOString();
+  const deviceId = await getOrCreateDeviceId();
   const existingRows = await db.select<Task[]>(
     "SELECT * FROM tasks WHERE id = $1",
     [input.id],
@@ -1317,6 +1932,9 @@ export async function updateTask(input: UpdateTaskInput): Promise<Task> {
     }
   }
 
+  setClauses.push("sync_version = COALESCE(sync_version, 0) + 1");
+  setClauses.push(`updated_by_device = $${paramIndex++}`);
+  params.push(deviceId);
   setClauses.push(`updated_at = $${paramIndex++}`);
   params.push(now);
 
@@ -1377,9 +1995,11 @@ export async function updateTask(input: UpdateTaskInput): Promise<Task> {
           remind_at,
           recurrence,
           created_at,
-          updated_at
+          updated_at,
+          sync_version,
+          updated_by_device
         )
-         VALUES ($1, $2, $3, $4, $5, 'TODO', $6, $7, $8, $9, $10, $11, $12)`,
+         VALUES ($1, $2, $3, $4, $5, 'TODO', $6, $7, $8, $9, $10, $11, $12, 1, $13)`,
         [
           nextTaskId,
           updatedTask.title,
@@ -1393,6 +2013,7 @@ export async function updateTask(input: UpdateTaskInput): Promise<Task> {
           updatedTask.recurrence,
           now,
           now,
+          deviceId,
         ],
       );
 
@@ -1402,16 +2023,44 @@ export async function updateTask(input: UpdateTaskInput): Promise<Task> {
         newValue: updatedTask.title,
         createdAt: now,
       });
+
+      const nextTaskRows = await db.select<Task[]>(
+        "SELECT * FROM tasks WHERE id = $1 LIMIT 1",
+        [nextTaskId],
+      );
+      const nextTask = nextTaskRows[0];
+      if (nextTask) {
+        await enqueueEntityUpsert("TASK", nextTask.id, nextTask, now);
+      }
     }
   }
 
+  await enqueueEntityUpsert("TASK", updatedTask.id, updatedTask, now);
   return updatedTask;
 }
 
 /** Delete a task by ID */
 export async function deleteTask(id: string): Promise<void> {
   const db = await getDb();
+  const now = new Date().toISOString();
+  const deviceId = await getOrCreateDeviceId();
+
+  const taskRows = await db.select<Task[]>(
+    "SELECT * FROM tasks WHERE id = $1 LIMIT 1",
+    [id],
+  );
+  const task = taskRows[0];
+  if (!task) return;
+
+  const subtaskRows = await db.select<TaskSubtask[]>(
+    "SELECT * FROM task_subtasks WHERE task_id = $1",
+    [id],
+  );
   await db.execute("DELETE FROM tasks WHERE id = $1", [id]);
+  for (const subtask of subtaskRows) {
+    await enqueueEntityDelete("TASK_SUBTASK", subtask.id, deviceId, now);
+  }
+  await enqueueEntityDelete("TASK", task.id, deviceId, now);
 }
 
 /** Get task counts by status */
@@ -1721,6 +2370,7 @@ export async function createTaskSubtask(
 ): Promise<TaskSubtask> {
   const db = await getDb();
   const now = new Date().toISOString();
+  const deviceId = await getOrCreateDeviceId();
   const normalizedTitle = normalizeSubtaskTitle(input.title);
   if (!normalizedTitle) {
     throw new Error("Subtask title is required.");
@@ -1734,9 +2384,11 @@ export async function createTaskSubtask(
         title,
         is_done,
         created_at,
-        updated_at
+        updated_at,
+        sync_version,
+        updated_by_device
       )
-       VALUES ($1, $2, $3, $4, $5, $6)`,
+       VALUES ($1, $2, $3, $4, $5, $6, 1, $7)`,
     [
       subtaskId,
       input.task_id,
@@ -1744,6 +2396,7 @@ export async function createTaskSubtask(
       input.is_done ? 1 : 0,
       now,
       now,
+      deviceId,
     ],
   );
 
@@ -1751,7 +2404,14 @@ export async function createTaskSubtask(
     "SELECT * FROM task_subtasks WHERE id = $1",
     [subtaskId],
   );
-  return rows[0];
+  const createdSubtask = rows[0];
+  await enqueueEntityUpsert(
+    "TASK_SUBTASK",
+    createdSubtask.id,
+    createdSubtask,
+    now,
+  );
+  return createdSubtask;
 }
 
 /** Update a checklist item */
@@ -1759,6 +2419,8 @@ export async function updateTaskSubtask(
   input: UpdateTaskSubtaskInput,
 ): Promise<TaskSubtask> {
   const db = await getDb();
+  const now = new Date().toISOString();
+  const deviceId = await getOrCreateDeviceId();
   const existingRows = await db.select<TaskSubtask[]>(
     "SELECT * FROM task_subtasks WHERE id = $1",
     [input.id],
@@ -1791,8 +2453,11 @@ export async function updateTaskSubtask(
     return existingSubtask;
   }
 
+  setClauses.push("sync_version = COALESCE(sync_version, 0) + 1");
+  setClauses.push(`updated_by_device = $${paramIndex++}`);
+  params.push(deviceId);
   setClauses.push(`updated_at = $${paramIndex++}`);
-  params.push(new Date().toISOString());
+  params.push(now);
   params.push(input.id);
 
   await db.execute(
@@ -1806,13 +2471,29 @@ export async function updateTaskSubtask(
     "SELECT * FROM task_subtasks WHERE id = $1",
     [input.id],
   );
-  return rows[0];
+  const updatedSubtask = rows[0];
+  await enqueueEntityUpsert(
+    "TASK_SUBTASK",
+    updatedSubtask.id,
+    updatedSubtask,
+    now,
+  );
+  return updatedSubtask;
 }
 
 /** Delete a checklist item */
 export async function deleteTaskSubtask(id: string): Promise<void> {
   const db = await getDb();
+  const now = new Date().toISOString();
+  const deviceId = await getOrCreateDeviceId();
+  const rows = await db.select<TaskSubtask[]>(
+    "SELECT * FROM task_subtasks WHERE id = $1 LIMIT 1",
+    [id],
+  );
+  const subtask = rows[0];
+  if (!subtask) return;
   await db.execute("DELETE FROM task_subtasks WHERE id = $1", [id]);
+  await enqueueEntityDelete("TASK_SUBTASK", subtask.id, deviceId, now);
 }
 
 /** Fetch task templates ordered by latest update */
@@ -1831,6 +2512,7 @@ export async function upsertTaskTemplate(
 ): Promise<TaskTemplate> {
   const db = await getDb();
   const now = new Date().toISOString();
+  const deviceId = await getOrCreateDeviceId();
   const normalizedName = input.name.trim();
   if (!normalizedName) {
     throw new Error("Template name is required.");
@@ -1884,8 +2566,10 @@ export async function upsertTaskTemplate(
               due_offset_minutes = $6,
               remind_offset_minutes = $7,
               recurrence = $8,
-              updated_at = $9
-        WHERE id = $10`,
+              sync_version = COALESCE(sync_version, 0) + 1,
+              updated_by_device = $9,
+              updated_at = $10
+        WHERE id = $11`,
       [
         normalizedName,
         input.title_template?.trim() || null,
@@ -1895,6 +2579,7 @@ export async function upsertTaskTemplate(
         normalizedDueOffset,
         normalizedRemindOffset,
         normalizedRecurrence,
+        deviceId,
         now,
         targetTemplateId,
       ],
@@ -1912,9 +2597,11 @@ export async function upsertTaskTemplate(
           remind_offset_minutes,
           recurrence,
           created_at,
-          updated_at
+          updated_at,
+          sync_version,
+          updated_by_device
         )
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 1, $12)`,
       [
         targetTemplateId,
         normalizedName,
@@ -1927,6 +2614,7 @@ export async function upsertTaskTemplate(
         normalizedRecurrence,
         now,
         now,
+        deviceId,
       ],
     );
   }
@@ -1935,13 +2623,29 @@ export async function upsertTaskTemplate(
     "SELECT * FROM task_templates WHERE id = $1",
     [targetTemplateId],
   );
-  return rows[0];
+  const upsertedTemplate = rows[0];
+  await enqueueEntityUpsert(
+    "TASK_TEMPLATE",
+    upsertedTemplate.id,
+    upsertedTemplate,
+    now,
+  );
+  return upsertedTemplate;
 }
 
 /** Delete a task template by id */
 export async function deleteTaskTemplate(id: string): Promise<void> {
   const db = await getDb();
+  const now = new Date().toISOString();
+  const deviceId = await getOrCreateDeviceId();
+  const rows = await db.select<TaskTemplate[]>(
+    "SELECT * FROM task_templates WHERE id = $1 LIMIT 1",
+    [id],
+  );
+  const taskTemplate = rows[0];
+  if (!taskTemplate) return;
   await db.execute("DELETE FROM task_templates WHERE id = $1", [id]);
+  await enqueueEntityDelete("TASK_TEMPLATE", taskTemplate.id, deviceId, now);
 }
 
 function normalizeBackupPayload(payload: unknown): BackupPayload {

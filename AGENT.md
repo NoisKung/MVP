@@ -106,3 +106,29 @@ CREATE TABLE IF NOT EXISTS sessions (
 1. `npm run test`
 2. `npm run test:e2e`
 3. `npm run build`
+
+---
+
+## 6. Sync Implementation Guardrails
+
+- Sync implementation must remain **provider-neutral** at core layer.
+- All local mutations for syncable entities (`project`, `task`, `task_subtask`, `task_template`) must:
+  - update `sync_version`
+  - update `updated_by_device`
+  - enqueue `sync_outbox` event (`UPSERT` or `DELETE`)
+- Incoming sync changes must be applied through deterministic rules:
+  - Last-Write-Wins by `updated_at`
+  - tie-break by `updated_by_device`
+- Use shared sync modules in `src/lib`:
+  - `sync-contract.ts` for payload parsing/validation
+  - `sync-engine.ts` for batch prep/apply/ack/cursor helpers
+  - `sync-runner.ts` for full cycle orchestration
+  - `sync-service.ts` for local storage wiring
+
+---
+
+## 7. Documentation Contract
+
+- `usage.md` is the operational reference for developers and agents.
+- If `AGENT.md` is modified in a way that affects workflow, commands, sync design, or validation gates, `usage.md` **must** be updated in the same change set.
+- If implementation behavior changes (especially sync flow or DB mutation path), update `usage.md` examples and flow diagrams/checklists immediately.

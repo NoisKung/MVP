@@ -8,7 +8,10 @@ interface WorkspaceViewExpectation {
 const WORKSPACE_VIEWS: WorkspaceViewExpectation[] = [
   {
     label: "Board",
-    selectors: ['h1.board-title:has-text("Board")', 'text=Failed to load tasks'],
+    selectors: [
+      'h1.board-title:has-text("Board")',
+      "text=Failed to load tasks",
+    ],
   },
   {
     label: "Projects",
@@ -22,21 +25,21 @@ const WORKSPACE_VIEWS: WorkspaceViewExpectation[] = [
     label: "Calendar",
     selectors: [
       'h1.calendar-title:has-text("Calendar")',
-      'text=Failed to load calendar',
+      "text=Failed to load calendar",
     ],
   },
   {
     label: "Today",
     selectors: [
       'h1.schedule-title:has-text("Today")',
-      'text=Failed to load tasks',
+      "text=Failed to load tasks",
     ],
   },
   {
     label: "Upcoming",
     selectors: [
       'h1.schedule-title:has-text("Upcoming")',
-      'text=Failed to load tasks',
+      "text=Failed to load tasks",
     ],
   },
   {
@@ -51,13 +54,18 @@ const WORKSPACE_VIEWS: WorkspaceViewExpectation[] = [
     label: "Dashboard",
     selectors: [
       'h1.dashboard-title:has-text("Dashboard")',
-      'text=Failed to load dashboard',
+      "text=Failed to load dashboard",
       ".dashboard-loading",
     ],
   },
   {
     label: "Settings",
-    selectors: ['h1.settings-title:has-text("Settings")'],
+    selectors: [
+      'h1.settings-title:has-text("Settings")',
+      'h2.settings-card-title:has-text("Sync")',
+      'button:has-text("Sync now")',
+      'button:has-text("Save Endpoints")',
+    ],
   },
 ];
 

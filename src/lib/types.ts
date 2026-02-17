@@ -249,13 +249,28 @@ export type SyncEntityType =
 
 export type SyncOperation = "UPSERT" | "DELETE";
 
-export type SyncStatus = "SYNCED" | "SYNCING" | "OFFLINE" | "CONFLICT";
+export type SyncStatus =
+  | "SYNCED"
+  | "SYNCING"
+  | "OFFLINE"
+  | "CONFLICT"
+  | "LOCAL_ONLY";
 
 export interface SyncCheckpoint {
   id: 1;
   last_sync_cursor: string | null;
   last_synced_at: string | null;
   updated_at: string;
+}
+
+export interface SyncEndpointSettings {
+  push_url: string | null;
+  pull_url: string | null;
+}
+
+export interface UpdateSyncEndpointSettingsInput {
+  push_url: string | null;
+  pull_url: string | null;
 }
 
 export interface SyncOutboxRecord {
@@ -315,6 +330,23 @@ export interface SyncPushResponse {
   rejected: SyncRejectedChange[];
   server_cursor: string;
   server_time: string;
+}
+
+export type SyncApiErrorCode =
+  | "SCHEMA_MISMATCH"
+  | "UNAUTHORIZED"
+  | "FORBIDDEN"
+  | "RATE_LIMITED"
+  | "INVALID_CURSOR"
+  | "VALIDATION_ERROR"
+  | "INTERNAL_ERROR"
+  | "UNAVAILABLE";
+
+export interface SyncApiError {
+  code: SyncApiErrorCode;
+  message: string;
+  retry_after_ms: number | null;
+  details: Record<string, unknown> | null;
 }
 
 export interface SyncPullRequest {

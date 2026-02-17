@@ -20,16 +20,21 @@ import {
   useCreateTask,
   useUpdateTask,
   useDeleteTask,
+  useSyncSettings,
+  useUpdateSyncSettings,
 } from "./hooks/use-tasks";
 import { useReminderNotifications } from "./hooks/use-reminder-notifications";
 import { useQuickCaptureShortcut } from "./hooks/use-quick-capture-shortcut";
 import { useTaskFilters } from "./hooks/use-task-filters";
+import { useSync } from "./hooks/use-sync";
 import { useAppStore } from "./store/app-store";
 import type {
   CreateTaskInput,
   UpdateTaskInput,
   TaskStatus,
   Task,
+  SyncStatus,
+  UpdateSyncEndpointSettingsInput,
 } from "./lib/types";
 import {
   getRemindersEnabledPreference,
@@ -66,6 +71,52 @@ function getErrorMessage(error: unknown): string {
   return "An unexpected error occurred. Please try again.";
 }
 
+function formatRelativeSyncTime(value: string | null): string | null {
+  if (!value) return null;
+  const parsedDate = new Date(value);
+  if (Number.isNaN(parsedDate.getTime())) return null;
+
+  const diffMs = Date.now() - parsedDate.getTime();
+  if (diffMs < 0) return "just now";
+
+  const minuteMs = 60_000;
+  const hourMs = 60 * minuteMs;
+
+  if (diffMs < minuteMs) return "just now";
+  if (diffMs < hourMs) {
+    const minutes = Math.floor(diffMs / minuteMs);
+    return `${minutes}m ago`;
+  }
+  if (diffMs < 24 * hourMs) {
+    const hours = Math.floor(diffMs / hourMs);
+    return `${hours}h ago`;
+  }
+  const days = Math.floor(diffMs / (24 * hourMs));
+  return `${days}d ago`;
+}
+
+function getSyncStatusLabel(input: {
+  status: SyncStatus;
+  isOnline: boolean;
+  lastSyncedAt: string | null;
+}): string {
+  if (input.status === "LOCAL_ONLY") {
+    return "Local only";
+  }
+  if (input.status === "SYNCING") {
+    return "Syncing...";
+  }
+  if (input.status === "SYNCED") {
+    const relativeTime = formatRelativeSyncTime(input.lastSyncedAt);
+    return relativeTime ? `Synced ${relativeTime}` : "Synced";
+  }
+  if (input.status === "OFFLINE") {
+    if (!input.isOnline) return "Offline";
+    return "Sync paused";
+  }
+  return "Needs attention";
+}
+
 function AppContent() {
   const {
     activeView,
@@ -100,6 +151,9 @@ function AppContent() {
   const createTask = useCreateTask();
   const updateTask = useUpdateTask();
   const deleteTask = useDeleteTask();
+  const { data: syncSettings, isLoading: isSyncSettingsLoading } =
+    useSyncSettings();
+  const updateSyncSettings = useUpdateSyncSettings();
   const {
     filters,
     savedViews,
@@ -128,6 +182,26 @@ function AppContent() {
   >(null);
   const [remindersEnabled, setRemindersEnabled] = useState<boolean>(() =>
     getRemindersEnabledPreference(),
+  );
+  const sync = useSync({
+    pushUrl: syncSettings?.push_url ?? null,
+    pullUrl: syncSettings?.pull_url ?? null,
+    configReady: !isSyncSettingsLoading,
+  });
+  const syncStatusLabel = useMemo(
+    () =>
+      getSyncStatusLabel({
+        status: sync.status,
+        isOnline: sync.isOnline,
+        lastSyncedAt: sync.lastSyncedAt,
+      }),
+    [sync.hasTransport, sync.isOnline, sync.lastSyncedAt, sync.status],
+  );
+  const handleSaveSyncSettings = useCallback(
+    async (input: UpdateSyncEndpointSettingsInput): Promise<void> => {
+      await updateSyncSettings.mutateAsync(input);
+    },
+    [updateSyncSettings],
   );
 
   const closeQuickCapture = useCallback(() => {
@@ -530,13 +604,28 @@ function AppContent() {
     <ReminderSettings
       remindersEnabled={remindersEnabled}
       onRemindersEnabledChange={handleRemindersEnabledChange}
+      syncStatus={sync.status}
+      syncStatusLabel={syncStatusLabel}
+      syncLastSyncedAt={sync.lastSyncedAt}
+      syncLastError={sync.lastError}
+      syncIsRunning={sync.isSyncing}
+      syncHasTransport={sync.hasTransport}
+      onSyncNow={sync.syncNow}
+      syncPushUrl={syncSettings?.push_url ?? null}
+      syncPullUrl={syncSettings?.pull_url ?? null}
+      syncConfigSaving={updateSyncSettings.isPending}
+      onSaveSyncSettings={handleSaveSyncSettings}
     />
   ) : (
     <Dashboard />
   );
 
   return (
-    <AppShell onCreateClick={() => openCreateModal(null)}>
+    <AppShell
+      onCreateClick={() => openCreateModal(null)}
+      syncStatus={sync.status}
+      syncStatusLabel={syncStatusLabel}
+    >
       {taskViewState && !taskViewState.isLoading && !taskViewState.isError && (
         <TaskFiltersBar
           filters={filters}

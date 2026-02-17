@@ -14,10 +14,15 @@ import {
   Plus,
   Zap,
   HardDrive,
+  Cloud,
+  CloudOff,
+  AlertTriangle,
+  RefreshCw,
   Menu,
   X,
   Heart,
 } from "lucide-react";
+import type { SyncStatus } from "@/lib/types";
 
 interface NavItem {
   view: ViewMode;
@@ -51,9 +56,32 @@ const NAV_ITEMS: NavItem[] = [
 interface AppShellProps {
   children: ReactNode;
   onCreateClick: () => void;
+  syncStatus: SyncStatus;
+  syncStatusLabel: string;
 }
 
-export function AppShell({ children, onCreateClick }: AppShellProps) {
+function renderSyncStatusIcon(status: SyncStatus) {
+  if (status === "LOCAL_ONLY") {
+    return <HardDrive size={13} />;
+  }
+  if (status === "SYNCING") {
+    return <RefreshCw size={13} className="sync-spin" />;
+  }
+  if (status === "OFFLINE") {
+    return <CloudOff size={13} />;
+  }
+  if (status === "CONFLICT") {
+    return <AlertTriangle size={13} />;
+  }
+  return <Cloud size={13} />;
+}
+
+export function AppShell({
+  children,
+  onCreateClick,
+  syncStatus,
+  syncStatusLabel,
+}: AppShellProps) {
   const { activeView, setActiveView } = useAppStore();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
@@ -144,9 +172,11 @@ export function AppShell({ children, onCreateClick }: AppShellProps) {
 
         {/* Footer */}
         <div className="sidebar-footer">
-          <div className="footer-status">
-            <HardDrive size={13} />
-            <span>Local Storage</span>
+          <div
+            className={`footer-status footer-status-${syncStatus.toLowerCase()}`}
+          >
+            {renderSyncStatusIcon(syncStatus)}
+            <span>{syncStatusLabel}</span>
           </div>
           <span className="footer-version">v0.1.0</span>
         </div>
@@ -381,10 +411,36 @@ export function AppShell({ children, onCreateClick }: AppShellProps) {
           font-size: 11px;
           color: var(--text-muted);
         }
+        .footer-status-synced {
+          color: #22c55e;
+        }
+        .footer-status-syncing {
+          color: var(--accent);
+        }
+        .footer-status-offline {
+          color: #f59e0b;
+        }
+        .footer-status-conflict {
+          color: var(--danger);
+        }
+        .footer-status-local_only {
+          color: var(--text-muted);
+        }
+        .sync-spin {
+          animation: sync-rotate 0.8s linear infinite;
+        }
         .footer-version {
           font-size: 11px;
           color: var(--text-disabled);
           font-variant-numeric: tabular-nums;
+        }
+        @keyframes sync-rotate {
+          from {
+            transform: rotate(0deg);
+          }
+          to {
+            transform: rotate(360deg);
+          }
         }
 
         /* ===== Main Content ===== */

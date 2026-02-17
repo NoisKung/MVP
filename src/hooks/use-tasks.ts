@@ -23,6 +23,8 @@ import {
   getWeeklyReviewSnapshot,
   exportBackupPayload,
   importBackupPayload,
+  getSyncEndpointSettings,
+  updateSyncEndpointSettings,
 } from "@/lib/database";
 import type {
   BackupPayload,
@@ -30,8 +32,10 @@ import type {
   CreateTaskInput,
   CreateTaskSubtaskInput,
   UpdateProjectInput,
+  UpdateSyncEndpointSettingsInput,
   UpdateTaskSubtaskInput,
   UpdateTaskInput,
+  SyncEndpointSettings,
   UpsertTaskTemplateInput,
 } from "@/lib/types";
 
@@ -45,6 +49,7 @@ const TASK_SUBTASKS_KEY = ["task-subtasks"] as const;
 const TASK_SUBTASK_STATS_KEY = ["task-subtask-stats"] as const;
 const TASK_TEMPLATES_KEY = ["task-templates"] as const;
 const PROJECTS_KEY = ["projects"] as const;
+const SYNC_SETTINGS_KEY = ["sync-settings"] as const;
 
 /** Fetch all active/completed projects */
 export function useProjects() {
@@ -300,6 +305,27 @@ export function useDeleteTaskTemplate() {
     mutationFn: (id: string) => deleteTaskTemplate(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: TASK_TEMPLATES_KEY });
+    },
+  });
+}
+
+/** Read sync endpoint settings stored in local SQLite */
+export function useSyncSettings() {
+  return useQuery({
+    queryKey: SYNC_SETTINGS_KEY,
+    queryFn: getSyncEndpointSettings,
+  });
+}
+
+/** Update sync endpoint settings in local SQLite */
+export function useUpdateSyncSettings() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (input: UpdateSyncEndpointSettingsInput) =>
+      updateSyncEndpointSettings(input),
+    onSuccess: (_result: SyncEndpointSettings) => {
+      queryClient.invalidateQueries({ queryKey: SYNC_SETTINGS_KEY });
     },
   });
 }
