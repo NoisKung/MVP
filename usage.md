@@ -79,6 +79,29 @@ Incoming apply rules:
 - ต้องมี ถ้าต้องการ sync ข้ามหลายเครื่อง เพราะ client ต้องมี backend กลางสำหรับ push/pull/cursor
 - ถ้าอยากลดภาระการทำ backend เอง สามารถทำ connector ไปบริการ cloud (Google/Microsoft/iCloud) แต่ก็ยังต้องมี sync service logic รองรับ conflict/idempotency
 
+เอา Sync URL มาจากไหน:
+1. กรณีรัน backend บนเครื่องตัวเอง (local dev)
+- ใช้ URL ตาม port ที่ backend เปิดจริง
+- ตัวอย่าง:
+  - `Push URL`: `http://127.0.0.1:8787/v1/sync/push`
+  - `Pull URL`: `http://127.0.0.1:8787/v1/sync/pull`
+
+2. กรณี deploy แล้ว (staging/production)
+- ใช้โดเมนของ sync service ที่ deploy แล้ว
+- ตัวอย่าง:
+  - `Push URL`: `https://sync.yourdomain.com/v1/sync/push`
+  - `Pull URL`: `https://sync.yourdomain.com/v1/sync/pull`
+
+3. กรณีทดสอบข้ามเครื่องจาก local server
+- ถ้าอีกเครื่องเข้าถึง `localhost` ไม่ได้ ให้เปิด tunnel (เช่น ngrok/cloudflared) หรือใช้ IP ที่เข้าถึงได้ใน LAN
+- ใช้ public/accessible URL จาก tunnel เป็น base URL แล้วต่อท้าย `/v1/sync/push` และ `/v1/sync/pull`
+
+Checklist ก่อนกรอกใน UI:
+- เปิด endpoint จริงครบทั้ง `push` และ `pull`
+- ต้องเป็น `http(s)` เท่านั้น
+- หลีกเลี่ยง trailing slash ซ้ำ เช่น `.../sync//push`
+- ถ้ากรอกผิด ให้กด `Save Endpoints` ใหม่ แล้วลอง `Sync now`
+
 ## 5) Running a Sync Cycle (Code)
 
 ตัวอย่างการเรียกใช้งานด้วย transport ของ backend:

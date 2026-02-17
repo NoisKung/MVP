@@ -8,7 +8,7 @@ import process from "node:process";
 
 let DatabaseSync = null;
 
-const APP_IDENTIFIER = "com.antigravity.solostack";
+const APP_IDENTIFIER = "com.solutionsstudio.solostack";
 const DB_FILE_NAME = "solostack.db";
 const TASK_STATUSES = new Set(["TODO", "DOING", "DONE", "ARCHIVED"]);
 const TASK_PRIORITIES = new Set(["URGENT", "NORMAL", "LOW"]);
