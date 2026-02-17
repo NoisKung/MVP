@@ -37,6 +37,11 @@ const NAV_ITEMS: NavItem[] = [
   { view: "today", label: "Today", icon: <CalendarCheck2 size={18} /> },
   { view: "upcoming", label: "Upcoming", icon: <CalendarDays size={18} /> },
   {
+    view: "conflicts",
+    label: "Conflicts",
+    icon: <AlertTriangle size={18} />,
+  },
+  {
     view: "review",
     label: "Weekly Review",
     icon: <ClipboardCheck size={18} />,
@@ -58,6 +63,7 @@ interface AppShellProps {
   onCreateClick: () => void;
   syncStatus: SyncStatus;
   syncStatusLabel: string;
+  onOpenConflictCenter: () => void;
 }
 
 function renderSyncStatusIcon(status: SyncStatus) {
@@ -81,6 +87,7 @@ export function AppShell({
   onCreateClick,
   syncStatus,
   syncStatusLabel,
+  onOpenConflictCenter,
 }: AppShellProps) {
   const { activeView, setActiveView } = useAppStore();
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -109,6 +116,11 @@ export function AppShell({
     onCreateClick();
     if (isMobile) closeSidebar();
   };
+  const handleOpenConflictCenter = () => {
+    onOpenConflictCenter();
+    if (isMobile) closeSidebar();
+  };
+  const isConflictStatusActionable = syncStatus === "CONFLICT";
 
   return (
     <div className="app-shell">
@@ -172,12 +184,24 @@ export function AppShell({
 
         {/* Footer */}
         <div className="sidebar-footer">
-          <div
-            className={`footer-status footer-status-${syncStatus.toLowerCase()}`}
-          >
-            {renderSyncStatusIcon(syncStatus)}
-            <span>{syncStatusLabel}</span>
-          </div>
+          {isConflictStatusActionable ? (
+            <button
+              type="button"
+              className={`footer-status footer-status-btn footer-status-${syncStatus.toLowerCase()}`}
+              onClick={handleOpenConflictCenter}
+              title="Open Conflict Center"
+            >
+              {renderSyncStatusIcon(syncStatus)}
+              <span>{syncStatusLabel}</span>
+            </button>
+          ) : (
+            <div
+              className={`footer-status footer-status-${syncStatus.toLowerCase()}`}
+            >
+              {renderSyncStatusIcon(syncStatus)}
+              <span>{syncStatusLabel}</span>
+            </div>
+          )}
           <span className="footer-version">v0.1.0</span>
         </div>
       </aside>
@@ -410,6 +434,17 @@ export function AppShell({
           gap: 6px;
           font-size: 11px;
           color: var(--text-muted);
+        }
+        .footer-status-btn {
+          background: none;
+          border: none;
+          padding: 0;
+          font-family: inherit;
+          cursor: pointer;
+        }
+        .footer-status-btn:hover {
+          text-decoration: underline;
+          text-underline-offset: 2px;
         }
         .footer-status-synced {
           color: #22c55e;

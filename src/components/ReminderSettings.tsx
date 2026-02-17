@@ -21,8 +21,32 @@ import {
   requestNotificationPermissionAccess,
   resetReminderPermissionAndHistory,
 } from "@/hooks/use-reminder-notifications";
-import { useExportBackup, useImportBackup } from "@/hooks/use-tasks";
-import type { SyncStatus, UpdateSyncEndpointSettingsInput } from "@/lib/types";
+import {
+  useBackupRestorePreflight,
+  useExportBackup,
+  useExportSyncConflictReport,
+  useImportBackup,
+  useRestoreLatestBackup,
+  useSyncConflictEvents,
+} from "@/hooks/use-tasks";
+import {
+  buildManualMergeInitialText,
+  buildManualMergeResolutionPayload,
+  normalizeManualMergeText,
+} from "@/lib/manual-merge";
+import type {
+  BackupRestorePreflight,
+  ResolveSyncConflictInput,
+  SyncConflictEventRecord,
+  SyncConflictRecord,
+  SyncConflictResolutionStrategy,
+  SyncRuntimeProfilePreset,
+  SyncSessionDiagnostics,
+  SyncStatus,
+  UpdateSyncEndpointSettingsInput,
+  UpdateSyncRuntimeSettingsInput,
+} from "@/lib/types";
+import { ManualMergeEditor } from "./ManualMergeEditor";
 
 interface ReminderSettingsProps {
   remindersEnabled: boolean;
@@ -38,6 +62,21 @@ interface ReminderSettingsProps {
   syncPullUrl: string | null;
   syncConfigSaving: boolean;
   onSaveSyncSettings: (input: UpdateSyncEndpointSettingsInput) => Promise<void>;
+  syncAutoIntervalSeconds: number;
+  syncBackgroundIntervalSeconds: number;
+  syncPushLimit: number;
+  syncPullLimit: number;
+  syncMaxPullPages: number;
+  syncRuntimePreset: SyncRuntimeProfilePreset;
+  syncDiagnostics: SyncSessionDiagnostics;
+  syncRuntimeSaving: boolean;
+  onSaveSyncRuntimeSettings: (
+    input: UpdateSyncRuntimeSettingsInput,
+  ) => Promise<void>;
+  syncConflicts: SyncConflictRecord[];
+  syncConflictsLoading: boolean;
+  syncConflictResolving: boolean;
+  onResolveSyncConflict: (input: ResolveSyncConflictInput) => Promise<void>;
 }
 
 function getErrorMessage(error: unknown): string {
@@ -76,6 +115,12 @@ function formatSyncDateTime(value: string | null): string {
   }).format(parsedDate);
 }
 
+function formatDurationMs(value: number | null): string {
+  if (value === null || !Number.isFinite(value)) return "N/A";
+  if (value < 1000) return `${value} ms`;
+  return `${(value / 1000).toFixed(2)} s`;
+}
+
 function normalizeUrlDraft(value: string): string | null {
   const normalized = value.trim();
   return normalized || null;
@@ -88,6 +133,64 @@ function isValidHttpUrl(value: string): boolean {
   } catch {
     return false;
   }
+}
+
+function parseIntegerDraft(value: string): number | null {
+  const trimmed = value.trim();
+  if (!trimmed) return null;
+  const parsed = Number(trimmed);
+  if (!Number.isFinite(parsed)) return null;
+  return Math.floor(parsed);
+}
+
+function formatConflictTypeLabel(
+  conflictType: SyncConflictRecord["conflict_type"],
+) {
+  if (conflictType === "delete_vs_update") return "Delete vs Update";
+  if (conflictType === "notes_collision") return "Notes Collision";
+  if (conflictType === "validation_error") return "Validation Error";
+  return "Field Conflict";
+}
+
+function formatConflictEventLabel(
+  eventType: SyncConflictEventRecord["event_type"],
+) {
+  if (eventType === "detected") return "Detected";
+  if (eventType === "resolved") return "Resolved";
+  if (eventType === "ignored") return "Ignored";
+  if (eventType === "retried") return "Retried";
+  return "Exported";
+}
+
+function formatPayloadJson(payloadJson: string | null): string {
+  if (!payloadJson) return "(empty)";
+  try {
+    const parsed = JSON.parse(payloadJson) as unknown;
+    return JSON.stringify(parsed, null, 2);
+  } catch {
+    return payloadJson;
+  }
+}
+
+function buildRestoreConfirmationMessage(preflight: BackupRestorePreflight) {
+  const hasPendingOutbox = preflight.pending_outbox_changes > 0;
+  if (!hasPendingOutbox) {
+    return "Restore will replace all local data and reset sync state (outbox/conflicts). Continue?";
+  }
+
+  return [
+    `There are ${preflight.pending_outbox_changes} pending outbox change(s) not synced yet.`,
+    "Force restore will discard pending outbox changes and clear open conflicts.",
+    "Continue with force restore?",
+  ].join("\n");
+}
+
+function buildRestoreResultLabel(result: {
+  tasks: number;
+  projects: number;
+  task_templates: number;
+}) {
+  return `Backup restored: ${result.tasks} tasks, ${result.projects} projects, ${result.task_templates} templates.`;
 }
 
 export function ReminderSettings({
@@ -104,6 +207,19 @@ export function ReminderSettings({
   syncPullUrl,
   syncConfigSaving,
   onSaveSyncSettings,
+  syncAutoIntervalSeconds,
+  syncBackgroundIntervalSeconds,
+  syncPushLimit,
+  syncPullLimit,
+  syncMaxPullPages,
+  syncRuntimePreset,
+  syncDiagnostics,
+  syncRuntimeSaving,
+  onSaveSyncRuntimeSettings,
+  syncConflicts,
+  syncConflictsLoading,
+  syncConflictResolving,
+  onResolveSyncConflict,
 }: ReminderSettingsProps) {
   const [permissionState, setPermissionState] =
     useState<NotificationPermissionState>("unknown");
@@ -115,14 +231,52 @@ export function ReminderSettings({
   const [backupError, setBackupError] = useState<string | null>(null);
   const [syncPushUrlDraft, setSyncPushUrlDraft] = useState<string>("");
   const [syncPullUrlDraft, setSyncPullUrlDraft] = useState<string>("");
+  const [syncAutoIntervalDraft, setSyncAutoIntervalDraft] =
+    useState<string>("");
+  const [syncBackgroundIntervalDraft, setSyncBackgroundIntervalDraft] =
+    useState<string>("");
+  const [syncPushLimitDraft, setSyncPushLimitDraft] = useState<string>("");
+  const [syncPullLimitDraft, setSyncPullLimitDraft] = useState<string>("");
+  const [syncMaxPullPagesDraft, setSyncMaxPullPagesDraft] =
+    useState<string>("");
   const [syncConfigFeedback, setSyncConfigFeedback] = useState<string | null>(
     null,
   );
   const [syncConfigError, setSyncConfigError] = useState<string | null>(null);
+  const [syncRuntimeFeedback, setSyncRuntimeFeedback] = useState<string | null>(
+    null,
+  );
+  const [syncRuntimeError, setSyncRuntimeError] = useState<string | null>(null);
+  const [conflictFeedback, setConflictFeedback] = useState<string | null>(null);
+  const [conflictError, setConflictError] = useState<string | null>(null);
+  const [selectedConflictId, setSelectedConflictId] = useState<string | null>(
+    null,
+  );
+  const [manualMergeConflictId, setManualMergeConflictId] = useState<
+    string | null
+  >(null);
+  const [manualMergeDraft, setManualMergeDraft] = useState("");
   const backupInputRef = useRef<HTMLInputElement | null>(null);
+  const backupRestorePreflight = useBackupRestorePreflight();
   const exportBackup = useExportBackup();
+  const exportSyncConflicts = useExportSyncConflictReport();
   const importBackup = useImportBackup();
-  const isBackupBusy = exportBackup.isPending || importBackup.isPending;
+  const restoreLatestBackup = useRestoreLatestBackup();
+  const isBackupBusy =
+    exportBackup.isPending ||
+    importBackup.isPending ||
+    restoreLatestBackup.isPending;
+  const selectedConflict =
+    syncConflicts.find((conflict) => conflict.id === selectedConflictId) ??
+    null;
+  const manualMergeConflict =
+    syncConflicts.find((conflict) => conflict.id === manualMergeConflictId) ??
+    null;
+  const {
+    data: selectedConflictEvents = [],
+    isLoading: isConflictEventsLoading,
+  } = useSyncConflictEvents(selectedConflict?.id, 100);
+  const backupPreflight = backupRestorePreflight.data;
 
   useEffect(() => {
     void refreshPermissionState(setPermissionState);
@@ -135,6 +289,55 @@ export function ReminderSettings({
   useEffect(() => {
     setSyncPullUrlDraft(syncPullUrl ?? "");
   }, [syncPullUrl]);
+
+  useEffect(() => {
+    setSyncAutoIntervalDraft(String(syncAutoIntervalSeconds));
+  }, [syncAutoIntervalSeconds]);
+
+  useEffect(() => {
+    setSyncBackgroundIntervalDraft(String(syncBackgroundIntervalSeconds));
+  }, [syncBackgroundIntervalSeconds]);
+
+  useEffect(() => {
+    setSyncPushLimitDraft(String(syncPushLimit));
+  }, [syncPushLimit]);
+
+  useEffect(() => {
+    setSyncPullLimitDraft(String(syncPullLimit));
+  }, [syncPullLimit]);
+
+  useEffect(() => {
+    setSyncMaxPullPagesDraft(String(syncMaxPullPages));
+  }, [syncMaxPullPages]);
+
+  useEffect(() => {
+    if (syncConflicts.length === 0) {
+      setSelectedConflictId(null);
+      return;
+    }
+
+    if (!selectedConflictId) {
+      setSelectedConflictId(syncConflicts[0].id);
+      return;
+    }
+
+    const stillExists = syncConflicts.some(
+      (conflict) => conflict.id === selectedConflictId,
+    );
+    if (!stillExists) {
+      setSelectedConflictId(syncConflicts[0].id);
+    }
+  }, [selectedConflictId, syncConflicts]);
+
+  useEffect(() => {
+    if (!manualMergeConflictId) return;
+    const stillExists = syncConflicts.some(
+      (conflict) => conflict.id === manualMergeConflictId,
+    );
+    if (stillExists) return;
+    setManualMergeConflictId(null);
+    setManualMergeDraft("");
+  }, [manualMergeConflictId, syncConflicts]);
 
   const handleRequestPermission = async () => {
     setIsBusy(true);
@@ -176,6 +379,31 @@ export function ReminderSettings({
     }
   };
 
+  const loadLatestRestorePreflight =
+    async (): Promise<BackupRestorePreflight | null> => {
+      const refreshed = await backupRestorePreflight.refetch();
+      return refreshed.data ?? backupRestorePreflight.data ?? null;
+    };
+
+  const confirmRestoreWithPreflight = async (): Promise<{
+    force: boolean;
+  } | null> => {
+    const preflight = await loadLatestRestorePreflight();
+    if (!preflight) {
+      setBackupError("Restore preflight is unavailable. Please try again.");
+      return null;
+    }
+
+    const confirmMessage = buildRestoreConfirmationMessage(preflight);
+    if (!window.confirm(confirmMessage)) {
+      return null;
+    }
+
+    return {
+      force: preflight.requires_force_restore,
+    };
+  };
+
   const handleExportBackup = async () => {
     setBackupError(null);
     setBackupFeedback(null);
@@ -207,23 +435,43 @@ export function ReminderSettings({
     event.target.value = "";
     if (!selectedFile) return;
 
-    if (
-      !window.confirm(
-        "Restoring backup will replace all current local data. Continue?",
-      )
-    ) {
-      return;
-    }
-
     setBackupError(null);
     setBackupFeedback(null);
     try {
+      const confirmation = await confirmRestoreWithPreflight();
+      if (!confirmation) return;
+
       const fileContent = await selectedFile.text();
       const parsedPayload = JSON.parse(fileContent) as unknown;
-      const result = await importBackup.mutateAsync(parsedPayload);
-      setBackupFeedback(
-        `Backup restored: ${result.tasks} tasks, ${result.projects} projects, ${result.task_templates} templates.`,
-      );
+      const result = await importBackup.mutateAsync({
+        payload: parsedPayload,
+        force: confirmation.force,
+      });
+
+      setBackupFeedback(buildRestoreResultLabel(result));
+      if (syncHasTransport) {
+        await onSyncNow();
+      }
+    } catch (error) {
+      setBackupError(getErrorMessage(error));
+    }
+  };
+
+  const handleRestoreLatestBackup = async () => {
+    setBackupError(null);
+    setBackupFeedback(null);
+
+    try {
+      const confirmation = await confirmRestoreWithPreflight();
+      if (!confirmation) return;
+
+      const result = await restoreLatestBackup.mutateAsync({
+        force: confirmation.force,
+      });
+      setBackupFeedback(buildRestoreResultLabel(result));
+      if (syncHasTransport) {
+        await onSyncNow();
+      }
     } catch (error) {
       setBackupError(getErrorMessage(error));
     }
@@ -271,6 +519,200 @@ export function ReminderSettings({
       );
     } catch (error) {
       setSyncConfigError(getErrorMessage(error));
+    }
+  };
+
+  const handleApplyDesktopSyncPreset = () => {
+    setSyncRuntimeFeedback(null);
+    setSyncRuntimeError(null);
+    setSyncAutoIntervalDraft("60");
+    setSyncBackgroundIntervalDraft("300");
+    setSyncPushLimitDraft("200");
+    setSyncPullLimitDraft("200");
+    setSyncMaxPullPagesDraft("5");
+  };
+
+  const handleApplyMobileSyncPreset = () => {
+    setSyncRuntimeFeedback(null);
+    setSyncRuntimeError(null);
+    setSyncAutoIntervalDraft("120");
+    setSyncBackgroundIntervalDraft("600");
+    setSyncPushLimitDraft("120");
+    setSyncPullLimitDraft("120");
+    setSyncMaxPullPagesDraft("3");
+  };
+
+  const handleSaveSyncRuntimeProfile = async () => {
+    setSyncRuntimeFeedback(null);
+    setSyncRuntimeError(null);
+
+    const autoSyncIntervalSeconds = parseIntegerDraft(syncAutoIntervalDraft);
+    const backgroundSyncIntervalSeconds = parseIntegerDraft(
+      syncBackgroundIntervalDraft,
+    );
+    const pushLimit = parseIntegerDraft(syncPushLimitDraft);
+    const pullLimit = parseIntegerDraft(syncPullLimitDraft);
+    const maxPullPages = parseIntegerDraft(syncMaxPullPagesDraft);
+
+    if (
+      autoSyncIntervalSeconds === null ||
+      backgroundSyncIntervalSeconds === null ||
+      pushLimit === null ||
+      pullLimit === null ||
+      maxPullPages === null
+    ) {
+      setSyncRuntimeError("All runtime fields must be valid integers.");
+      return;
+    }
+
+    if (autoSyncIntervalSeconds < 15 || autoSyncIntervalSeconds > 3600) {
+      setSyncRuntimeError(
+        "Foreground interval must be between 15 and 3600 seconds.",
+      );
+      return;
+    }
+    if (
+      backgroundSyncIntervalSeconds < 30 ||
+      backgroundSyncIntervalSeconds > 7200
+    ) {
+      setSyncRuntimeError(
+        "Background interval must be between 30 and 7200 seconds.",
+      );
+      return;
+    }
+    if (backgroundSyncIntervalSeconds < autoSyncIntervalSeconds) {
+      setSyncRuntimeError(
+        "Background interval must be >= foreground interval.",
+      );
+      return;
+    }
+    if (pushLimit < 20 || pushLimit > 500) {
+      setSyncRuntimeError("Push limit must be between 20 and 500.");
+      return;
+    }
+    if (pullLimit < 20 || pullLimit > 500) {
+      setSyncRuntimeError("Pull limit must be between 20 and 500.");
+      return;
+    }
+    if (maxPullPages < 1 || maxPullPages > 20) {
+      setSyncRuntimeError("Max pull pages must be between 1 and 20.");
+      return;
+    }
+
+    try {
+      await onSaveSyncRuntimeSettings({
+        auto_sync_interval_seconds: autoSyncIntervalSeconds,
+        background_sync_interval_seconds: backgroundSyncIntervalSeconds,
+        push_limit: pushLimit,
+        pull_limit: pullLimit,
+        max_pull_pages: maxPullPages,
+      });
+      setSyncRuntimeFeedback("Sync runtime profile was saved.");
+    } catch (error) {
+      setSyncRuntimeError(getErrorMessage(error));
+    }
+  };
+
+  const handleResolveConflict = async (
+    conflictId: string,
+    strategy: SyncConflictResolutionStrategy,
+    resolutionPayload?: Record<string, unknown> | null,
+  ): Promise<boolean> => {
+    setConflictFeedback(null);
+    setConflictError(null);
+    try {
+      await onResolveSyncConflict({
+        conflict_id: conflictId,
+        strategy,
+        resolution_payload: resolutionPayload ?? null,
+      });
+      setConflictFeedback(
+        strategy === "retry"
+          ? "Conflict queued for retry."
+          : "Conflict marked as resolved.",
+      );
+      return true;
+    } catch (error) {
+      setConflictError(getErrorMessage(error));
+      return false;
+    }
+  };
+
+  const handleRetryConflict = async (conflictId: string) => {
+    if (
+      !window.confirm(
+        "Retry will re-queue this conflict in the next sync cycle. Continue?",
+      )
+    ) {
+      return;
+    }
+
+    await handleResolveConflict(conflictId, "retry");
+  };
+
+  const handleOpenManualMergeEditor = (conflict: SyncConflictRecord) => {
+    setConflictError(null);
+    setConflictFeedback(null);
+    setManualMergeConflictId(conflict.id);
+    setManualMergeDraft(buildManualMergeInitialText(conflict));
+  };
+
+  const handleCancelManualMerge = () => {
+    setManualMergeConflictId(null);
+    setManualMergeDraft("");
+  };
+
+  const handleSubmitManualMerge = async () => {
+    if (!manualMergeConflict) return;
+
+    const normalizedDraft = normalizeManualMergeText(manualMergeDraft);
+    if (!normalizedDraft) {
+      setConflictError("Merged content must not be empty.");
+      return;
+    }
+
+    const isSuccess = await handleResolveConflict(
+      manualMergeConflict.id,
+      "manual_merge",
+      buildManualMergeResolutionPayload({
+        conflict: manualMergeConflict,
+        mergedText: normalizedDraft,
+        source: "settings_conflict_center",
+      }),
+    );
+    if (!isSuccess) return;
+
+    handleCancelManualMerge();
+  };
+
+  const handleExportConflictReport = async () => {
+    setConflictFeedback(null);
+    setConflictError(null);
+
+    try {
+      const payload = await exportSyncConflicts.mutateAsync({
+        status: "all",
+        limit: 1000,
+        eventsPerConflict: 100,
+      });
+      const reportText = JSON.stringify(payload, null, 2);
+      const blob = new Blob([reportText], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const safeTimestamp = payload.exported_at.replace(/[:.]/g, "-");
+      const filename = `solostack-conflicts-${safeTimestamp}.json`;
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 0);
+
+      setConflictFeedback(
+        `Conflict report exported (${payload.total_conflicts} conflict record(s)).`,
+      );
+    } catch (error) {
+      setConflictError(getErrorMessage(error));
     }
   };
 
@@ -426,6 +868,159 @@ export function ReminderSettings({
           )}
         </div>
 
+        <div className="sync-conflicts">
+          <div className="sync-conflicts-head">
+            <p className="settings-row-title">Conflict Center</p>
+            <button
+              type="button"
+              className="settings-btn"
+              onClick={() => void handleExportConflictReport()}
+              disabled={exportSyncConflicts.isPending}
+            >
+              <Download size={14} />
+              {exportSyncConflicts.isPending ? "Exporting..." : "Export Report"}
+            </button>
+          </div>
+          {syncConflictsLoading ? (
+            <p className="settings-row-subtitle">Loading conflicts...</p>
+          ) : syncConflicts.length === 0 ? (
+            <p className="settings-row-subtitle">No open conflicts.</p>
+          ) : (
+            <div className="sync-conflict-list">
+              {syncConflicts.map((conflict) => (
+                <div className="sync-conflict-item" key={conflict.id}>
+                  <div className="sync-conflict-item-head">
+                    <span className="sync-conflict-type">
+                      {formatConflictTypeLabel(conflict.conflict_type)}
+                    </span>
+                    <span className="sync-conflict-entity">
+                      {conflict.entity_type}:{conflict.entity_id}
+                    </span>
+                    {selectedConflictId === conflict.id && (
+                      <span className="sync-conflict-selected">Selected</span>
+                    )}
+                  </div>
+                  <p className="sync-conflict-message">{conflict.message}</p>
+                  <p className="settings-row-subtitle">
+                    Detected: {formatSyncDateTime(conflict.detected_at)}
+                  </p>
+                  <div className="settings-actions">
+                    <button
+                      type="button"
+                      className="settings-btn"
+                      onClick={() =>
+                        void handleResolveConflict(conflict.id, "keep_local")
+                      }
+                      disabled={syncConflictResolving}
+                    >
+                      Keep Local
+                    </button>
+                    <button
+                      type="button"
+                      className="settings-btn"
+                      onClick={() =>
+                        void handleResolveConflict(conflict.id, "keep_remote")
+                      }
+                      disabled={syncConflictResolving}
+                    >
+                      Keep Remote
+                    </button>
+                    <button
+                      type="button"
+                      className="settings-btn"
+                      onClick={() => void handleRetryConflict(conflict.id)}
+                      disabled={syncConflictResolving}
+                    >
+                      Retry
+                    </button>
+                    <button
+                      type="button"
+                      className="settings-btn"
+                      onClick={() => handleOpenManualMergeEditor(conflict)}
+                      disabled={syncConflictResolving}
+                    >
+                      Manual Merge
+                    </button>
+                    <button
+                      type="button"
+                      className="settings-btn"
+                      onClick={() => setSelectedConflictId(conflict.id)}
+                    >
+                      Details
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
+          {selectedConflict && (
+            <div className="sync-conflict-detail">
+              <p className="settings-row-title">Conflict Detail</p>
+              <p className="settings-row-subtitle">
+                {selectedConflict.entity_type}:{selectedConflict.entity_id} ·{" "}
+                {formatConflictTypeLabel(selectedConflict.conflict_type)}
+              </p>
+              <div className="sync-conflict-payload-grid">
+                <div>
+                  <span className="settings-field-label">Local payload</span>
+                  <pre className="sync-conflict-payload">
+                    {formatPayloadJson(selectedConflict.local_payload_json)}
+                  </pre>
+                </div>
+                <div>
+                  <span className="settings-field-label">Remote payload</span>
+                  <pre className="sync-conflict-payload">
+                    {formatPayloadJson(selectedConflict.remote_payload_json)}
+                  </pre>
+                </div>
+              </div>
+
+              <p className="settings-row-title sync-conflict-timeline-title">
+                Timeline
+              </p>
+              {isConflictEventsLoading ? (
+                <p className="settings-row-subtitle">Loading timeline...</p>
+              ) : selectedConflictEvents.length === 0 ? (
+                <p className="settings-row-subtitle">No events yet.</p>
+              ) : (
+                <div className="sync-conflict-timeline">
+                  {selectedConflictEvents.map((event) => (
+                    <div className="sync-conflict-timeline-item" key={event.id}>
+                      <span className="sync-conflict-event-pill">
+                        {formatConflictEventLabel(event.event_type)}
+                      </span>
+                      <span className="settings-row-subtitle">
+                        {formatSyncDateTime(event.created_at)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {manualMergeConflict && (
+            <ManualMergeEditor
+              conflict={manualMergeConflict}
+              draft={manualMergeDraft}
+              isSaving={syncConflictResolving}
+              onDraftChange={setManualMergeDraft}
+              onCancel={handleCancelManualMerge}
+              onSubmit={() => void handleSubmitManualMerge()}
+            />
+          )}
+
+          {conflictFeedback && (
+            <p className="settings-feedback">{conflictFeedback}</p>
+          )}
+          {conflictError && (
+            <p className="settings-feedback settings-feedback-error">
+              {conflictError}
+            </p>
+          )}
+        </div>
+
         <div className="sync-endpoint-grid">
           <label className="settings-field">
             <span className="settings-field-label">Push URL</span>
@@ -455,6 +1050,155 @@ export function ReminderSettings({
               disabled={syncConfigSaving}
             />
           </label>
+        </div>
+
+        <div className="sync-runtime-card">
+          <div className="sync-runtime-head">
+            <p className="settings-row-title">Sync Runtime Profile</p>
+            <p className="settings-row-subtitle">
+              Tune sync behavior for desktop/mobile beta workloads.
+            </p>
+          </div>
+          <div className="sync-runtime-grid">
+            <label className="settings-field">
+              <span className="settings-field-label">
+                Foreground Interval (s)
+              </span>
+              <input
+                className="settings-input"
+                type="number"
+                min={15}
+                max={3600}
+                step={1}
+                value={syncAutoIntervalDraft}
+                onChange={(event) =>
+                  setSyncAutoIntervalDraft(event.target.value)
+                }
+                disabled={syncRuntimeSaving}
+              />
+            </label>
+            <label className="settings-field">
+              <span className="settings-field-label">
+                Background Interval (s)
+              </span>
+              <input
+                className="settings-input"
+                type="number"
+                min={30}
+                max={7200}
+                step={1}
+                value={syncBackgroundIntervalDraft}
+                onChange={(event) =>
+                  setSyncBackgroundIntervalDraft(event.target.value)
+                }
+                disabled={syncRuntimeSaving}
+              />
+            </label>
+            <label className="settings-field">
+              <span className="settings-field-label">Push Limit</span>
+              <input
+                className="settings-input"
+                type="number"
+                min={20}
+                max={500}
+                step={1}
+                value={syncPushLimitDraft}
+                onChange={(event) => setSyncPushLimitDraft(event.target.value)}
+                disabled={syncRuntimeSaving}
+              />
+            </label>
+            <label className="settings-field">
+              <span className="settings-field-label">Pull Limit</span>
+              <input
+                className="settings-input"
+                type="number"
+                min={20}
+                max={500}
+                step={1}
+                value={syncPullLimitDraft}
+                onChange={(event) => setSyncPullLimitDraft(event.target.value)}
+                disabled={syncRuntimeSaving}
+              />
+            </label>
+            <label className="settings-field">
+              <span className="settings-field-label">Max Pull Pages</span>
+              <input
+                className="settings-input"
+                type="number"
+                min={1}
+                max={20}
+                step={1}
+                value={syncMaxPullPagesDraft}
+                onChange={(event) =>
+                  setSyncMaxPullPagesDraft(event.target.value)
+                }
+                disabled={syncRuntimeSaving}
+              />
+            </label>
+          </div>
+          <div className="settings-actions">
+            <button
+              type="button"
+              className="settings-btn"
+              onClick={handleApplyDesktopSyncPreset}
+              disabled={syncRuntimeSaving}
+            >
+              Desktop Preset
+            </button>
+            <button
+              type="button"
+              className="settings-btn"
+              onClick={handleApplyMobileSyncPreset}
+              disabled={syncRuntimeSaving}
+            >
+              Mobile Beta Preset
+            </button>
+            <button
+              type="button"
+              className="settings-btn settings-btn-primary"
+              onClick={() => void handleSaveSyncRuntimeProfile()}
+              disabled={syncRuntimeSaving}
+            >
+              {syncRuntimeSaving ? "Saving..." : "Save Runtime"}
+            </button>
+          </div>
+          {syncRuntimeFeedback && (
+            <p className="settings-feedback">{syncRuntimeFeedback}</p>
+          )}
+          {syncRuntimeError && (
+            <p className="settings-feedback settings-feedback-error">
+              {syncRuntimeError}
+            </p>
+          )}
+          <div>
+            <p className="settings-row-title">Sync Diagnostics (Session)</p>
+            <p className="settings-row-subtitle">
+              Runtime preset:{" "}
+              {syncRuntimePreset === "mobile"
+                ? "Mobile Beta (detected)"
+                : "Desktop (detected)"}
+            </p>
+            <p className="settings-row-subtitle">
+              Success rate: {syncDiagnostics.success_rate_percent.toFixed(1)}% (
+              {syncDiagnostics.successful_cycles}/{syncDiagnostics.total_cycles}
+              )
+            </p>
+            <p className="settings-row-subtitle">
+              Last cycle duration:{" "}
+              {formatDurationMs(syncDiagnostics.last_cycle_duration_ms)}
+            </p>
+            <p className="settings-row-subtitle">
+              Average cycle duration:{" "}
+              {formatDurationMs(syncDiagnostics.average_cycle_duration_ms)}
+            </p>
+            <p className="settings-row-subtitle">
+              Failed cycles: {syncDiagnostics.failed_cycles} (streak:{" "}
+              {syncDiagnostics.consecutive_failures})
+            </p>
+            <p className="settings-row-subtitle">
+              Conflict cycles: {syncDiagnostics.conflict_cycles}
+            </p>
+          </div>
         </div>
 
         <div className="settings-actions">
@@ -504,6 +1248,34 @@ export function ReminderSettings({
           Restore will replace all current local data.
         </p>
 
+        {backupRestorePreflight.isLoading ? (
+          <p className="settings-row-subtitle">Checking restore preflight...</p>
+        ) : backupPreflight ? (
+          <div className="backup-preflight">
+            <p className="settings-row-subtitle">
+              Latest internal backup:{" "}
+              {formatSyncDateTime(backupPreflight.latest_backup_exported_at)}
+            </p>
+            <p className="settings-row-subtitle">
+              Pending outbox changes: {backupPreflight.pending_outbox_changes}
+            </p>
+            <p className="settings-row-subtitle">
+              Open conflicts: {backupPreflight.open_conflicts}
+            </p>
+            {backupPreflight.requires_force_restore && (
+              <p className="settings-feedback settings-feedback-warn">
+                Restore currently requires force because pending outbox changes
+                exist.
+              </p>
+            )}
+          </div>
+        ) : null}
+        {backupRestorePreflight.isError && (
+          <p className="settings-feedback settings-feedback-error">
+            Unable to load restore preflight details.
+          </p>
+        )}
+
         <div className="settings-actions">
           <button
             type="button"
@@ -517,11 +1289,22 @@ export function ReminderSettings({
           <button
             type="button"
             className="settings-btn"
+            onClick={() => void handleRestoreLatestBackup()}
+            disabled={isBackupBusy || !backupPreflight?.has_latest_backup}
+          >
+            <RotateCcw size={14} />
+            {restoreLatestBackup.isPending
+              ? "Restoring Latest..."
+              : "Restore Latest Backup"}
+          </button>
+          <button
+            type="button"
+            className="settings-btn"
             onClick={handleOpenBackupFilePicker}
             disabled={isBackupBusy}
           >
             <Upload size={14} />
-            {importBackup.isPending ? "Restoring..." : "Restore Backup"}
+            {importBackup.isPending ? "Restoring..." : "Restore from File"}
           </button>
           <input
             ref={backupInputRef}
@@ -623,6 +1406,9 @@ export function ReminderSettings({
           margin-top: -2px;
           margin-bottom: 10px;
           color: var(--danger);
+        }
+        .backup-preflight {
+          margin-bottom: 10px;
         }
         .toggle-btn {
           width: 44px;
@@ -757,6 +1543,141 @@ export function ReminderSettings({
         .sync-meta {
           margin-bottom: 8px;
         }
+        .sync-conflicts {
+          border: 1px solid var(--border-default);
+          border-radius: var(--radius-md);
+          background: var(--bg-elevated);
+          padding: 10px;
+          margin-bottom: 10px;
+        }
+        .sync-conflicts-head {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 8px;
+          margin-bottom: 8px;
+        }
+        .sync-conflict-list {
+          display: grid;
+          gap: 8px;
+          margin-top: 6px;
+        }
+        .sync-conflict-item {
+          border: 1px solid var(--border-default);
+          border-radius: var(--radius-md);
+          background: var(--bg-surface);
+          padding: 10px;
+        }
+        .sync-conflict-item-head {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 8px;
+          align-items: center;
+          margin-bottom: 4px;
+        }
+        .sync-conflict-type {
+          display: inline-flex;
+          align-items: center;
+          border-radius: var(--radius-full);
+          border: 1px solid rgba(248, 113, 113, 0.45);
+          background: var(--danger-subtle);
+          color: var(--danger);
+          font-size: 11px;
+          font-weight: 700;
+          padding: 2px 8px;
+          text-transform: uppercase;
+          letter-spacing: 0.2px;
+        }
+        .sync-conflict-entity {
+          font-size: 11px;
+          color: var(--text-muted);
+          font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+            "Liberation Mono", "Courier New", monospace;
+        }
+        .sync-conflict-selected {
+          font-size: 11px;
+          color: var(--accent);
+          font-weight: 700;
+        }
+        .sync-conflict-message {
+          font-size: 12px;
+          color: var(--text-secondary);
+          margin-bottom: 6px;
+          line-height: 1.45;
+        }
+        .sync-conflict-detail {
+          margin-top: 10px;
+          border: 1px solid var(--border-default);
+          border-radius: var(--radius-md);
+          background: var(--bg-surface);
+          padding: 10px;
+        }
+        .sync-conflict-payload-grid {
+          display: grid;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 8px;
+          margin-top: 8px;
+        }
+        .sync-conflict-payload {
+          margin-top: 4px;
+          margin-bottom: 0;
+          border: 1px solid var(--border-default);
+          border-radius: var(--radius-sm);
+          background: var(--bg-elevated);
+          color: var(--text-secondary);
+          font-size: 11px;
+          line-height: 1.4;
+          padding: 8px;
+          white-space: pre-wrap;
+          word-break: break-word;
+          max-height: 180px;
+          overflow: auto;
+          font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas,
+            "Liberation Mono", "Courier New", monospace;
+        }
+        .sync-conflict-timeline-title {
+          margin-top: 10px;
+        }
+        .sync-conflict-timeline {
+          display: grid;
+          gap: 6px;
+          margin-top: 6px;
+        }
+        .sync-conflict-timeline-item {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          flex-wrap: wrap;
+        }
+        .sync-conflict-event-pill {
+          display: inline-flex;
+          align-items: center;
+          border-radius: var(--radius-full);
+          border: 1px solid var(--border-default);
+          background: var(--bg-elevated);
+          color: var(--text-secondary);
+          font-size: 11px;
+          font-weight: 700;
+          padding: 2px 8px;
+          text-transform: uppercase;
+          letter-spacing: 0.2px;
+        }
+        .sync-runtime-card {
+          border: 1px solid var(--border-default);
+          border-radius: var(--radius-md);
+          background: var(--bg-surface);
+          padding: 10px;
+          margin-bottom: 10px;
+        }
+        .sync-runtime-head {
+          margin-bottom: 8px;
+        }
+        .sync-runtime-grid {
+          display: grid;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 8px;
+          margin-bottom: 10px;
+        }
         .sync-endpoint-grid {
           display: grid;
           grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -812,6 +1733,16 @@ export function ReminderSettings({
           }
           .settings-row {
             align-items: flex-start;
+          }
+          .sync-conflicts-head {
+            align-items: flex-start;
+            flex-direction: column;
+          }
+          .sync-conflict-payload-grid {
+            grid-template-columns: 1fr;
+          }
+          .sync-runtime-grid {
+            grid-template-columns: 1fr;
           }
           .sync-endpoint-grid {
             grid-template-columns: 1fr;

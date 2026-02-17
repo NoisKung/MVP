@@ -43,6 +43,14 @@ const WORKSPACE_VIEWS: WorkspaceViewExpectation[] = [
     ],
   },
   {
+    label: "Conflicts",
+    selectors: [
+      'h1.conflict-center-title:has-text("Conflict Center")',
+      "text=No open conflicts",
+      "text=Loading conflicts...",
+    ],
+  },
+  {
     label: "Weekly Review",
     selectors: [
       'h1.weekly-review-title:has-text("Weekly Review")',

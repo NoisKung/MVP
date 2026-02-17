@@ -22,20 +22,35 @@ import {
   getTaskChangelogs,
   getWeeklyReviewSnapshot,
   exportBackupPayload,
+  exportSyncConflictReport,
+  getBackupRestorePreflight,
   importBackupPayload,
+  listSyncConflicts,
+  listSyncConflictEvents,
+  restoreLatestBackupPayload,
   getSyncEndpointSettings,
+  ensureSyncRuntimeSettingsSeeded,
+  resolveSyncConflict,
   updateSyncEndpointSettings,
+  updateSyncRuntimeSettings,
 } from "@/lib/database";
 import type {
+  BackupRestorePreflight,
   BackupPayload,
   CreateProjectInput,
   CreateTaskInput,
   CreateTaskSubtaskInput,
   UpdateProjectInput,
+  ResolveSyncConflictInput,
+  SyncConflictReportPayload,
+  SyncConflictStatus,
   UpdateSyncEndpointSettingsInput,
+  SyncRuntimeProfilePreset,
+  UpdateSyncRuntimeSettingsInput,
   UpdateTaskSubtaskInput,
   UpdateTaskInput,
   SyncEndpointSettings,
+  SyncRuntimeSettings,
   UpsertTaskTemplateInput,
 } from "@/lib/types";
 
@@ -50,6 +65,10 @@ const TASK_SUBTASK_STATS_KEY = ["task-subtask-stats"] as const;
 const TASK_TEMPLATES_KEY = ["task-templates"] as const;
 const PROJECTS_KEY = ["projects"] as const;
 const SYNC_SETTINGS_KEY = ["sync-settings"] as const;
+const SYNC_RUNTIME_SETTINGS_KEY = ["sync-runtime-settings"] as const;
+const SYNC_CONFLICTS_KEY = ["sync-conflicts"] as const;
+const SYNC_CONFLICT_EVENTS_KEY = ["sync-conflict-events"] as const;
+const BACKUP_RESTORE_PREFLIGHT_KEY = ["backup-restore-preflight"] as const;
 
 /** Fetch all active/completed projects */
 export function useProjects() {
@@ -330,10 +349,94 @@ export function useUpdateSyncSettings() {
   });
 }
 
+/** Read sync runtime settings (intervals + limits) */
+export function useSyncRuntimeSettings(
+  preset: SyncRuntimeProfilePreset = "desktop",
+) {
+  return useQuery({
+    queryKey: [...SYNC_RUNTIME_SETTINGS_KEY, preset],
+    queryFn: () => ensureSyncRuntimeSettingsSeeded(preset),
+  });
+}
+
+/** Update sync runtime settings (intervals + limits) */
+export function useUpdateSyncRuntimeSettings() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (input: UpdateSyncRuntimeSettingsInput) =>
+      updateSyncRuntimeSettings(input),
+    onSuccess: (_result: SyncRuntimeSettings) => {
+      queryClient.invalidateQueries({ queryKey: SYNC_RUNTIME_SETTINGS_KEY });
+    },
+  });
+}
+
+/** Fetch sync conflicts for conflict center surfaces */
+export function useSyncConflicts(
+  status: SyncConflictStatus | "all" = "open",
+  limit = 100,
+) {
+  return useQuery({
+    queryKey: [...SYNC_CONFLICTS_KEY, status, limit],
+    queryFn: () =>
+      listSyncConflicts({
+        status,
+        limit,
+      }),
+  });
+}
+
+/** Fetch event timeline for one sync conflict */
+export function useSyncConflictEvents(conflictId?: string, limit = 100) {
+  return useQuery({
+    queryKey: [...SYNC_CONFLICT_EVENTS_KEY, conflictId, limit],
+    queryFn: () => listSyncConflictEvents(conflictId as string, limit),
+    enabled: Boolean(conflictId),
+  });
+}
+
+/** Resolve an open sync conflict with explicit strategy */
+export function useResolveSyncConflict() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (input: ResolveSyncConflictInput) => resolveSyncConflict(input),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: SYNC_CONFLICTS_KEY });
+      queryClient.invalidateQueries({ queryKey: SYNC_CONFLICT_EVENTS_KEY });
+    },
+  });
+}
+
+/** Export conflict report with conflict + timeline events */
+export function useExportSyncConflictReport() {
+  return useMutation({
+    mutationFn: (input?: {
+      status?: SyncConflictStatus | "all";
+      limit?: number;
+      eventsPerConflict?: number;
+    }): Promise<SyncConflictReportPayload> => exportSyncConflictReport(input),
+  });
+}
+
 /** Export full local data payload for backup */
 export function useExportBackup() {
+  const queryClient = useQueryClient();
+
   return useMutation({
     mutationFn: () => exportBackupPayload(),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: BACKUP_RESTORE_PREFLIGHT_KEY });
+    },
+  });
+}
+
+/** Inspect restore preflight guardrails (outbox/conflicts/latest snapshot) */
+export function useBackupRestorePreflight() {
+  return useQuery({
+    queryKey: BACKUP_RESTORE_PREFLIGHT_KEY,
+    queryFn: (): Promise<BackupRestorePreflight> => getBackupRestorePreflight(),
   });
 }
 
@@ -342,8 +445,10 @@ export function useImportBackup() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: (payload: BackupPayload | unknown) =>
-      importBackupPayload(payload),
+    mutationFn: (input: {
+      payload: BackupPayload | unknown;
+      force?: boolean;
+    }) => importBackupPayload(input.payload, { force: input.force }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: PROJECTS_KEY });
       queryClient.invalidateQueries({ queryKey: TASKS_KEY });
@@ -355,6 +460,34 @@ export function useImportBackup() {
       queryClient.invalidateQueries({ queryKey: TASK_SUBTASKS_KEY });
       queryClient.invalidateQueries({ queryKey: TASK_SUBTASK_STATS_KEY });
       queryClient.invalidateQueries({ queryKey: TASK_TEMPLATES_KEY });
+      queryClient.invalidateQueries({ queryKey: SYNC_CONFLICTS_KEY });
+      queryClient.invalidateQueries({ queryKey: SYNC_CONFLICT_EVENTS_KEY });
+      queryClient.invalidateQueries({ queryKey: BACKUP_RESTORE_PREFLIGHT_KEY });
+    },
+  });
+}
+
+/** Restore the latest local exported snapshot with optional force guardrail */
+export function useRestoreLatestBackup() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (input?: { force?: boolean }) =>
+      restoreLatestBackupPayload({ force: input?.force }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: PROJECTS_KEY });
+      queryClient.invalidateQueries({ queryKey: TASKS_KEY });
+      queryClient.invalidateQueries({ queryKey: TODAY_TASKS_KEY });
+      queryClient.invalidateQueries({ queryKey: UPCOMING_TASKS_KEY });
+      queryClient.invalidateQueries({ queryKey: STATS_KEY });
+      queryClient.invalidateQueries({ queryKey: WEEKLY_REVIEW_KEY });
+      queryClient.invalidateQueries({ queryKey: CHANGELOGS_KEY });
+      queryClient.invalidateQueries({ queryKey: TASK_SUBTASKS_KEY });
+      queryClient.invalidateQueries({ queryKey: TASK_SUBTASK_STATS_KEY });
+      queryClient.invalidateQueries({ queryKey: TASK_TEMPLATES_KEY });
+      queryClient.invalidateQueries({ queryKey: SYNC_CONFLICTS_KEY });
+      queryClient.invalidateQueries({ queryKey: SYNC_CONFLICT_EVENTS_KEY });
+      queryClient.invalidateQueries({ queryKey: BACKUP_RESTORE_PREFLIGHT_KEY });
     },
   });
 }

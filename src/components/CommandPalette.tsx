@@ -30,6 +30,7 @@ const VIEW_COMMANDS: Array<{ view: ViewMode; label: string }> = [
   { view: "calendar", label: "Calendar" },
   { view: "today", label: "Today" },
   { view: "upcoming", label: "Upcoming" },
+  { view: "conflicts", label: "Conflict Center" },
   { view: "review", label: "Weekly Review" },
   { view: "dashboard", label: "Dashboard" },
   { view: "settings", label: "Settings" },

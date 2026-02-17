@@ -240,6 +240,21 @@ export interface BackupImportResult {
   task_templates: number;
 }
 
+/** Options for restore/backup import guardrails */
+export interface BackupImportOptions {
+  force?: boolean;
+  source?: "file" | "latest_backup";
+}
+
+/** Restore guardrails for backup recovery */
+export interface BackupRestorePreflight {
+  pending_outbox_changes: number;
+  open_conflicts: number;
+  has_latest_backup: boolean;
+  latest_backup_exported_at: string | null;
+  requires_force_restore: boolean;
+}
+
 export type SyncEntityType =
   | "PROJECT"
   | "TASK"
@@ -256,6 +271,19 @@ export type SyncStatus =
   | "CONFLICT"
   | "LOCAL_ONLY";
 
+export interface SyncSessionDiagnostics {
+  total_cycles: number;
+  successful_cycles: number;
+  failed_cycles: number;
+  conflict_cycles: number;
+  consecutive_failures: number;
+  success_rate_percent: number;
+  last_cycle_duration_ms: number | null;
+  average_cycle_duration_ms: number | null;
+  last_attempt_at: string | null;
+  last_success_at: string | null;
+}
+
 export interface SyncCheckpoint {
   id: 1;
   last_sync_cursor: string | null;
@@ -271,6 +299,24 @@ export interface SyncEndpointSettings {
 export interface UpdateSyncEndpointSettingsInput {
   push_url: string | null;
   pull_url: string | null;
+}
+
+export type SyncRuntimeProfilePreset = "desktop" | "mobile";
+
+export interface SyncRuntimeSettings {
+  auto_sync_interval_seconds: number;
+  background_sync_interval_seconds: number;
+  push_limit: number;
+  pull_limit: number;
+  max_pull_pages: number;
+}
+
+export interface UpdateSyncRuntimeSettingsInput {
+  auto_sync_interval_seconds: number;
+  background_sync_interval_seconds: number;
+  push_limit: number;
+  pull_limit: number;
+  max_pull_pages: number;
 }
 
 export interface SyncOutboxRecord {
@@ -294,6 +340,77 @@ export interface DeletedRecord {
   deleted_by_device: string | null;
   created_at: string;
   updated_at: string;
+}
+
+export type SyncConflictType =
+  | "field_conflict"
+  | "delete_vs_update"
+  | "notes_collision"
+  | "validation_error";
+
+export type SyncConflictStatus = "open" | "resolved" | "ignored";
+
+export type SyncConflictResolutionStrategy =
+  | "keep_local"
+  | "keep_remote"
+  | "manual_merge"
+  | "retry";
+
+export type SyncConflictEventType =
+  | "detected"
+  | "resolved"
+  | "ignored"
+  | "retried"
+  | "exported";
+
+export interface SyncConflictRecord {
+  id: string;
+  incoming_idempotency_key: string;
+  entity_type: SyncEntityType;
+  entity_id: string;
+  operation: SyncOperation;
+  conflict_type: SyncConflictType;
+  reason_code: string;
+  message: string;
+  local_payload_json: string | null;
+  remote_payload_json: string | null;
+  base_payload_json: string | null;
+  status: SyncConflictStatus;
+  resolution_strategy: SyncConflictResolutionStrategy | null;
+  resolution_payload_json: string | null;
+  resolved_by_device: string | null;
+  detected_at: string;
+  resolved_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface SyncConflictEventRecord {
+  id: string;
+  conflict_id: string;
+  event_type: SyncConflictEventType;
+  event_payload_json: string | null;
+  created_at: string;
+}
+
+export interface ResolveSyncConflictInput {
+  conflict_id: string;
+  strategy: SyncConflictResolutionStrategy;
+  resolved_by_device?: string | null;
+  resolution_payload?: Record<string, unknown> | null;
+}
+
+export interface SyncConflictReportItem {
+  conflict: SyncConflictRecord;
+  events: SyncConflictEventRecord[];
+}
+
+export interface SyncConflictReportPayload {
+  version: 1;
+  exported_at: string;
+  total_conflicts: number;
+  status_filter: SyncConflictStatus | "all";
+  items: SyncConflictReportItem[];
 }
 
 export interface SyncPushChange {
@@ -439,6 +556,7 @@ export type ViewMode =
   | "calendar"
   | "today"
   | "upcoming"
+  | "conflicts"
   | "review"
   | "dashboard"
   | "settings";

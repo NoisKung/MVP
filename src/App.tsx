@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AppShell } from "./components/AppShell";
 import { TaskBoard } from "./components/TaskBoard";
 import { TaskForm } from "./components/TaskForm";
@@ -8,6 +8,7 @@ import { Dashboard } from "./components/Dashboard";
 import { TaskScheduleView } from "./components/TaskScheduleView";
 import { ProjectView } from "./components/ProjectView";
 import { CalendarView } from "./components/CalendarView";
+import { ConflictCenterView } from "./components/ConflictCenterView";
 import { WeeklyReviewView } from "./components/WeeklyReviewView";
 import { ReminderSettings } from "./components/ReminderSettings";
 import { TaskFiltersBar } from "./components/TaskFiltersBar";
@@ -20,7 +21,11 @@ import {
   useCreateTask,
   useUpdateTask,
   useDeleteTask,
+  useResolveSyncConflict,
+  useSyncConflicts,
+  useSyncRuntimeSettings,
   useSyncSettings,
+  useUpdateSyncRuntimeSettings,
   useUpdateSyncSettings,
 } from "./hooks/use-tasks";
 import { useReminderNotifications } from "./hooks/use-reminder-notifications";
@@ -33,14 +38,19 @@ import type {
   UpdateTaskInput,
   TaskStatus,
   Task,
+  SyncConflictRecord,
+  ResolveSyncConflictInput,
   SyncStatus,
   UpdateSyncEndpointSettingsInput,
+  UpdateSyncRuntimeSettingsInput,
 } from "./lib/types";
 import {
   getRemindersEnabledPreference,
   setRemindersEnabledPreference,
 } from "./lib/reminder-settings";
 import { applyTaskFilters } from "./lib/task-filters";
+import { detectSyncRuntimeProfilePreset } from "./lib/runtime-platform";
+import { installE2EBridge } from "./lib/e2e-bridge";
 import "./index.css";
 
 const queryClient = new QueryClient({
@@ -117,7 +127,49 @@ function getSyncStatusLabel(input: {
   return "Needs attention";
 }
 
+function isE2EBridgeEnabled(): boolean {
+  if (typeof window === "undefined") return false;
+  const searchParams = new URLSearchParams(window.location.search);
+  return searchParams.get("e2e") === "1";
+}
+
+function createE2EConflictFixture(): SyncConflictRecord {
+  const nowIso = new Date().toISOString();
+  const uniqueSuffix = `${Date.now()}-${Math.floor(Math.random() * 1_000_000)}`;
+  const entityId = `e2e-task-${uniqueSuffix}`;
+  const conflictId = `e2e-conflict-${uniqueSuffix}`;
+
+  return {
+    id: conflictId,
+    incoming_idempotency_key: `incoming-${conflictId}`,
+    entity_type: "TASK",
+    entity_id: entityId,
+    operation: "UPSERT",
+    conflict_type: "field_conflict",
+    reason_code: "MISSING_TASK_TITLE",
+    message: "Task title is required in incoming payload.",
+    local_payload_json: JSON.stringify({
+      title: "Local task title",
+      description: "Existing local payload",
+    }),
+    remote_payload_json: JSON.stringify({
+      description: "Incoming remote payload without title",
+    }),
+    base_payload_json: null,
+    status: "open",
+    resolution_strategy: null,
+    resolution_payload_json: null,
+    resolved_by_device: null,
+    detected_at: nowIso,
+    resolved_at: null,
+    created_at: nowIso,
+    updated_at: nowIso,
+  };
+}
+
 function AppContent() {
+  const e2eBridgeEnabled = useMemo(() => isE2EBridgeEnabled(), []);
+  const syncRuntimePreset = useMemo(() => detectSyncRuntimeProfilePreset(), []);
   const {
     activeView,
     setActiveView,
@@ -151,6 +203,12 @@ function AppContent() {
   const createTask = useCreateTask();
   const updateTask = useUpdateTask();
   const deleteTask = useDeleteTask();
+  const { data: syncConflicts = [], isLoading: isSyncConflictsLoading } =
+    useSyncConflicts("open", 50);
+  const resolveSyncConflict = useResolveSyncConflict();
+  const { data: syncRuntimeSettings, isLoading: isSyncRuntimeSettingsLoading } =
+    useSyncRuntimeSettings(syncRuntimePreset);
+  const updateSyncRuntimeSettings = useUpdateSyncRuntimeSettings();
   const { data: syncSettings, isLoading: isSyncSettingsLoading } =
     useSyncSettings();
   const updateSyncSettings = useUpdateSyncSettings();
@@ -183,25 +241,130 @@ function AppContent() {
   const [remindersEnabled, setRemindersEnabled] = useState<boolean>(() =>
     getRemindersEnabledPreference(),
   );
+  const [e2eOpenConflicts, setE2eOpenConflicts] = useState<
+    SyncConflictRecord[]
+  >([]);
+  const [isE2EConflictResolving, setIsE2EConflictResolving] = useState(false);
+  const e2eSyncFailureBudgetRef = useRef(0);
+  const [e2eSyncStatus, setE2ESyncStatus] = useState<SyncStatus>("SYNCED");
+  const [e2eSyncLastSyncedAt, setE2ESyncLastSyncedAt] = useState<string | null>(
+    null,
+  );
+  const [e2eSyncLastError, setE2ESyncLastError] = useState<string | null>(null);
+  const [isE2ESyncRunning, setIsE2ESyncRunning] = useState(false);
   const sync = useSync({
     pushUrl: syncSettings?.push_url ?? null,
     pullUrl: syncSettings?.pull_url ?? null,
-    configReady: !isSyncSettingsLoading,
+    configReady: !isSyncSettingsLoading && !isSyncRuntimeSettingsLoading,
+    autoSyncIntervalMs:
+      (syncRuntimeSettings?.auto_sync_interval_seconds ?? 60) * 1000,
+    backgroundSyncIntervalMs:
+      (syncRuntimeSettings?.background_sync_interval_seconds ?? 300) * 1000,
+    pushLimit: syncRuntimeSettings?.push_limit ?? 200,
+    pullLimit: syncRuntimeSettings?.pull_limit ?? 200,
+    maxPullPages: syncRuntimeSettings?.max_pull_pages ?? 5,
   });
+  const visibleSyncStatus = e2eBridgeEnabled ? e2eSyncStatus : sync.status;
+  const visibleSyncLastSyncedAt = e2eBridgeEnabled
+    ? e2eSyncLastSyncedAt
+    : sync.lastSyncedAt;
+  const visibleSyncLastError = e2eBridgeEnabled
+    ? e2eSyncLastError
+    : sync.lastError;
+  const visibleSyncIsRunning = e2eBridgeEnabled
+    ? isE2ESyncRunning
+    : sync.isSyncing;
+  const visibleSyncHasTransport = e2eBridgeEnabled ? true : sync.hasTransport;
+  const visibleSyncIsOnline = e2eBridgeEnabled ? true : sync.isOnline;
   const syncStatusLabel = useMemo(
     () =>
       getSyncStatusLabel({
-        status: sync.status,
-        isOnline: sync.isOnline,
-        lastSyncedAt: sync.lastSyncedAt,
+        status: visibleSyncStatus,
+        isOnline: visibleSyncIsOnline,
+        lastSyncedAt: visibleSyncLastSyncedAt,
       }),
-    [sync.hasTransport, sync.isOnline, sync.lastSyncedAt, sync.status],
+    [visibleSyncIsOnline, visibleSyncLastSyncedAt, visibleSyncStatus],
   );
   const handleSaveSyncSettings = useCallback(
     async (input: UpdateSyncEndpointSettingsInput): Promise<void> => {
       await updateSyncSettings.mutateAsync(input);
     },
     [updateSyncSettings],
+  );
+  const handleE2ESyncNow = useCallback(async (): Promise<void> => {
+    setIsE2ESyncRunning(true);
+    setE2ESyncStatus("SYNCING");
+    setE2ESyncLastError(null);
+
+    await new Promise<void>((resolve) => {
+      window.setTimeout(() => resolve(), 80);
+    });
+
+    if (e2eSyncFailureBudgetRef.current > 0) {
+      e2eSyncFailureBudgetRef.current -= 1;
+      setE2ESyncStatus("CONFLICT");
+      setE2ESyncLastError("E2E simulated transport failure.");
+      setIsE2ESyncRunning(false);
+      return;
+    }
+
+    const nowIso = new Date().toISOString();
+    setE2ESyncStatus("SYNCED");
+    setE2ESyncLastSyncedAt(nowIso);
+    setE2ESyncLastError(null);
+    setIsE2ESyncRunning(false);
+  }, []);
+
+  const handleE2ESetSyncFailureBudget = useCallback((count: number) => {
+    const normalizedCount = Number.isFinite(count)
+      ? Math.max(0, Math.floor(count))
+      : 0;
+    e2eSyncFailureBudgetRef.current = normalizedCount;
+  }, []);
+  const visibleSyncNow = e2eBridgeEnabled ? handleE2ESyncNow : sync.syncNow;
+
+  const handleResolveSyncConflict = useCallback(
+    async (input: ResolveSyncConflictInput): Promise<void> => {
+      if (e2eBridgeEnabled) {
+        setIsE2EConflictResolving(true);
+        try {
+          const nowIso = new Date().toISOString();
+          if (input.strategy === "retry") {
+            setE2eOpenConflicts((previous) =>
+              previous.map((conflict) =>
+                conflict.id === input.conflict_id
+                  ? {
+                      ...conflict,
+                      resolution_strategy: "retry",
+                      resolved_by_device: "e2e-local-device",
+                      resolved_at: null,
+                      updated_at: nowIso,
+                    }
+                  : conflict,
+              ),
+            );
+            return;
+          }
+
+          setE2eOpenConflicts((previous) =>
+            previous.filter((conflict) => conflict.id !== input.conflict_id),
+          );
+          return;
+        } finally {
+          setIsE2EConflictResolving(false);
+        }
+      }
+
+      await resolveSyncConflict.mutateAsync(input);
+      await sync.syncNow();
+    },
+    [e2eBridgeEnabled, resolveSyncConflict, sync],
+  );
+  const handleSaveSyncRuntimeSettings = useCallback(
+    async (input: UpdateSyncRuntimeSettingsInput): Promise<void> => {
+      await updateSyncRuntimeSettings.mutateAsync(input);
+    },
+    [updateSyncRuntimeSettings],
   );
 
   const closeQuickCapture = useCallback(() => {
@@ -240,6 +403,45 @@ function AppContent() {
     setRemindersEnabled(enabled);
     setRemindersEnabledPreference(enabled);
   }, []);
+
+  const handleE2EResetSyncState = useCallback(() => {
+    setE2eOpenConflicts([]);
+    e2eSyncFailureBudgetRef.current = 0;
+    setE2ESyncStatus("SYNCED");
+    setE2ESyncLastSyncedAt(null);
+    setE2ESyncLastError(null);
+    setIsE2ESyncRunning(false);
+  }, []);
+
+  const handleE2ESeedTaskFieldConflict = useCallback(() => {
+    const fixture = createE2EConflictFixture();
+    setE2eOpenConflicts((previous) => [fixture, ...previous]);
+    return {
+      conflict_id: fixture.id,
+      entity_id: fixture.entity_id,
+    };
+  }, []);
+
+  const handleE2EListOpenConflictIds = useCallback(
+    () => e2eOpenConflicts.map((conflict) => conflict.id),
+    [e2eOpenConflicts],
+  );
+
+  useEffect(() => {
+    installE2EBridge({
+      enabled: e2eBridgeEnabled,
+      onResetSyncState: handleE2EResetSyncState,
+      onSeedTaskFieldConflict: handleE2ESeedTaskFieldConflict,
+      onListOpenConflictIds: handleE2EListOpenConflictIds,
+      onSetSyncFailureBudget: handleE2ESetSyncFailureBudget,
+    });
+  }, [
+    e2eBridgeEnabled,
+    handleE2EListOpenConflictIds,
+    handleE2EResetSyncState,
+    handleE2ESetSyncFailureBudget,
+    handleE2ESeedTaskFieldConflict,
+  ]);
 
   const handleTaskNotificationOpen = useCallback(
     (taskId: string) => {
@@ -422,6 +624,15 @@ function AppContent() {
       projects.map((project) => [project.id, project.name]),
     ) as Record<string, string>;
   }, [projects]);
+  const visibleSyncConflicts = e2eBridgeEnabled
+    ? e2eOpenConflicts
+    : syncConflicts;
+  const visibleSyncConflictsLoading = e2eBridgeEnabled
+    ? false
+    : isSyncConflictsLoading;
+  const visibleSyncConflictResolving = e2eBridgeEnabled
+    ? isE2EConflictResolving
+    : resolveSyncConflict.isPending;
 
   const content = taskViewState?.isLoading ? (
     <div
@@ -600,21 +811,46 @@ function AppContent() {
       onStatusChange={handleStatusChange}
       onCreateClick={() => openCreateModal(null)}
     />
+  ) : activeView === "conflicts" ? (
+    <ConflictCenterView
+      syncConflicts={visibleSyncConflicts}
+      syncConflictsLoading={visibleSyncConflictsLoading}
+      syncConflictResolving={visibleSyncConflictResolving}
+      onResolveSyncConflict={handleResolveSyncConflict}
+      onOpenSyncSettings={() => setActiveView("settings")}
+    />
   ) : activeView === "settings" ? (
     <ReminderSettings
       remindersEnabled={remindersEnabled}
       onRemindersEnabledChange={handleRemindersEnabledChange}
-      syncStatus={sync.status}
+      syncStatus={visibleSyncStatus}
       syncStatusLabel={syncStatusLabel}
-      syncLastSyncedAt={sync.lastSyncedAt}
-      syncLastError={sync.lastError}
-      syncIsRunning={sync.isSyncing}
-      syncHasTransport={sync.hasTransport}
-      onSyncNow={sync.syncNow}
+      syncLastSyncedAt={visibleSyncLastSyncedAt}
+      syncLastError={visibleSyncLastError}
+      syncIsRunning={visibleSyncIsRunning}
+      syncHasTransport={visibleSyncHasTransport}
+      onSyncNow={visibleSyncNow}
       syncPushUrl={syncSettings?.push_url ?? null}
       syncPullUrl={syncSettings?.pull_url ?? null}
       syncConfigSaving={updateSyncSettings.isPending}
       onSaveSyncSettings={handleSaveSyncSettings}
+      syncAutoIntervalSeconds={
+        syncRuntimeSettings?.auto_sync_interval_seconds ?? 60
+      }
+      syncBackgroundIntervalSeconds={
+        syncRuntimeSettings?.background_sync_interval_seconds ?? 300
+      }
+      syncPushLimit={syncRuntimeSettings?.push_limit ?? 200}
+      syncPullLimit={syncRuntimeSettings?.pull_limit ?? 200}
+      syncMaxPullPages={syncRuntimeSettings?.max_pull_pages ?? 5}
+      syncRuntimePreset={syncRuntimePreset}
+      syncDiagnostics={sync.diagnostics}
+      syncRuntimeSaving={updateSyncRuntimeSettings.isPending}
+      onSaveSyncRuntimeSettings={handleSaveSyncRuntimeSettings}
+      syncConflicts={visibleSyncConflicts}
+      syncConflictsLoading={visibleSyncConflictsLoading}
+      syncConflictResolving={visibleSyncConflictResolving}
+      onResolveSyncConflict={handleResolveSyncConflict}
     />
   ) : (
     <Dashboard />
@@ -623,8 +859,9 @@ function AppContent() {
   return (
     <AppShell
       onCreateClick={() => openCreateModal(null)}
-      syncStatus={sync.status}
+      syncStatus={visibleSyncStatus}
       syncStatusLabel={syncStatusLabel}
+      onOpenConflictCenter={() => setActiveView("conflicts")}
     >
       {taskViewState && !taskViewState.isLoading && !taskViewState.isError && (
         <TaskFiltersBar

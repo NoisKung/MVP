@@ -1,18 +1,30 @@
 import Database from "@tauri-apps/plugin-sql";
 import type {
   AppSettingRecord,
+  BackupImportOptions,
   BackupImportResult,
   BackupPayload,
+  BackupRestorePreflight,
   DeletedRecord,
+  ResolveSyncConflictInput,
   Task,
   Project,
   SessionRecord,
   SyncCheckpoint,
+  SyncConflictEventRecord,
+  SyncConflictEventType,
+  SyncConflictReportPayload,
+  SyncConflictRecord,
+  SyncConflictResolutionStrategy,
+  SyncConflictStatus,
+  SyncConflictType,
   SyncEndpointSettings,
   SyncEntityType,
   SyncOperation,
   SyncOutboxRecord,
   SyncPushChange,
+  SyncRuntimeProfilePreset,
+  SyncRuntimeSettings,
   TaskStatus,
   TaskPriority,
   TaskSubtask,
@@ -31,6 +43,7 @@ import type {
   UpdateProjectInput,
   UpdateTaskSubtaskInput,
   UpdateSyncEndpointSettingsInput,
+  UpdateSyncRuntimeSettingsInput,
   UpsertTaskTemplateInput,
   UpdateTaskInput,
 } from "./types";
@@ -95,9 +108,52 @@ const SYNC_ENTITY_TYPES: SyncEntityType[] = [
   "SETTING",
 ];
 const SYNC_OPERATIONS: SyncOperation[] = ["UPSERT", "DELETE"];
+const SYNC_CONFLICT_TYPES: SyncConflictType[] = [
+  "field_conflict",
+  "delete_vs_update",
+  "notes_collision",
+  "validation_error",
+];
+const SYNC_CONFLICT_STATUSES: SyncConflictStatus[] = [
+  "open",
+  "resolved",
+  "ignored",
+];
+const SYNC_CONFLICT_RESOLUTION_STRATEGIES: SyncConflictResolutionStrategy[] = [
+  "keep_local",
+  "keep_remote",
+  "manual_merge",
+  "retry",
+];
+const SYNC_CONFLICT_EVENT_TYPES: SyncConflictEventType[] = [
+  "detected",
+  "resolved",
+  "ignored",
+  "retried",
+  "exported",
+];
 const SYNC_SETTINGS_DEVICE_ID_KEY = "sync.device_id";
 const SYNC_SETTINGS_PUSH_URL_KEY = "local.sync.push_url";
 const SYNC_SETTINGS_PULL_URL_KEY = "local.sync.pull_url";
+const SYNC_SETTINGS_AUTO_INTERVAL_SECONDS_KEY =
+  "local.sync.auto_interval_seconds";
+const SYNC_SETTINGS_BACKGROUND_INTERVAL_SECONDS_KEY =
+  "local.sync.background_interval_seconds";
+const SYNC_SETTINGS_PUSH_LIMIT_KEY = "local.sync.push_limit";
+const SYNC_SETTINGS_PULL_LIMIT_KEY = "local.sync.pull_limit";
+const SYNC_SETTINGS_MAX_PULL_PAGES_KEY = "local.sync.max_pull_pages";
+const LOCAL_BACKUP_LATEST_PAYLOAD_KEY = "local.backup.latest_payload_v1";
+const LOCAL_BACKUP_LATEST_EXPORTED_AT_KEY = "local.backup.latest_exported_at";
+const DEFAULT_SYNC_AUTO_INTERVAL_SECONDS = 60;
+const DEFAULT_SYNC_BACKGROUND_INTERVAL_SECONDS = 300;
+const DEFAULT_SYNC_PUSH_LIMIT = 200;
+const DEFAULT_SYNC_PULL_LIMIT = 200;
+const DEFAULT_SYNC_MAX_PULL_PAGES = 5;
+const MOBILE_SYNC_AUTO_INTERVAL_SECONDS = 120;
+const MOBILE_SYNC_BACKGROUND_INTERVAL_SECONDS = 600;
+const MOBILE_SYNC_PUSH_LIMIT = 120;
+const MOBILE_SYNC_PULL_LIMIT = 120;
+const MOBILE_SYNC_MAX_PULL_PAGES = 3;
 const LOCAL_ONLY_SETTING_PREFIX = "local.";
 
 /** Get or create the database connection singleton */
@@ -273,6 +329,56 @@ async function initSchema(db: Database): Promise<void> {
   await db.execute(`
     CREATE INDEX IF NOT EXISTS idx_deleted_records_deleted_at
     ON deleted_records(deleted_at DESC)
+  `);
+
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS sync_conflicts (
+      id TEXT PRIMARY KEY,
+      incoming_idempotency_key TEXT NOT NULL UNIQUE,
+      entity_type TEXT NOT NULL CHECK(entity_type IN ('PROJECT', 'TASK', 'TASK_SUBTASK', 'TASK_TEMPLATE', 'SETTING')),
+      entity_id TEXT NOT NULL,
+      operation TEXT NOT NULL CHECK(operation IN ('UPSERT', 'DELETE')),
+      conflict_type TEXT NOT NULL CHECK(conflict_type IN ('field_conflict', 'delete_vs_update', 'notes_collision', 'validation_error')),
+      reason_code TEXT NOT NULL,
+      message TEXT NOT NULL,
+      local_payload_json TEXT,
+      remote_payload_json TEXT,
+      base_payload_json TEXT,
+      status TEXT NOT NULL DEFAULT 'open' CHECK(status IN ('open', 'resolved', 'ignored')),
+      resolution_strategy TEXT CHECK(resolution_strategy IN ('keep_local', 'keep_remote', 'manual_merge', 'retry')),
+      resolution_payload_json TEXT,
+      resolved_by_device TEXT,
+      detected_at DATETIME NOT NULL,
+      resolved_at DATETIME,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+  `);
+
+  await db.execute(`
+    CREATE INDEX IF NOT EXISTS idx_sync_conflicts_status_detected_at
+    ON sync_conflicts(status, detected_at DESC)
+  `);
+
+  await db.execute(`
+    CREATE INDEX IF NOT EXISTS idx_sync_conflicts_entity
+    ON sync_conflicts(entity_type, entity_id, detected_at DESC)
+  `);
+
+  await db.execute(`
+    CREATE TABLE IF NOT EXISTS sync_conflict_events (
+      id TEXT PRIMARY KEY,
+      conflict_id TEXT NOT NULL,
+      event_type TEXT NOT NULL CHECK(event_type IN ('detected', 'resolved', 'ignored', 'retried', 'exported')),
+      event_payload_json TEXT,
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      FOREIGN KEY(conflict_id) REFERENCES sync_conflicts(id) ON DELETE CASCADE
+    )
+  `);
+
+  await db.execute(`
+    CREATE INDEX IF NOT EXISTS idx_sync_conflict_events_conflict_created_at
+    ON sync_conflict_events(conflict_id, created_at DESC)
   `);
 
   await ensureProjectColumns(db);
@@ -669,6 +775,50 @@ function asSyncOperation(value: unknown): SyncOperation {
   throw new Error("Unsupported sync operation.");
 }
 
+function asSyncConflictType(value: unknown): SyncConflictType {
+  if (
+    typeof value === "string" &&
+    SYNC_CONFLICT_TYPES.includes(value as SyncConflictType)
+  ) {
+    return value as SyncConflictType;
+  }
+  return "validation_error";
+}
+
+function asSyncConflictStatus(value: unknown): SyncConflictStatus {
+  if (
+    typeof value === "string" &&
+    SYNC_CONFLICT_STATUSES.includes(value as SyncConflictStatus)
+  ) {
+    return value as SyncConflictStatus;
+  }
+  return "open";
+}
+
+function asSyncConflictResolutionStrategy(
+  value: unknown,
+): SyncConflictResolutionStrategy | null {
+  if (
+    typeof value === "string" &&
+    SYNC_CONFLICT_RESOLUTION_STRATEGIES.includes(
+      value as SyncConflictResolutionStrategy,
+    )
+  ) {
+    return value as SyncConflictResolutionStrategy;
+  }
+  return null;
+}
+
+function asSyncConflictEventType(value: unknown): SyncConflictEventType {
+  if (
+    typeof value === "string" &&
+    SYNC_CONFLICT_EVENT_TYPES.includes(value as SyncConflictEventType)
+  ) {
+    return value as SyncConflictEventType;
+  }
+  throw new Error("Unsupported sync conflict event type.");
+}
+
 async function assertProjectExists(
   db: Database,
   projectId: string | null | undefined,
@@ -821,6 +971,218 @@ export async function updateSyncEndpointSettings(
   return {
     push_url: pushUrl,
     pull_url: pullUrl,
+  };
+}
+
+function getSyncRuntimeDefaultsByPreset(
+  preset: SyncRuntimeProfilePreset,
+): SyncRuntimeSettings {
+  if (preset === "mobile") {
+    return {
+      auto_sync_interval_seconds: MOBILE_SYNC_AUTO_INTERVAL_SECONDS,
+      background_sync_interval_seconds: MOBILE_SYNC_BACKGROUND_INTERVAL_SECONDS,
+      push_limit: MOBILE_SYNC_PUSH_LIMIT,
+      pull_limit: MOBILE_SYNC_PULL_LIMIT,
+      max_pull_pages: MOBILE_SYNC_MAX_PULL_PAGES,
+    };
+  }
+
+  return {
+    auto_sync_interval_seconds: DEFAULT_SYNC_AUTO_INTERVAL_SECONDS,
+    background_sync_interval_seconds: DEFAULT_SYNC_BACKGROUND_INTERVAL_SECONDS,
+    push_limit: DEFAULT_SYNC_PUSH_LIMIT,
+    pull_limit: DEFAULT_SYNC_PULL_LIMIT,
+    max_pull_pages: DEFAULT_SYNC_MAX_PULL_PAGES,
+  };
+}
+
+function toSyncRuntimeSettingsEntries(
+  settings: SyncRuntimeSettings,
+): Array<[string, string]> {
+  return [
+    [
+      SYNC_SETTINGS_AUTO_INTERVAL_SECONDS_KEY,
+      String(settings.auto_sync_interval_seconds),
+    ],
+    [
+      SYNC_SETTINGS_BACKGROUND_INTERVAL_SECONDS_KEY,
+      String(settings.background_sync_interval_seconds),
+    ],
+    [SYNC_SETTINGS_PUSH_LIMIT_KEY, String(settings.push_limit)],
+    [SYNC_SETTINGS_PULL_LIMIT_KEY, String(settings.pull_limit)],
+    [SYNC_SETTINGS_MAX_PULL_PAGES_KEY, String(settings.max_pull_pages)],
+  ];
+}
+
+export async function ensureSyncRuntimeSettingsSeeded(
+  preset: SyncRuntimeProfilePreset = "desktop",
+): Promise<SyncRuntimeSettings> {
+  const db = await getDb();
+  const existingRows = await db.select<Array<{ key: string }>>(
+    "SELECT key FROM settings WHERE key IN ($1, $2, $3, $4, $5) LIMIT 1",
+    [
+      SYNC_SETTINGS_AUTO_INTERVAL_SECONDS_KEY,
+      SYNC_SETTINGS_BACKGROUND_INTERVAL_SECONDS_KEY,
+      SYNC_SETTINGS_PUSH_LIMIT_KEY,
+      SYNC_SETTINGS_PULL_LIMIT_KEY,
+      SYNC_SETTINGS_MAX_PULL_PAGES_KEY,
+    ],
+  );
+  if (existingRows.length > 0) {
+    return getSyncRuntimeSettings();
+  }
+
+  const seededSettings = getSyncRuntimeDefaultsByPreset(preset);
+
+  await db.execute("BEGIN IMMEDIATE");
+  try {
+    for (const [key, value] of toSyncRuntimeSettingsEntries(seededSettings)) {
+      await db.execute(
+        `INSERT INTO settings (key, value)
+             VALUES ($1, $2)
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+        [key, value],
+      );
+    }
+    await db.execute("COMMIT");
+  } catch (error) {
+    await db.execute("ROLLBACK");
+    throw error;
+  }
+
+  return seededSettings;
+}
+
+export async function getSyncRuntimeSettings(): Promise<SyncRuntimeSettings> {
+  const db = await getDb();
+  const rows = await db.select<AppSettingRecord[]>(
+    "SELECT key, value FROM settings WHERE key IN ($1, $2, $3, $4, $5)",
+    [
+      SYNC_SETTINGS_AUTO_INTERVAL_SECONDS_KEY,
+      SYNC_SETTINGS_BACKGROUND_INTERVAL_SECONDS_KEY,
+      SYNC_SETTINGS_PUSH_LIMIT_KEY,
+      SYNC_SETTINGS_PULL_LIMIT_KEY,
+      SYNC_SETTINGS_MAX_PULL_PAGES_KEY,
+    ],
+  );
+
+  let autoSyncIntervalSeconds = DEFAULT_SYNC_AUTO_INTERVAL_SECONDS;
+  let backgroundSyncIntervalSeconds = DEFAULT_SYNC_BACKGROUND_INTERVAL_SECONDS;
+  let pushLimit = DEFAULT_SYNC_PUSH_LIMIT;
+  let pullLimit = DEFAULT_SYNC_PULL_LIMIT;
+  let maxPullPages = DEFAULT_SYNC_MAX_PULL_PAGES;
+
+  for (const row of rows) {
+    if (row.key === SYNC_SETTINGS_AUTO_INTERVAL_SECONDS_KEY) {
+      autoSyncIntervalSeconds = normalizeSyncRuntimeNumber(row.value, {
+        min: 15,
+        max: 3600,
+        fallback: DEFAULT_SYNC_AUTO_INTERVAL_SECONDS,
+      });
+    } else if (row.key === SYNC_SETTINGS_BACKGROUND_INTERVAL_SECONDS_KEY) {
+      backgroundSyncIntervalSeconds = normalizeSyncRuntimeNumber(row.value, {
+        min: 30,
+        max: 7200,
+        fallback: DEFAULT_SYNC_BACKGROUND_INTERVAL_SECONDS,
+      });
+    } else if (row.key === SYNC_SETTINGS_PUSH_LIMIT_KEY) {
+      pushLimit = normalizeSyncRuntimeNumber(row.value, {
+        min: 20,
+        max: 500,
+        fallback: DEFAULT_SYNC_PUSH_LIMIT,
+      });
+    } else if (row.key === SYNC_SETTINGS_PULL_LIMIT_KEY) {
+      pullLimit = normalizeSyncRuntimeNumber(row.value, {
+        min: 20,
+        max: 500,
+        fallback: DEFAULT_SYNC_PULL_LIMIT,
+      });
+    } else if (row.key === SYNC_SETTINGS_MAX_PULL_PAGES_KEY) {
+      maxPullPages = normalizeSyncRuntimeNumber(row.value, {
+        min: 1,
+        max: 20,
+        fallback: DEFAULT_SYNC_MAX_PULL_PAGES,
+      });
+    }
+  }
+
+  return {
+    auto_sync_interval_seconds: autoSyncIntervalSeconds,
+    background_sync_interval_seconds: Math.max(
+      autoSyncIntervalSeconds,
+      backgroundSyncIntervalSeconds,
+    ),
+    push_limit: pushLimit,
+    pull_limit: pullLimit,
+    max_pull_pages: maxPullPages,
+  };
+}
+
+export async function updateSyncRuntimeSettings(
+  input: UpdateSyncRuntimeSettingsInput,
+): Promise<SyncRuntimeSettings> {
+  const db = await getDb();
+  const autoSyncIntervalSeconds = normalizeSyncRuntimeNumber(
+    input.auto_sync_interval_seconds,
+    {
+      min: 15,
+      max: 3600,
+      fallback: DEFAULT_SYNC_AUTO_INTERVAL_SECONDS,
+    },
+  );
+  const backgroundSyncIntervalSeconds = Math.max(
+    autoSyncIntervalSeconds,
+    normalizeSyncRuntimeNumber(input.background_sync_interval_seconds, {
+      min: 30,
+      max: 7200,
+      fallback: DEFAULT_SYNC_BACKGROUND_INTERVAL_SECONDS,
+    }),
+  );
+  const pushLimit = normalizeSyncRuntimeNumber(input.push_limit, {
+    min: 20,
+    max: 500,
+    fallback: DEFAULT_SYNC_PUSH_LIMIT,
+  });
+  const pullLimit = normalizeSyncRuntimeNumber(input.pull_limit, {
+    min: 20,
+    max: 500,
+    fallback: DEFAULT_SYNC_PULL_LIMIT,
+  });
+  const maxPullPages = normalizeSyncRuntimeNumber(input.max_pull_pages, {
+    min: 1,
+    max: 20,
+    fallback: DEFAULT_SYNC_MAX_PULL_PAGES,
+  });
+
+  await db.execute("BEGIN IMMEDIATE");
+  try {
+    for (const [key, value] of toSyncRuntimeSettingsEntries({
+      auto_sync_interval_seconds: autoSyncIntervalSeconds,
+      background_sync_interval_seconds: backgroundSyncIntervalSeconds,
+      push_limit: pushLimit,
+      pull_limit: pullLimit,
+      max_pull_pages: maxPullPages,
+    })) {
+      await db.execute(
+        `INSERT INTO settings (key, value)
+             VALUES ($1, $2)
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+        [key, value],
+      );
+    }
+
+    await db.execute("COMMIT");
+  } catch (error) {
+    await db.execute("ROLLBACK");
+    throw error;
+  }
+
+  return {
+    auto_sync_interval_seconds: autoSyncIntervalSeconds,
+    background_sync_interval_seconds: backgroundSyncIntervalSeconds,
+    push_limit: pushLimit,
+    pull_limit: pullLimit,
+    max_pull_pages: maxPullPages,
   };
 }
 
@@ -1061,6 +1423,494 @@ export async function listDeletedRecords(
   );
 }
 
+interface PersistSyncConflictInput {
+  change: SyncPushChange;
+  conflict_type: SyncConflictType;
+  reason_code: string;
+  message: string;
+  local_payload: Record<string, unknown> | null;
+  remote_payload: Record<string, unknown> | null;
+  base_payload?: Record<string, unknown> | null;
+}
+
+function toJsonString(value: unknown): string | null {
+  if (value === null || value === undefined) return null;
+  try {
+    return JSON.stringify(value);
+  } catch {
+    return null;
+  }
+}
+
+async function addSyncConflictEvent(
+  db: Database,
+  input: {
+    conflict_id: string;
+    event_type: SyncConflictEventType;
+    event_payload?: Record<string, unknown> | null;
+    created_at?: string;
+  },
+): Promise<void> {
+  const nowIso = input.created_at ?? new Date().toISOString();
+  await db.execute(
+    `INSERT INTO sync_conflict_events (
+        id,
+        conflict_id,
+        event_type,
+        event_payload_json,
+        created_at
+      )
+       VALUES ($1, $2, $3, $4, $5)`,
+    [
+      uuidv4(),
+      input.conflict_id,
+      asSyncConflictEventType(input.event_type),
+      toJsonString(input.event_payload),
+      nowIso,
+    ],
+  );
+}
+
+async function getSyncEntityPayloadSnapshot(
+  db: Database,
+  entityType: SyncEntityType,
+  entityId: string,
+): Promise<Record<string, unknown> | null> {
+  if (entityType === "PROJECT") {
+    const rows = await db.select<Record<string, unknown>[]>(
+      "SELECT * FROM projects WHERE id = $1 LIMIT 1",
+      [entityId],
+    );
+    return rows[0] ?? null;
+  }
+
+  if (entityType === "TASK") {
+    const rows = await db.select<Record<string, unknown>[]>(
+      "SELECT * FROM tasks WHERE id = $1 LIMIT 1",
+      [entityId],
+    );
+    return rows[0] ?? null;
+  }
+
+  if (entityType === "TASK_SUBTASK") {
+    const rows = await db.select<Record<string, unknown>[]>(
+      "SELECT * FROM task_subtasks WHERE id = $1 LIMIT 1",
+      [entityId],
+    );
+    return rows[0] ?? null;
+  }
+
+  if (entityType === "TASK_TEMPLATE") {
+    const rows = await db.select<Record<string, unknown>[]>(
+      "SELECT * FROM task_templates WHERE id = $1 LIMIT 1",
+      [entityId],
+    );
+    return rows[0] ?? null;
+  }
+
+  const rows = await db.select<AppSettingRecord[]>(
+    "SELECT key, value FROM settings WHERE key = $1 LIMIT 1",
+    [entityId],
+  );
+  const settingRow = rows[0];
+  if (!settingRow) return null;
+  return {
+    key: settingRow.key,
+    value: settingRow.value,
+  };
+}
+
+async function persistIncomingSyncConflict(
+  db: Database,
+  input: PersistSyncConflictInput,
+): Promise<"conflict" | "skipped"> {
+  const nowIso = new Date().toISOString();
+  const incomingIdempotencyKey =
+    input.change.idempotency_key.trim() ||
+    `${input.change.entity_type}:${input.change.entity_id}:${input.change.updated_at}`;
+
+  const existingRows = await db.select<
+    Array<{ id: string; status: SyncConflictStatus }>
+  >(
+    `SELECT id, status
+       FROM sync_conflicts
+      WHERE incoming_idempotency_key = $1
+      LIMIT 1`,
+    [incomingIdempotencyKey],
+  );
+  const existing = existingRows[0];
+
+  if (
+    existing &&
+    (existing.status === "resolved" || existing.status === "ignored")
+  ) {
+    await addSyncConflictEvent(db, {
+      conflict_id: existing.id,
+      event_type: "retried",
+      event_payload: {
+        reason: "incoming_change_repeated",
+        reason_code: input.reason_code,
+      },
+      created_at: nowIso,
+    });
+    return "skipped";
+  }
+
+  const entityId = input.change.entity_id.trim();
+  const conflictId = existing?.id ?? uuidv4();
+  const remotePayloadJson = toJsonString(input.remote_payload);
+  const localPayloadJson = toJsonString(input.local_payload);
+  const basePayloadJson = toJsonString(input.base_payload ?? null);
+
+  if (existing) {
+    await db.execute(
+      `UPDATE sync_conflicts
+          SET entity_type = $1,
+              entity_id = $2,
+              operation = $3,
+              conflict_type = $4,
+              reason_code = $5,
+              message = $6,
+              local_payload_json = $7,
+              remote_payload_json = $8,
+              base_payload_json = $9,
+              status = 'open',
+              resolution_strategy = NULL,
+              resolution_payload_json = NULL,
+              resolved_by_device = NULL,
+              resolved_at = NULL,
+              detected_at = $10,
+              updated_at = $10
+        WHERE id = $11`,
+      [
+        asSyncEntityType(input.change.entity_type),
+        entityId,
+        asSyncOperation(input.change.operation),
+        asSyncConflictType(input.conflict_type),
+        input.reason_code,
+        input.message,
+        localPayloadJson,
+        remotePayloadJson,
+        basePayloadJson,
+        nowIso,
+        conflictId,
+      ],
+    );
+  } else {
+    await db.execute(
+      `INSERT INTO sync_conflicts (
+          id,
+          incoming_idempotency_key,
+          entity_type,
+          entity_id,
+          operation,
+          conflict_type,
+          reason_code,
+          message,
+          local_payload_json,
+          remote_payload_json,
+          base_payload_json,
+          status,
+          resolution_strategy,
+          resolution_payload_json,
+          resolved_by_device,
+          detected_at,
+          resolved_at,
+          created_at,
+          updated_at
+        )
+         VALUES (
+          $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
+          $11, 'open', NULL, NULL, NULL, $12, NULL, $12, $12
+         )`,
+      [
+        conflictId,
+        incomingIdempotencyKey,
+        asSyncEntityType(input.change.entity_type),
+        entityId,
+        asSyncOperation(input.change.operation),
+        asSyncConflictType(input.conflict_type),
+        input.reason_code,
+        input.message,
+        localPayloadJson,
+        remotePayloadJson,
+        basePayloadJson,
+        nowIso,
+      ],
+    );
+  }
+
+  await addSyncConflictEvent(db, {
+    conflict_id: conflictId,
+    event_type: "detected",
+    event_payload: {
+      reason_code: input.reason_code,
+      message: input.message,
+      entity_type: input.change.entity_type,
+      entity_id: entityId,
+      operation: input.change.operation,
+    },
+    created_at: nowIso,
+  });
+
+  return "conflict";
+}
+
+async function persistAndReturnConflict(
+  db: Database,
+  change: SyncPushChange,
+  input: {
+    conflict_type: SyncConflictType;
+    reason_code: string;
+    message: string;
+    remote_payload: Record<string, unknown> | null;
+  },
+): Promise<"conflict" | "skipped"> {
+  const entityId = change.entity_id.trim();
+  const localPayload = entityId
+    ? await getSyncEntityPayloadSnapshot(db, change.entity_type, entityId)
+    : null;
+
+  return persistIncomingSyncConflict(db, {
+    change,
+    conflict_type: input.conflict_type,
+    reason_code: input.reason_code,
+    message: input.message,
+    local_payload: localPayload,
+    remote_payload: input.remote_payload,
+  });
+}
+
+async function markConflictResolvedByAppliedIncomingChange(
+  db: Database,
+  change: SyncPushChange,
+): Promise<void> {
+  const incomingIdempotencyKey = change.idempotency_key.trim();
+  if (!incomingIdempotencyKey) return;
+
+  const rows = await db.select<Array<{ id: string }>>(
+    `SELECT id
+       FROM sync_conflicts
+      WHERE incoming_idempotency_key = $1
+        AND status = 'open'`,
+    [incomingIdempotencyKey],
+  );
+  if (rows.length === 0) return;
+
+  const nowIso = new Date().toISOString();
+  for (const row of rows) {
+    await db.execute(
+      `UPDATE sync_conflicts
+          SET status = 'resolved',
+              resolution_strategy = 'retry',
+              resolved_by_device = $1,
+              resolved_at = $2,
+              updated_at = $2
+        WHERE id = $3`,
+      [change.updated_by_device, nowIso, row.id],
+    );
+    await addSyncConflictEvent(db, {
+      conflict_id: row.id,
+      event_type: "resolved",
+      event_payload: {
+        strategy: "retry",
+        reason: "incoming_change_applied",
+      },
+      created_at: nowIso,
+    });
+  }
+}
+
+export async function listSyncConflicts(input?: {
+  status?: SyncConflictStatus | "all";
+  limit?: number;
+}): Promise<SyncConflictRecord[]> {
+  const db = await getDb();
+  const normalizedLimit = Math.max(
+    1,
+    Math.min(1000, Math.trunc(input?.limit ?? 100)),
+  );
+  const requestedStatus = input?.status ?? "open";
+  if (requestedStatus === "all") {
+    return db.select<SyncConflictRecord[]>(
+      `SELECT *
+         FROM sync_conflicts
+        ORDER BY
+          CASE status
+            WHEN 'open' THEN 0
+            WHEN 'resolved' THEN 1
+            ELSE 2
+          END ASC,
+          detected_at DESC,
+          id DESC
+        LIMIT $1`,
+      [normalizedLimit],
+    );
+  }
+
+  const normalizedStatus = asSyncConflictStatus(requestedStatus);
+  return db.select<SyncConflictRecord[]>(
+    `SELECT *
+       FROM sync_conflicts
+      WHERE status = $1
+      ORDER BY detected_at DESC, id DESC
+      LIMIT $2`,
+    [normalizedStatus, normalizedLimit],
+  );
+}
+
+export async function getSyncConflict(
+  conflictId: string,
+): Promise<SyncConflictRecord | null> {
+  const db = await getDb();
+  const normalizedConflictId = conflictId.trim();
+  if (!normalizedConflictId) return null;
+
+  const rows = await db.select<SyncConflictRecord[]>(
+    `SELECT *
+       FROM sync_conflicts
+      WHERE id = $1
+      LIMIT 1`,
+    [normalizedConflictId],
+  );
+  return rows[0] ?? null;
+}
+
+export async function listSyncConflictEvents(
+  conflictId: string,
+  limit = 200,
+): Promise<SyncConflictEventRecord[]> {
+  const db = await getDb();
+  const normalizedConflictId = conflictId.trim();
+  if (!normalizedConflictId) return [];
+
+  const normalizedLimit = Math.max(1, Math.min(1000, Math.trunc(limit)));
+  return db.select<SyncConflictEventRecord[]>(
+    `SELECT *
+       FROM sync_conflict_events
+      WHERE conflict_id = $1
+      ORDER BY created_at DESC, id DESC
+      LIMIT $2`,
+    [normalizedConflictId, normalizedLimit],
+  );
+}
+
+export async function exportSyncConflictReport(input?: {
+  status?: SyncConflictStatus | "all";
+  limit?: number;
+  eventsPerConflict?: number;
+}): Promise<SyncConflictReportPayload> {
+  const db = await getDb();
+  const statusFilter = input?.status ?? "all";
+  const conflicts = await listSyncConflicts({
+    status: statusFilter,
+    limit: input?.limit ?? 500,
+  });
+  const eventsPerConflict = Math.max(
+    1,
+    Math.min(1000, Math.trunc(input?.eventsPerConflict ?? 50)),
+  );
+  const exportedAt = new Date().toISOString();
+
+  for (const conflict of conflicts) {
+    await addSyncConflictEvent(db, {
+      conflict_id: conflict.id,
+      event_type: "exported",
+      event_payload: {
+        report_exported_at: exportedAt,
+      },
+      created_at: exportedAt,
+    });
+  }
+
+  const items = await Promise.all(
+    conflicts.map(async (conflict) => ({
+      conflict,
+      events: await listSyncConflictEvents(conflict.id, eventsPerConflict),
+    })),
+  );
+
+  return {
+    version: 1,
+    exported_at: exportedAt,
+    total_conflicts: conflicts.length,
+    status_filter: statusFilter,
+    items,
+  };
+}
+
+export async function resolveSyncConflict(
+  input: ResolveSyncConflictInput,
+): Promise<SyncConflictRecord> {
+  const db = await getDb();
+  const conflictId = input.conflict_id.trim();
+  if (!conflictId) {
+    throw new Error("conflict_id is required.");
+  }
+  const existingConflict = await getSyncConflict(conflictId);
+  if (!existingConflict) {
+    throw new Error("Conflict not found.");
+  }
+
+  const strategy = asSyncConflictResolutionStrategy(input.strategy);
+  if (!strategy) {
+    throw new Error("Invalid conflict resolution strategy.");
+  }
+  if (
+    strategy === "manual_merge" &&
+    (!input.resolution_payload ||
+      !isPlainObject(input.resolution_payload) ||
+      Object.keys(input.resolution_payload).length === 0)
+  ) {
+    throw new Error("Manual merge requires a non-empty resolution payload.");
+  }
+
+  const nowIso = new Date().toISOString();
+  const resolvedByDevice =
+    input.resolved_by_device?.trim() || (await getOrCreateDeviceId());
+  const nextStatus: SyncConflictStatus =
+    strategy === "retry" ? "open" : "resolved";
+  const nextResolvedAt = nextStatus === "resolved" ? nowIso : null;
+
+  await db.execute(
+    `UPDATE sync_conflicts
+        SET status = $1,
+            resolution_strategy = $2,
+            resolution_payload_json = $3,
+            resolved_by_device = $4,
+            resolved_at = $5,
+            updated_at = $6
+      WHERE id = $7`,
+    [
+      nextStatus,
+      strategy,
+      toJsonString(input.resolution_payload ?? null),
+      resolvedByDevice,
+      nextResolvedAt,
+      nowIso,
+      conflictId,
+    ],
+  );
+
+  await addSyncConflictEvent(db, {
+    conflict_id: conflictId,
+    event_type: strategy === "retry" ? "retried" : "resolved",
+    event_payload: {
+      strategy,
+      resolved_by_device: resolvedByDevice,
+      status: nextStatus,
+    },
+    created_at: nowIso,
+  });
+
+  const updated = await getSyncConflict(conflictId);
+  if (!updated) {
+    throw new Error("Conflict not found.");
+  }
+
+  return updated;
+}
+
 interface SyncEntityVersionState {
   exists: boolean;
   updated_at: string | null;
@@ -1126,6 +1976,20 @@ function isValidSyncEndpointUrl(value: string): boolean {
   } catch {
     return false;
   }
+}
+
+function normalizeSyncRuntimeNumber(
+  value: unknown,
+  input: {
+    min: number;
+    max: number;
+    fallback: number;
+  },
+): number {
+  const parsed = asIntegerOrDefault(value, input.fallback);
+  if (parsed < input.min) return input.min;
+  if (parsed > input.max) return input.max;
+  return parsed;
 }
 
 async function getSyncEntityVersionState(
@@ -1224,6 +2088,10 @@ export async function applyIncomingSyncChange(
     change.operation === "UPSERT" && isPlainObject(change.payload)
       ? change.payload
       : {};
+  const remotePayload =
+    change.operation === "UPSERT" && isPlainObject(change.payload)
+      ? change.payload
+      : null;
 
   if (!isSettingEntity) {
     const existingState = await getSyncEntityVersionState(
@@ -1241,7 +2109,14 @@ export async function applyIncomingSyncChange(
   if (change.operation === "UPSERT") {
     if (change.entity_type === "PROJECT") {
       const name = normalizeProjectName(asNullableString(payload.name) ?? "");
-      if (!name) return "conflict";
+      if (!name) {
+        return persistAndReturnConflict(db, change, {
+          conflict_type: "field_conflict",
+          reason_code: "MISSING_PROJECT_NAME",
+          message: "Project name is required in incoming payload.",
+          remote_payload: remotePayload,
+        });
+      }
 
       await db.execute(
         `INSERT INTO projects (
@@ -1279,7 +2154,14 @@ export async function applyIncomingSyncChange(
       );
     } else if (change.entity_type === "TASK") {
       const title = asNullableString(payload.title)?.trim() ?? "";
-      if (!title) return "conflict";
+      if (!title) {
+        return persistAndReturnConflict(db, change, {
+          conflict_type: "field_conflict",
+          reason_code: "MISSING_TASK_TITLE",
+          message: "Task title is required in incoming payload.",
+          remote_payload: remotePayload,
+        });
+      }
 
       const incomingProjectId = normalizeOptionalText(payload.project_id);
       let projectId: string | null = incomingProjectId;
@@ -1289,7 +2171,13 @@ export async function applyIncomingSyncChange(
           [incomingProjectId],
         );
         if (projectRows.length === 0) {
-          return "conflict";
+          return persistAndReturnConflict(db, change, {
+            conflict_type: "delete_vs_update",
+            reason_code: "TASK_PROJECT_NOT_FOUND",
+            message:
+              "Incoming task references a project that does not exist locally.",
+            remote_payload: remotePayload,
+          });
         }
       } else {
         projectId = null;
@@ -1350,14 +2238,27 @@ export async function applyIncomingSyncChange(
     } else if (change.entity_type === "TASK_SUBTASK") {
       const taskId = normalizeOptionalText(payload.task_id);
       const title = asNullableString(payload.title)?.trim() ?? "";
-      if (!taskId || !title) return "conflict";
+      if (!taskId || !title) {
+        return persistAndReturnConflict(db, change, {
+          conflict_type: "field_conflict",
+          reason_code: "INVALID_SUBTASK_PAYLOAD",
+          message: "Subtask payload requires task_id and title.",
+          remote_payload: remotePayload,
+        });
+      }
 
       const taskRows = await db.select<Array<{ id: string }>>(
         "SELECT id FROM tasks WHERE id = $1 LIMIT 1",
         [taskId],
       );
       if (taskRows.length === 0) {
-        return "conflict";
+        return persistAndReturnConflict(db, change, {
+          conflict_type: "delete_vs_update",
+          reason_code: "SUBTASK_TASK_NOT_FOUND",
+          message:
+            "Incoming subtask references a task that does not exist locally.",
+          remote_payload: remotePayload,
+        });
       }
 
       await db.execute(
@@ -1393,7 +2294,14 @@ export async function applyIncomingSyncChange(
       );
     } else if (change.entity_type === "TASK_TEMPLATE") {
       const name = asNullableString(payload.name)?.trim() ?? "";
-      if (!name) return "conflict";
+      if (!name) {
+        return persistAndReturnConflict(db, change, {
+          conflict_type: "field_conflict",
+          reason_code: "MISSING_TEMPLATE_NAME",
+          message: "Task template name is required in incoming payload.",
+          remote_payload: remotePayload,
+        });
+      }
 
       await db.execute(
         `INSERT INTO task_templates (
@@ -1460,6 +2368,7 @@ export async function applyIncomingSyncChange(
       "DELETE FROM deleted_records WHERE entity_type = $1 AND entity_id = $2",
       [change.entity_type, entityId],
     );
+    await markConflictResolvedByAppliedIncomingChange(db, change);
     return "applied";
   }
 
@@ -1481,6 +2390,7 @@ export async function applyIncomingSyncChange(
     deleted_by_device: change.updated_by_device,
     deleted_at: change.updated_at,
   });
+  await markConflictResolvedByAppliedIncomingChange(db, change);
   return "applied";
 }
 
@@ -2648,6 +3558,83 @@ export async function deleteTaskTemplate(id: string): Promise<void> {
   await enqueueEntityDelete("TASK_TEMPLATE", taskTemplate.id, deviceId, now);
 }
 
+async function readLatestBackupSnapshotSettings(db: Database): Promise<{
+  latestPayloadJson: string | null;
+  latestExportedAt: string | null;
+}> {
+  const rows = await db.select<AppSettingRecord[]>(
+    "SELECT key, value FROM settings WHERE key IN ($1, $2)",
+    [LOCAL_BACKUP_LATEST_PAYLOAD_KEY, LOCAL_BACKUP_LATEST_EXPORTED_AT_KEY],
+  );
+
+  let latestPayloadJson: string | null = null;
+  let latestExportedAt: string | null = null;
+  for (const row of rows) {
+    if (row.key === LOCAL_BACKUP_LATEST_PAYLOAD_KEY) {
+      const normalizedPayload = row.value.trim();
+      latestPayloadJson = normalizedPayload || null;
+    } else if (row.key === LOCAL_BACKUP_LATEST_EXPORTED_AT_KEY) {
+      latestExportedAt = asNullableString(row.value);
+    }
+  }
+
+  return {
+    latestPayloadJson,
+    latestExportedAt,
+  };
+}
+
+async function saveLatestBackupSnapshot(
+  db: Database,
+  payload: BackupPayload,
+): Promise<void> {
+  await db.execute(
+    `INSERT INTO settings (key, value)
+         VALUES ($1, $2)
+    ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+    [LOCAL_BACKUP_LATEST_PAYLOAD_KEY, JSON.stringify(payload)],
+  );
+  await db.execute(
+    `INSERT INTO settings (key, value)
+         VALUES ($1, $2)
+    ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+    [LOCAL_BACKUP_LATEST_EXPORTED_AT_KEY, payload.exported_at],
+  );
+}
+
+async function getBackupRestorePreflightFromDb(
+  db: Database,
+): Promise<BackupRestorePreflight> {
+  await ensureSyncTablesReady(db);
+
+  const [outboxRows, conflictRows, latestBackupSettings] = await Promise.all([
+    db.select<Array<{ count: number }>>(
+      "SELECT COUNT(*) as count FROM sync_outbox",
+    ),
+    db.select<Array<{ count: number }>>(
+      "SELECT COUNT(*) as count FROM sync_conflicts WHERE status = 'open'",
+    ),
+    readLatestBackupSnapshotSettings(db),
+  ]);
+
+  const pendingOutboxChanges = Math.max(0, Number(outboxRows[0]?.count ?? 0));
+  const openConflicts = Math.max(0, Number(conflictRows[0]?.count ?? 0));
+  const hasLatestBackup = Boolean(latestBackupSettings.latestPayloadJson);
+
+  return {
+    pending_outbox_changes: pendingOutboxChanges,
+    open_conflicts: openConflicts,
+    has_latest_backup: hasLatestBackup,
+    latest_backup_exported_at: latestBackupSettings.latestExportedAt,
+    requires_force_restore: pendingOutboxChanges > 0,
+  };
+}
+
+export async function getBackupRestorePreflight(): Promise<BackupRestorePreflight> {
+  const db = await getDb();
+  return getBackupRestorePreflightFromDb(db);
+}
+
 function normalizeBackupPayload(payload: unknown): BackupPayload {
   if (!isPlainObject(payload)) {
     throw new Error("Invalid backup payload.");
@@ -2669,6 +3656,12 @@ function normalizeBackupPayload(payload: unknown): BackupPayload {
     if (!isPlainObject(entry)) continue;
     const key = asNullableString(entry.key)?.trim() ?? "";
     if (!key) continue;
+    if (
+      key === LOCAL_BACKUP_LATEST_PAYLOAD_KEY ||
+      key === LOCAL_BACKUP_LATEST_EXPORTED_AT_KEY
+    ) {
+      continue;
+    }
     settingsByKey.set(key, {
       key,
       value: asNullableString(entry.value) ?? "",
@@ -2862,11 +3855,17 @@ export async function exportBackupPayload(): Promise<BackupPayload> {
     ),
   ]);
 
-  return {
+  const filteredSettings = settings.filter(
+    (setting) =>
+      setting.key !== LOCAL_BACKUP_LATEST_PAYLOAD_KEY &&
+      setting.key !== LOCAL_BACKUP_LATEST_EXPORTED_AT_KEY,
+  );
+
+  const payload: BackupPayload = {
     version: 1,
     exported_at: new Date().toISOString(),
     data: {
-      settings,
+      settings: filteredSettings,
       projects,
       tasks,
       sessions,
@@ -2875,14 +3874,32 @@ export async function exportBackupPayload(): Promise<BackupPayload> {
       task_templates: taskTemplates,
     },
   };
+
+  await saveLatestBackupSnapshot(db, payload);
+  return payload;
 }
 
 /** Replace local data with a backup payload and return imported row counts */
 export async function importBackupPayload(
   rawPayload: BackupPayload | unknown,
+  options?: BackupImportOptions,
 ): Promise<BackupImportResult> {
   const db = await getDb();
   const backupPayload = normalizeBackupPayload(rawPayload);
+  const preflight = await getBackupRestorePreflightFromDb(db);
+  if (preflight.requires_force_restore && !options?.force) {
+    throw new Error(
+      `Restore is blocked: ${preflight.pending_outbox_changes} pending outbox change(s). Sync pending changes first, or confirm force restore.`,
+    );
+  }
+
+  const preservedLocalSettings = await db.select<AppSettingRecord[]>(
+    `SELECT key, value
+       FROM settings
+      WHERE key = $1
+         OR key LIKE $2`,
+    [SYNC_SETTINGS_DEVICE_ID_KEY, `${LOCAL_ONLY_SETTING_PREFIX}%`],
+  );
   const {
     settings,
     projects,
@@ -2893,9 +3910,15 @@ export async function importBackupPayload(
     task_templates: taskTemplates,
   } = backupPayload.data;
 
+  await ensureSyncTablesReady(db);
   await db.execute("BEGIN IMMEDIATE");
 
   try {
+    await db.execute("DELETE FROM sync_conflict_events");
+    await db.execute("DELETE FROM sync_conflicts");
+    await db.execute("DELETE FROM sync_outbox");
+    await db.execute("DELETE FROM deleted_records");
+
     await db.execute("DELETE FROM sessions");
     await db.execute("DELETE FROM task_subtasks");
     await db.execute("DELETE FROM task_changelogs");
@@ -2909,6 +3932,14 @@ export async function importBackupPayload(
         setting.key,
         setting.value,
       ]);
+    }
+    for (const setting of preservedLocalSettings) {
+      await db.execute(
+        `INSERT INTO settings (key, value)
+             VALUES ($1, $2)
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+        [setting.key, setting.value],
+      );
     }
 
     for (const project of projects) {
@@ -3067,6 +4098,17 @@ export async function importBackupPayload(
       );
     }
 
+    const nowIso = new Date().toISOString();
+    await db.execute(
+      `UPDATE sync_checkpoints
+          SET last_sync_cursor = NULL,
+              last_synced_at = NULL,
+              updated_at = $1
+        WHERE id = 1`,
+      [nowIso],
+    );
+    await saveLatestBackupSnapshot(db, backupPayload);
+
     await db.execute("COMMIT");
   } catch (error) {
     await db.execute("ROLLBACK");
@@ -3082,4 +4124,28 @@ export async function importBackupPayload(
     task_changelogs: taskChangelogs.length,
     task_templates: taskTemplates.length,
   };
+}
+
+/** Restore the latest exported local snapshot with preflight guardrails */
+export async function restoreLatestBackupPayload(options?: {
+  force?: boolean;
+}): Promise<BackupImportResult> {
+  const db = await getDb();
+  const latestBackupSettings = await readLatestBackupSnapshotSettings(db);
+  const latestPayloadJson = latestBackupSettings.latestPayloadJson;
+  if (!latestPayloadJson) {
+    throw new Error("No latest backup snapshot found. Export backup first.");
+  }
+
+  let parsedPayload: unknown;
+  try {
+    parsedPayload = JSON.parse(latestPayloadJson) as unknown;
+  } catch {
+    throw new Error("Latest backup snapshot is corrupted.");
+  }
+
+  return importBackupPayload(parsedPayload, {
+    force: options?.force,
+    source: "latest_backup",
+  });
 }

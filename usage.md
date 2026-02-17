@@ -37,7 +37,8 @@ Core files:
 - `src/lib/sync-engine.ts`: prepare/ack/apply/advance helpers
 - `src/lib/sync-runner.ts`: orchestration หนึ่งรอบของ sync cycle
 - `src/lib/sync-service.ts`: wiring เข้ากับ local DB functions
-- `src/lib/database.ts`: mutation path + outbox + incoming apply
+- `src/lib/database.ts`: mutation path + outbox + incoming apply + conflict persistence/report
+- `src/hooks/use-tasks.ts`: hooks สำหรับ conflict list/events/resolve/report export
 
 Syncable entities:
 - `PROJECT`
@@ -55,6 +56,10 @@ Incoming apply rules:
 - Last-Write-Wins by `updated_at`
 - tie-break by `updated_by_device`
 - keep local `sync.device_id` stable (ไม่ overwrite จาก remote)
+- เมื่อ payload/reference ไม่ถูกต้อง ระบบจะ persist conflict ลง:
+  - `sync_conflicts`
+  - `sync_conflict_events`
+- กัน conflict ซ้ำด้วย `incoming_idempotency_key`
 
 ## 4) Sync Transport Configuration (UI)
 
@@ -73,6 +78,16 @@ Incoming apply rules:
 - ผู้ใช้กด `Sync now` ได้จากหน้า Settings ตลอด
 - auto-sync failure จะทำ exponential backoff (เริ่ม ~5s และ cap ที่ 5 นาที)
 - เมื่อ `pull` ตอบ `has_more=true` ระบบจะดึงหน้าถัดไปอัตโนมัติ (default สูงสุด 5 หน้า/รอบ)
+
+P3-2 runtime tuning (Settings > Sync > `Sync Runtime Profile`):
+- ปรับ foreground/background auto-sync interval ได้จาก UI
+- ปรับ `push limit`, `pull limit`, `max pull pages` ได้จาก UI
+- มี preset:
+  - `Desktop Preset` (สมดุล responsiveness)
+  - `Mobile Beta Preset` (ลด network/battery overhead)
+- first launch บน iOS/Android (ถ้ายังไม่เคยตั้งค่า runtime มาก่อน) จะ seed ค่าเริ่มต้นเป็น `Mobile Beta Preset` อัตโนมัติ
+- background interval ต้องมากกว่าหรือเท่ากับ foreground interval
+- มี `Sync Diagnostics (Session)` ในหน้า Settings แสดง success rate, cycle latency, failure streak และ conflict cycles เพื่อช่วย tune mobile beta
 
 ต้องมี server ไหม:
 - ไม่ต้องมี ถ้าใช้งานเครื่องเดียว (สถานะ `LOCAL_ONLY`)
@@ -151,8 +166,39 @@ console.log(summary);
 - `Local only`: ไม่ได้ตั้ง endpoint และใช้งานแบบ local machine เดียว
 
 ตำแหน่งแสดงผล:
-- Sidebar footer: status badge ระดับแอป
+- Sidebar footer: status badge ระดับแอป (เมื่อสถานะเป็น `Conflict` กดเพื่อเปิด `Conflict Center` ได้)
 - Settings > Sync card: ปุ่ม `Sync now`, เวลาซิงก์ล่าสุด, error ล่าสุด
+- Settings > Sync > `Conflict Center`: ดูรายการ conflict ที่เปิดอยู่และกด resolve
+- Sidebar > `Conflicts`: dedicated view สำหรับจัดการ conflict แบบเต็มหน้า
+
+## 6B) Conflict Center (P3-3 Baseline)
+
+ในหน้า `Settings > Sync` และหน้า dedicated `Conflicts`:
+- แสดง open conflicts (ชนิด, entity, message, detected time)
+- action ต่อรายการ:
+  - `Keep Local`
+  - `Keep Remote`
+  - `Retry`
+  - `Manual Merge` (เปิด side-by-side diff editor + merge actions + ช่อง merged content)
+- กด `Details` เพื่อดู payload (`local`/`remote`) และ timeline events ของ conflict นั้น
+- กด `Export Report` เพื่อดาวน์โหลด conflict report เป็น JSON (รวม events)
+- ทุกครั้งที่ export report ระบบจะเพิ่ม timeline event ประเภท `exported`
+
+พฤติกรรมปัจจุบัน:
+- เมื่อกด resolve ระบบจะบันทึก resolution/event ลง DB ทันที
+- หลัง resolve จะ trigger `Sync now` อัตโนมัติ 1 รอบ
+- ถ้า incoming change เดิมถูก apply สำเร็จภายหลัง conflict จะถูก mark เป็น resolved อัตโนมัติ (strategy = `retry`)
+- action `Retry` มี confirmation ก่อน re-queue conflict เพื่อกันกดพลาด
+
+Recovery (Backup & Restore):
+- ก่อน restore ระบบจะทำ preflight (`pending outbox`, `open conflicts`, `latest backup`)
+- ถ้า outbox ยังไม่ว่าง ระบบจะบังคับเป็น force restore flow พร้อม confirmation ชัดเจน
+- มีปุ่ม `Restore Latest Backup` (snapshot ล่าสุดที่ export ภายในเครื่อง)
+- หลัง restore ระบบจะ clear stale sync state (`sync_outbox`, `sync_conflicts`, checkpoint) และ trigger sync รอบใหม่อัตโนมัติเมื่อมี transport
+
+ข้อจำกัดปัจจุบัน (Known Limitations):
+- `Keep Local`/`Keep Remote` ตอนนี้เป็น metadata resolution flow
+- `Manual Merge` เป็น diff-based editor แล้ว แต่ยังไม่มี inline 3-way merge automation
 
 ## 7) Contributor Checklist (Sync Changes)
 
@@ -162,6 +208,7 @@ console.log(summary);
 3. เพิ่ม/แก้ tests (`sync-contract.test.ts`, `sync-engine.test.ts`, `sync-runner.test.ts`)
 4. รัน gate ครบ (`test` -> `test:e2e` -> `build`)
 5. อัปเดตเอกสารที่เกี่ยวข้อง (`AGENT.md`, `usage.md`, และ roadmap docs)
+6. สำหรับ deterministic E2E fixtures ใช้หน้า app ด้วย query `?e2e=1`
 
 ## 8) Documentation Sync Rule
 
