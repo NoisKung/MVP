@@ -421,9 +421,9 @@ Google Drive (`appDataFolder`) vs OneDrive (`approot`) ในมุม SoloStack
 
 1. [done] comparative spike: Google `appDataFolder` vs OneDrive `approot`
 2. [done] ทำ connector adapter contract v0.1 ให้รองรับทั้ง Google/OneDrive ด้วย interface เดียว
-3. เริ่ม AWS architecture spike พร้อม cost baseline สำหรับ sync + MCP
-4. สรุป telemetry baseline ที่ต้องส่งออกนอกแอป (desktop session vs cloud observability)
-5. แตกงาน P3-6 อ่านข้อมูลผ่าน MCP tool set ตาม contract v0.1
+3. [next] เริ่ม AWS architecture spike พร้อม cost baseline สำหรับ sync + MCP
+4. [next] สรุป telemetry baseline ที่ต้องส่งออกนอกแอป (desktop session vs cloud observability)
+5. [next] แตกงาน P3-6 อ่านข้อมูลผ่าน MCP tool set ตาม contract v0.1
 
 ## 12) Immediate Next Actions (P3-6 Kickoff)
 
@@ -433,3 +433,73 @@ Google Drive (`appDataFolder`) vs OneDrive (`approot`) ในมุม SoloStack
 4. เพิ่ม integration tests กับ fixture DB ขนาดเล็กและกลาง
 5. เขียน agent usage playbook สำหรับเคส weekly summary รุ่นแรก
 6. นิยาม hosted MCP deployment profile บน AWS (ถ้าเลือก cloud mode)
+
+## 13) Next Sprint Plan (2026-02-19 ถึง 2026-03-04)
+
+เป้าหมาย sprint นี้: ปิด 3 งานค้างจาก Immediate Next Actions ให้ได้ output ที่ใช้งานตัดสินใจและเริ่มลงมือพัฒนา P3-6 ได้ทันที
+
+### Stream A: AWS Architecture Spike (Sync + MCP)
+
+ช่วงทำงาน: 2026-02-19 ถึง 2026-02-24
+
+งานหลัก:
+- ออกแบบ 2 profile เพื่อเทียบ:
+  - `lambda-first`: API Gateway + Lambda + DynamoDB + Cognito + CloudWatch
+  - `service-first`: ALB/ECS Fargate + RDS Postgres + Cognito + CloudWatch
+- ประเมิน workload baseline:
+  - desktop sync polling
+  - conflict/retry burst
+  - MCP read traffic baseline
+- สรุป cost baseline แบบ low/medium/high traffic
+
+ผลลัพธ์ที่ต้องได้:
+- decision memo 1 หน้า (เลือก profile แนะนำ + trade-offs)
+- cost table baseline สำหรับ dev/staging/prod
+- security baseline checklist (IAM, secrets, logging, encryption at rest/in transit)
+
+Definition of Done:
+- มี recommendation เดียวที่เชื่อมกับ Open Decisions ข้อ AWS stack
+- มี assumptions และ risk ที่ตรวจสอบได้
+
+### Stream B: Telemetry Baseline (Desktop + Cloud)
+
+ช่วงทำงาน: 2026-02-23 ถึง 2026-02-27
+
+งานหลัก:
+- นิยาม metrics กลาง 3 กลุ่ม:
+  - sync health
+  - conflict lifecycle
+  - connector reliability
+- กำหนด schema/log envelope กลางสำหรับ local session และ cloud ingestion
+- นิยาม threshold alert เบื้องต้นสำหรับ beta
+
+ผลลัพธ์ที่ต้องได้:
+- telemetry spec v0.1 (field list + units + sampling + retention)
+- mapping table ระหว่าง local diagnostics กับ cloud metrics
+- alert baseline สำหรับ critical failures/data safety
+
+Definition of Done:
+- เชื่อมกับ Open Decisions ข้อ telemetry scope ได้ชัดเจน
+- พร้อมใช้อ้างอิงตอนทำ implementation โดยไม่แก้ contract ใหญ่ซ้ำ
+
+### Stream C: P3-6 Breakdown to Execution
+
+ช่วงทำงาน: 2026-02-26 ถึง 2026-03-04
+
+งานหลัก:
+- แตก P3-6 เป็น milestone ย่อย:
+  - contract/spec
+  - server skeleton
+  - read tools wave-1
+  - test + hardening
+- define acceptance criteria ราย milestone
+- define dependency matrix กับ Stream A/B
+
+ผลลัพธ์ที่ต้องได้:
+- execution backlog สำหรับ P3-6 (order + estimate + risk)
+- first implementation ticket set (เริ่ม `get_tasks`, `get_projects`)
+- quality gates ต่อ milestone (test/build/performance bounds)
+
+Definition of Done:
+- เริ่ม implementation P3-6 ได้ทันทีโดยไม่ต้องกลับมา re-plan ใหญ่
+- ลด ambiguity ใน Open Decisions ข้อ MCP deployment/auth
