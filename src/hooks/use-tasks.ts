@@ -24,6 +24,7 @@ import {
   exportBackupPayload,
   exportSyncConflictReport,
   getBackupRestorePreflight,
+  getSyncConflictObservabilityCounters,
   importBackupPayload,
   listSyncConflicts,
   listSyncConflictEvents,
@@ -42,6 +43,7 @@ import type {
   CreateTaskSubtaskInput,
   UpdateProjectInput,
   ResolveSyncConflictInput,
+  SyncConflictObservabilityCounters,
   SyncConflictReportPayload,
   SyncConflictStatus,
   UpdateSyncEndpointSettingsInput,
@@ -68,6 +70,9 @@ const SYNC_SETTINGS_KEY = ["sync-settings"] as const;
 const SYNC_RUNTIME_SETTINGS_KEY = ["sync-runtime-settings"] as const;
 const SYNC_CONFLICTS_KEY = ["sync-conflicts"] as const;
 const SYNC_CONFLICT_EVENTS_KEY = ["sync-conflict-events"] as const;
+const SYNC_CONFLICT_OBSERVABILITY_KEY = [
+  "sync-conflict-observability",
+] as const;
 const BACKUP_RESTORE_PREFLIGHT_KEY = ["backup-restore-preflight"] as const;
 
 /** Fetch all active/completed projects */
@@ -396,6 +401,15 @@ export function useSyncConflictEvents(conflictId?: string, limit = 100) {
   });
 }
 
+/** Fetch aggregate observability counters for conflict lifecycle */
+export function useSyncConflictObservability() {
+  return useQuery({
+    queryKey: SYNC_CONFLICT_OBSERVABILITY_KEY,
+    queryFn: (): Promise<SyncConflictObservabilityCounters> =>
+      getSyncConflictObservabilityCounters(),
+  });
+}
+
 /** Resolve an open sync conflict with explicit strategy */
 export function useResolveSyncConflict() {
   const queryClient = useQueryClient();
@@ -405,18 +419,29 @@ export function useResolveSyncConflict() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: SYNC_CONFLICTS_KEY });
       queryClient.invalidateQueries({ queryKey: SYNC_CONFLICT_EVENTS_KEY });
+      queryClient.invalidateQueries({
+        queryKey: SYNC_CONFLICT_OBSERVABILITY_KEY,
+      });
     },
   });
 }
 
 /** Export conflict report with conflict + timeline events */
 export function useExportSyncConflictReport() {
+  const queryClient = useQueryClient();
+
   return useMutation({
     mutationFn: (input?: {
       status?: SyncConflictStatus | "all";
       limit?: number;
       eventsPerConflict?: number;
     }): Promise<SyncConflictReportPayload> => exportSyncConflictReport(input),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: SYNC_CONFLICT_EVENTS_KEY });
+      queryClient.invalidateQueries({
+        queryKey: SYNC_CONFLICT_OBSERVABILITY_KEY,
+      });
+    },
   });
 }
 
@@ -462,6 +487,9 @@ export function useImportBackup() {
       queryClient.invalidateQueries({ queryKey: TASK_TEMPLATES_KEY });
       queryClient.invalidateQueries({ queryKey: SYNC_CONFLICTS_KEY });
       queryClient.invalidateQueries({ queryKey: SYNC_CONFLICT_EVENTS_KEY });
+      queryClient.invalidateQueries({
+        queryKey: SYNC_CONFLICT_OBSERVABILITY_KEY,
+      });
       queryClient.invalidateQueries({ queryKey: BACKUP_RESTORE_PREFLIGHT_KEY });
     },
   });
@@ -487,6 +515,9 @@ export function useRestoreLatestBackup() {
       queryClient.invalidateQueries({ queryKey: TASK_TEMPLATES_KEY });
       queryClient.invalidateQueries({ queryKey: SYNC_CONFLICTS_KEY });
       queryClient.invalidateQueries({ queryKey: SYNC_CONFLICT_EVENTS_KEY });
+      queryClient.invalidateQueries({
+        queryKey: SYNC_CONFLICT_OBSERVABILITY_KEY,
+      });
       queryClient.invalidateQueries({ queryKey: BACKUP_RESTORE_PREFLIGHT_KEY });
     },
   });

@@ -413,6 +413,19 @@ export interface SyncConflictReportPayload {
   items: SyncConflictReportItem[];
 }
 
+export interface SyncConflictObservabilityCounters {
+  total_conflicts: number;
+  open_conflicts: number;
+  resolved_conflicts: number;
+  ignored_conflicts: number;
+  retried_events: number;
+  exported_events: number;
+  resolution_rate_percent: number;
+  median_resolution_time_ms: number | null;
+  latest_detected_at: string | null;
+  latest_resolved_at: string | null;
+}
+
 export interface SyncPushChange {
   entity_type: SyncEntityType;
   entity_id: string;

@@ -4,6 +4,7 @@ import { randomUUID } from "node:crypto";
 import { describe, expect, it, vi } from "vitest";
 import type { SyncPushChange } from "@/lib/types";
 import { createSyncIdempotencyKey } from "@/lib/sync-contract";
+import { runSyncCycle } from "@/lib/sync-runner";
 
 vi.mock("@tauri-apps/plugin-sql", async () => {
   const fs = await import("node:fs");
@@ -265,6 +266,134 @@ describe("database sync conflict persistence", () => {
     expect(resolvedConflict?.status).toBe("resolved");
     expect(resolvedConflict?.resolution_strategy).toBe("retry");
     expect(resolvedConflict?.resolved_by_device).toBe("device-remote");
+  });
+
+  it("reaches conflict-free sync after manual resolve when transport replays the same incoming change", async () => {
+    const entityId = `task-transport-${randomUUID()}`;
+    const incomingIdempotencyKey = `incoming-transport-${randomUUID()}`;
+    const recordedPushChanges: Array<
+      Array<{ entity_id: string; idempotency_key: string }>
+    > = [];
+    let pushCallCount = 0;
+    let pullCallCount = 0;
+
+    const storage = {
+      getDeviceId: database.getOrCreateDeviceId,
+      getCheckpoint: database.getSyncCheckpoint,
+      setCheckpoint: database.setSyncCheckpoint,
+      listOutboxChanges: database.listSyncOutboxChanges,
+      removeOutboxChanges: database.removeSyncOutboxChanges,
+      markOutboxChangeFailed: database.markSyncOutboxChangeFailed,
+      applyIncomingChange: database.applyIncomingSyncChange,
+    };
+
+    const transport = {
+      push: async (payload: unknown) => {
+        pushCallCount += 1;
+        const rawChanges = Array.isArray(
+          (payload as { changes?: unknown })?.changes,
+        )
+          ? ((payload as { changes: unknown[] }).changes ?? [])
+          : [];
+        const changes = rawChanges
+          .map((change) => {
+            if (typeof change !== "object" || change === null) return null;
+            const entityIdValue = (change as { entity_id?: unknown }).entity_id;
+            const idempotencyKeyValue = (
+              change as { idempotency_key?: unknown }
+            ).idempotency_key;
+            if (
+              typeof entityIdValue !== "string" ||
+              typeof idempotencyKeyValue !== "string"
+            ) {
+              return null;
+            }
+            return {
+              entity_id: entityIdValue,
+              idempotency_key: idempotencyKeyValue,
+            };
+          })
+          .filter(
+            (
+              change,
+            ): change is { entity_id: string; idempotency_key: string } =>
+              change !== null,
+          );
+        recordedPushChanges.push(changes);
+
+        return {
+          accepted: changes.map((change) => change.idempotency_key),
+          rejected: [],
+          server_cursor: `cursor-push-${pushCallCount}`,
+          server_time: `2026-02-17T02:0${Math.min(pushCallCount, 9)}:00.000Z`,
+        };
+      },
+      pull: async () => {
+        pullCallCount += 1;
+        const replayChange = createIncomingTaskChange({
+          entity_id: entityId,
+          idempotency_key: incomingIdempotencyKey,
+          payload: {
+            description: "missing title to trigger conflict during pull",
+          },
+        });
+
+        return {
+          server_cursor: `cursor-pull-${pullCallCount}`,
+          server_time: `2026-02-17T03:0${Math.min(pullCallCount, 9)}:00.000Z`,
+          has_more: false,
+          changes: pullCallCount <= 2 ? [replayChange] : [],
+        };
+      },
+    };
+
+    const firstSummary = await runSyncCycle({
+      transport,
+      storage,
+    });
+    expect(firstSummary.pull?.conflicts).toBe(1);
+
+    const createdConflict = (
+      await database.listSyncConflicts({
+        status: "open",
+        limit: 500,
+      })
+    ).find(
+      (item) =>
+        item.entity_id === entityId &&
+        item.incoming_idempotency_key === incomingIdempotencyKey,
+    );
+    expect(createdConflict).toBeTruthy();
+
+    await database.resolveSyncConflict({
+      conflict_id: createdConflict!.id,
+      strategy: "keep_local",
+      resolved_by_device: "device-resolver",
+    });
+
+    const secondSummary = await runSyncCycle({
+      transport,
+      storage,
+    });
+
+    expect(secondSummary.failed_outbox_changes).toBe(0);
+    expect(secondSummary.pull?.conflicts).toBe(0);
+    expect(secondSummary.pull?.skipped).toBeGreaterThanOrEqual(1);
+
+    const resolvedConflict = await database.getSyncConflict(
+      createdConflict!.id,
+    );
+    expect(resolvedConflict?.status).toBe("resolved");
+    expect(resolvedConflict?.resolution_strategy).toBe("keep_local");
+
+    const hasResolutionOutboxPush = recordedPushChanges.some((changes) =>
+      changes.some(
+        (change) =>
+          change.entity_id ===
+          `local.sync.conflict_resolution.${createdConflict!.id}`,
+      ),
+    );
+    expect(hasResolutionOutboxPush).toBe(true);
   });
 
   it("enqueues idempotent outbox record when resolving conflict", async () => {

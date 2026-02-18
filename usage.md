@@ -1,6 +1,6 @@
 # SoloStack Usage Guide
 
-อัปเดตล่าสุด: 2026-02-17
+อัปเดตล่าสุด: 2026-02-18
 
 ## 1) Development Commands
 
@@ -37,8 +37,9 @@ Core files:
 - `src/lib/sync-engine.ts`: prepare/ack/apply/advance helpers
 - `src/lib/sync-runner.ts`: orchestration หนึ่งรอบของ sync cycle
 - `src/lib/sync-service.ts`: wiring เข้ากับ local DB functions
+- `src/lib/sync-connector-contract.ts`: provider-neutral connector contract v0.1 (Google/OneDrive baseline)
 - `src/lib/database.ts`: mutation path + outbox + incoming apply + conflict persistence/report
-- `src/hooks/use-tasks.ts`: hooks สำหรับ conflict list/events/resolve/report export
+- `src/hooks/use-tasks.ts`: hooks สำหรับ conflict list/events/resolve/report export/observability
 
 Syncable entities:
 - `PROJECT`
@@ -88,6 +89,7 @@ P3-2 runtime tuning (Settings > Sync > `Sync Runtime Profile`):
 - first launch บน iOS/Android (ถ้ายังไม่เคยตั้งค่า runtime มาก่อน) จะ seed ค่าเริ่มต้นเป็น `Mobile Beta Preset` อัตโนมัติ
 - background interval ต้องมากกว่าหรือเท่ากับ foreground interval
 - มี `Sync Diagnostics (Session)` ในหน้า Settings แสดง success rate, cycle latency, failure streak และ conflict cycles เพื่อช่วย tune mobile beta
+- มี `Conflict Observability` ในหน้าเดียวกัน แสดง total/open/resolved conflicts, resolution rate, median resolve time, และ retried/exported event counters
 
 ต้องมี server ไหม:
 - ไม่ต้องมี ถ้าใช้งานเครื่องเดียว (สถานะ `LOCAL_ONLY`)
@@ -157,6 +159,17 @@ console.log(summary);
 - จำนวน outbox ที่ส่งสำเร็จ/ล้มเหลว/ค้าง
 - ผล apply pull (`applied`, `skipped`, `conflicts`, `failed`)
 
+## 5B) Connector Contract Baseline (P3-5)
+
+- มี interface กลาง `SyncConnectorAdapter` ใน `src/lib/sync-connector-contract.ts`
+- ครอบคลุม operation พื้นฐาน:
+  - `list`
+  - `read`
+  - `write`
+  - `remove`
+- มี capability map ต่อ provider (`google_appdata`, `onedrive_approot`) และ helper สำหรับ normalize request bounds + error shape
+- ไฟล์นี้เป็น contract layer (ยังไม่ใช่ provider implementation จริง)
+
 ## 6) Sync Status Semantics
 
 - `Synced`: sync cycle ล่าสุดสำเร็จและไม่มี conflict/failure
@@ -183,6 +196,7 @@ console.log(summary);
 - กด `Details` เพื่อดู payload (`local`/`remote`) และ timeline events ของ conflict นั้น
 - กด `Export Report` เพื่อดาวน์โหลด conflict report เป็น JSON (รวม events)
 - ทุกครั้งที่ export report ระบบจะเพิ่ม timeline event ประเภท `exported`
+- มี aggregate counters สำหรับ conflict lifecycle เพื่อช่วย monitor แนวโน้ม (resolution rate + median time-to-resolve)
 
 พฤติกรรมปัจจุบัน:
 - เมื่อกด resolve ระบบจะบันทึก resolution/event ลง DB ทันที
@@ -216,3 +230,62 @@ Recovery (Backup & Restore):
   - ต้องอัปเดต `usage.md` ใน change set เดียวกัน
 - ถ้า behavior ของ implementation เปลี่ยน:
   - ต้องอัปเดตตัวอย่างการใช้งานใน `usage.md` ให้ตรง behavior ล่าสุด
+
+## 9) MCP Local Skeleton (P3-6 Kickoff)
+
+รัน MCP server skeleton:
+
+```bash
+npm run mcp:dev
+```
+
+default bind:
+- `127.0.0.1:8799`
+
+health endpoints:
+- `GET /`
+- `GET /health`
+- `GET /healthz`
+
+read tool endpoints:
+- `POST /tools/get_tasks`
+- `POST /tools/get_projects`
+- `POST /tools/get_weekly_review`
+- `POST /tools/search_tasks`
+- `POST /tools/get_task_changelogs`
+- `POST /tools` (generic route, ส่ง `tool` ผ่าน body)
+
+audit log baseline:
+- MCP จะเขียน structured log ต่อ 1 tool call ลง stdout (event `mcp.tool_call`)
+- payload หลัก: `request_id`, `tool`, `ok`, `status_code`, `error_code`, `duration_ms`
+
+config env vars:
+- `SOLOSTACK_MCP_HOST`
+- `SOLOSTACK_MCP_PORT`
+- `SOLOSTACK_MCP_DB_PATH`
+- `SOLOSTACK_MCP_LOG_LEVEL`
+- `SOLOSTACK_MCP_READ_ONLY`
+- `SOLOSTACK_MCP_ENABLE_CORS`
+- `SOLOSTACK_MCP_RATE_LIMIT_ENABLED`
+- `SOLOSTACK_MCP_RATE_LIMIT_WINDOW_MS`
+- `SOLOSTACK_MCP_RATE_LIMIT_MAX_REQUESTS`
+- `SOLOSTACK_MCP_TIMEOUT_GUARD_ENABLED`
+- `SOLOSTACK_MCP_TIMEOUT_STRATEGY`
+- `SOLOSTACK_MCP_TOOL_TIMEOUT_MS`
+
+load/perf matrix baseline:
+- รัน `npm run mcp:load-matrix`
+- output ที่ `docs/mcp-load-matrix-v0.1.md`
+
+รายละเอียดเพิ่มเติม: `mcp-solostack/README.md`
+
+## 10) Planning Artifacts (P3-5 / P3-6)
+
+- AWS spike memo: `docs/aws-spike-v0.1.md`
+- Telemetry spec baseline: `docs/telemetry-spec-v0.1.md`
+- MCP execution backlog: `docs/p3-6-execution-backlog-v0.1.md`
+- MCP read-tool contract: `docs/mcp-read-tools-contract-v0.1.md`
+- Agent usage playbook: `docs/agent-usage-playbook-v0.1.md`
+- MCP AWS hosted profile: `docs/mcp-aws-hosted-profile-v0.1.md`
+- MCP hardening report: `docs/mcp-hardening-report-v0.1.md`
+- MCP load matrix: `docs/mcp-load-matrix-v0.1.md`

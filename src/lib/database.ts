@@ -13,6 +13,7 @@ import type {
   SyncCheckpoint,
   SyncConflictEventRecord,
   SyncConflictEventType,
+  SyncConflictObservabilityCounters,
   SyncConflictReportPayload,
   SyncConflictRecord,
   SyncConflictResolutionStrategy,
@@ -1901,6 +1902,142 @@ export async function listSyncConflictEvents(
       LIMIT $2`,
     [normalizedConflictId, normalizedLimit],
   );
+}
+
+interface SyncConflictStatusCountRow {
+  status: SyncConflictStatus;
+  count: number;
+}
+
+interface SyncConflictEventCountRow {
+  event_type: SyncConflictEventType;
+  count: number;
+}
+
+interface SyncConflictResolutionWindowRow {
+  detected_at: string;
+  resolved_at: string;
+}
+
+interface SyncConflictLatestTimestampsRow {
+  latest_detected_at: string | null;
+  latest_resolved_at: string | null;
+}
+
+function toResolutionDurationMs(input: {
+  detected_at: string;
+  resolved_at: string;
+}): number | null {
+  const detectedAtMs = Date.parse(input.detected_at);
+  const resolvedAtMs = Date.parse(input.resolved_at);
+  if (!Number.isFinite(detectedAtMs) || !Number.isFinite(resolvedAtMs)) {
+    return null;
+  }
+  if (resolvedAtMs < detectedAtMs) return null;
+  return Math.floor(resolvedAtMs - detectedAtMs);
+}
+
+function calculateMedianValue(values: number[]): number | null {
+  if (values.length === 0) return null;
+  const sortedValues = [...values].sort((left, right) => left - right);
+  const middleIndex = Math.floor(sortedValues.length / 2);
+  if (sortedValues.length % 2 === 1) {
+    return sortedValues[middleIndex];
+  }
+  return Math.round(
+    (sortedValues[middleIndex - 1] + sortedValues[middleIndex]) / 2,
+  );
+}
+
+function toRatePercent(numerator: number, denominator: number): number {
+  if (denominator <= 0) return 0;
+  return Math.round((numerator / denominator) * 1000) / 10;
+}
+
+export async function getSyncConflictObservabilityCounters(): Promise<SyncConflictObservabilityCounters> {
+  const db = await getDb();
+  await ensureSyncTablesReady(db);
+  const [statusRows, eventRows, resolutionWindowRows, latestTimestampRows] =
+    await Promise.all([
+      db.select<SyncConflictStatusCountRow[]>(
+        `SELECT status, COUNT(*) as count
+         FROM sync_conflicts
+        GROUP BY status`,
+      ),
+      db.select<SyncConflictEventCountRow[]>(
+        `SELECT event_type, COUNT(*) as count
+         FROM sync_conflict_events
+        GROUP BY event_type`,
+      ),
+      db.select<SyncConflictResolutionWindowRow[]>(
+        `SELECT detected_at, resolved_at
+         FROM sync_conflicts
+        WHERE status = 'resolved'
+          AND resolved_at IS NOT NULL`,
+      ),
+      db.select<SyncConflictLatestTimestampsRow[]>(
+        `SELECT
+          (SELECT detected_at
+             FROM sync_conflicts
+            ORDER BY detected_at DESC, id DESC
+            LIMIT 1) as latest_detected_at,
+          (SELECT resolved_at
+             FROM sync_conflicts
+            WHERE resolved_at IS NOT NULL
+            ORDER BY resolved_at DESC, id DESC
+            LIMIT 1) as latest_resolved_at`,
+      ),
+    ]);
+
+  const statusCounts: Record<SyncConflictStatus, number> = {
+    open: 0,
+    resolved: 0,
+    ignored: 0,
+  };
+  for (const row of statusRows) {
+    const status = asSyncConflictStatus(row.status);
+    statusCounts[status] = Math.max(0, Number(row.count ?? 0));
+  }
+
+  const eventCounts: Record<SyncConflictEventType, number> = {
+    detected: 0,
+    resolved: 0,
+    ignored: 0,
+    retried: 0,
+    exported: 0,
+  };
+  for (const row of eventRows) {
+    const eventType = asSyncConflictEventType(row.event_type);
+    eventCounts[eventType] = Math.max(0, Number(row.count ?? 0));
+  }
+
+  const totalConflicts =
+    statusCounts.open + statusCounts.resolved + statusCounts.ignored;
+  const medianResolutionTimeMs = calculateMedianValue(
+    resolutionWindowRows
+      .map((row) => toResolutionDurationMs(row))
+      .filter((value): value is number => value !== null),
+  );
+  const latestTimestamps = latestTimestampRows[0] ?? {
+    latest_detected_at: null,
+    latest_resolved_at: null,
+  };
+
+  return {
+    total_conflicts: totalConflicts,
+    open_conflicts: statusCounts.open,
+    resolved_conflicts: statusCounts.resolved,
+    ignored_conflicts: statusCounts.ignored,
+    retried_events: eventCounts.retried,
+    exported_events: eventCounts.exported,
+    resolution_rate_percent: toRatePercent(
+      statusCounts.resolved,
+      totalConflicts,
+    ),
+    median_resolution_time_ms: medianResolutionTimeMs,
+    latest_detected_at: latestTimestamps.latest_detected_at,
+    latest_resolved_at: latestTimestamps.latest_resolved_at,
+  };
 }
 
 export async function exportSyncConflictReport(input?: {

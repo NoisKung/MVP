@@ -1,6 +1,6 @@
 # SoloStack Execution Planning
 
-อัปเดตล่าสุด: 2026-02-17
+อัปเดตล่าสุด: 2026-02-18
 แหล่งข้อมูลหลัก: `IDEA.md`
 
 ## 1) Planning Intent
@@ -144,6 +144,47 @@
   - auth (`Cognito`) และ observability baseline (`CloudWatch`)
 - ข้อเสนอเลือก provider ลำดับแรกพร้อมเกณฑ์ตัดสิน
 
+### Comparative Spike Snapshot (2026-02-18)
+
+Google Drive (`appDataFolder`) vs OneDrive (`approot`) ในมุม SoloStack sync connector:
+
+1. Integration complexity (MVP speed)
+- Google `appDataFolder`: API surface แคบกว่า, โฟลเดอร์ private ต่อแอปโดยตรง, path model ตรงไปตรงมา
+- OneDrive `approot`: ทำได้ดีแต่ต้องเผื่อความหลากหลายของ tenant/org policy และ Graph edge cases มากกว่า
+
+2. Data safety + connector semantics
+- ทั้งสองฝั่งเหมาะกับ app-private storage และรองรับไฟล์ metadata/payload ได้
+- ทั้งสองฝั่งยังต้องพึ่ง SoloStack sync core สำหรับ conflict/idempotency/domain merge logic อยู่ดี
+
+3. Ecosystem fit
+- Google: เหมาะกับ personal/workspace mix ที่ไม่ต้องเจอ org restriction หนัก
+- OneDrive: แข็งแรงมากในองค์กรที่ใช้ Microsoft 365 เป็นหลัก (โอกาสเจอ policy governance สูงกว่า)
+
+4. Operational risk (desktop beta)
+- Google-first ช่วยลด unknowns ในรอบ pilot แรก
+- OneDrive ควรเป็น wave ถัดไปพร้อม test matrix สำหรับ tenant policy / throttling / token refresh edge cases
+
+### Recommendation (for P3-5 Pilot)
+
+เลือก `Google appDataFolder` เป็น connector ลำดับแรกใน pilot และคง provider-neutral contract เดิม เพื่อให้ต่อ `OneDrive approot` ได้โดยไม่เปลี่ยน sync core.
+
+### Exit Conditions Before Connector Build
+
+- Freeze connector adapter contract (upload/download/list/delete + cursor metadata)
+- แยก secret/token storage policy ให้ชัดเจน (desktop secure store)
+- เพิ่ม integration fixture สำหรับ provider error mapping (`rate_limit`, `unauthorized`, `unavailable`)
+- เพิ่ม observability fields ต่อ connector (`provider`, `latency_ms`, `http_status`, `retry_after_ms`)
+
+### Current Progress (2026-02-18)
+
+- เสร็จแล้ว:
+  - comparative spike snapshot (Google vs OneDrive) พร้อม recommendation สำหรับ pilot
+  - connector adapter contract v0.1 ใน `src/lib/sync-connector-contract.ts`
+- คงเหลือ:
+  - provider implementation stubs (Google/OneDrive)
+  - token storage + refresh flow integration
+  - connector integration tests กับ fixture responses
+
 ## Phase F: P3-6 MCP Server for SoloStack
 
 ช่วงเป้าหมาย: 2026-06-29 ถึง 2026-07-24
@@ -164,6 +205,23 @@
 - Agent เรียก weekly summary ได้ภายใน <= 2 วินาทีใน local machine
 - ไม่มี direct DB corruption case จาก MCP read path
 - Query ที่หนักมี guardrails (limit/timeout/rate-limit) และไม่ทำให้ UI lag
+
+### Current Progress (2026-02-18)
+
+- เสร็จแล้ว:
+  - local MCP skeleton + health/config loader (`mcp-solostack/server.mjs`, `mcp-solostack/config.mjs`)
+  - read tools ครบ wave-1 และ wave-2 (`get_tasks`, `get_projects`, `get_weekly_review`, `search_tasks`, `get_task_changelogs`)
+  - รองรับทั้ง route mode (`/tools/<tool>`) และ generic mode (`/tools`)
+  - integration tests สำหรับ app/tool routes พร้อม fixture DB (`mcp-solostack/app.test.ts`, `mcp-solostack/tools.test.ts`)
+  - audit log baseline ต่อ 1 tool call (`event = mcp.tool_call`)
+  - เพิ่ม rate limiter (`RATE_LIMITED`) และ timeout guard (`TIMEOUT`) สำหรับ `/tools*`
+  - เพิ่ม hosted timeout strategy แบบ `worker_hard` (terminate worker เมื่อ timeout เกิน)
+  - เพิ่ม load/perf matrix baseline สำหรับ small/medium fixture (`docs/mcp-load-matrix-v0.1.md`)
+  - เอกสาร agent playbook และ AWS hosted profile baseline
+  - hardening snapshot v0.1 (`docs/mcp-hardening-report-v0.1.md`)
+- คงเหลือ:
+  - ทำซ้ำ load/perf matrix ใน hosted staging เพื่อเทียบกับ local baseline
+  - ตัดสินใจ sink/retention สำหรับ audit log ใน hosted profile
 
 ## 5) Workstream Breakdown (P3-1 Priority)
 
@@ -294,7 +352,7 @@
 
 ## Week 3 (2026-05-04 ถึง 2026-05-08)
 - เพิ่ม recovery tools (`retry`, `restore`, `export report`) (done: มี preflight/force + restore latest backup)
-- เพิ่ม conflict timeline event log + observability counters (partial: event log done, counters pending)
+- เพิ่ม conflict timeline event log + observability counters (done: event log + aggregate counters + median resolve time)
 - hardening + bugfix + ผ่าน quality gates ก่อนประกาศ internal beta
 
 ## 6D) P3-3 Implementation Checklist (Dev Team)
@@ -313,6 +371,7 @@
 - [x] ทุก `resolveConflict` ต้องสร้าง idempotency key และ enqueue outbox change
 - [x] เพิ่ม `retryLastFailedSync` แบบกันยิงซ้ำและ safe re-entry
 - [x] เพิ่ม `exportConflictReport` เป็น structured JSON
+- [x] เพิ่ม `getSyncConflictObservabilityCounters` (total/open/resolved, retried/exported events, median resolve time)
 
 ## UI / UX
 - [x] เพิ่ม global status entry point เมื่อสถานะเป็น `Conflict`
@@ -377,17 +436,98 @@
 
 ## 11) Immediate Next Actions
 
-1. เพิ่ม conflict test matrix + Playwright coverage สำหรับ resolve/retry/recovery
-2. เพิ่ม integration tests สำหรับ resolve replay + idempotent retry
-3. เพิ่ม observability counters สำหรับ conflict lifecycle
-4. เริ่ม comparative spike: Google `appDataFolder` vs OneDrive `approot`
-5. เริ่ม AWS architecture spike พร้อม cost baseline สำหรับ sync + MCP
+1. [done] comparative spike: Google `appDataFolder` vs OneDrive `approot`
+2. [done] ทำ connector adapter contract v0.1 ให้รองรับทั้ง Google/OneDrive ด้วย interface เดียว
+3. [done] เริ่ม AWS architecture spike พร้อม cost baseline สำหรับ sync + MCP (`docs/aws-spike-v0.1.md`)
+4. [done] สรุป telemetry baseline ที่ต้องส่งออกนอกแอป (`docs/telemetry-spec-v0.1.md`)
+5. [done] แตกงาน P3-6 อ่านข้อมูลผ่าน MCP tool set ตาม contract v0.1 (`docs/p3-6-execution-backlog-v0.1.md`)
 
 ## 12) Immediate Next Actions (P3-6 Kickoff)
 
-1. สรุป MCP read-tool contract v0.1 ในไฟล์ spec เดียว
-2. สร้าง `mcp-solostack` skeleton + health check + config loader
-3. ต่อ `get_tasks` และ `get_projects` ให้ใช้งานได้ end-to-end ก่อน
-4. เพิ่ม integration tests กับ fixture DB ขนาดเล็กและกลาง
-5. เขียน agent usage playbook สำหรับเคส weekly summary รุ่นแรก
-6. นิยาม hosted MCP deployment profile บน AWS (ถ้าเลือก cloud mode)
+1. [done] สรุป MCP read-tool contract v0.1 (`docs/mcp-read-tools-contract-v0.1.md`)
+2. [done] สร้าง `mcp-solostack` skeleton + health check + config loader (`mcp-solostack/server.mjs`)
+3. [done] ต่อ `get_tasks` และ `get_projects` ให้ใช้งานได้ end-to-end (`POST /tools/get_tasks`, `POST /tools/get_projects`)
+4. [done] เพิ่ม integration tests กับ fixture DB ขนาดเล็กและกลาง (`mcp-solostack/app.test.ts`, `mcp-solostack/tools.test.ts`)
+5. [done] เขียน agent usage playbook สำหรับเคส weekly summary รุ่นแรก (`docs/agent-usage-playbook-v0.1.md`)
+6. [done] นิยาม hosted MCP deployment profile บน AWS (ถ้าเลือก cloud mode) (`docs/mcp-aws-hosted-profile-v0.1.md`)
+
+## 13) Next Sprint Plan (2026-02-19 ถึง 2026-03-04)
+
+เป้าหมาย sprint นี้: ปิด 3 งานค้างจาก Immediate Next Actions ให้ได้ output ที่ใช้งานตัดสินใจและเริ่มลงมือพัฒนา P3-6 ได้ทันที
+
+### Stream A: AWS Architecture Spike (Sync + MCP)
+
+ช่วงทำงาน: 2026-02-19 ถึง 2026-02-24
+
+งานหลัก:
+- ออกแบบ 2 profile เพื่อเทียบ:
+  - `lambda-first`: API Gateway + Lambda + DynamoDB + Cognito + CloudWatch
+  - `service-first`: ALB/ECS Fargate + RDS Postgres + Cognito + CloudWatch
+- ประเมิน workload baseline:
+  - desktop sync polling
+  - conflict/retry burst
+  - MCP read traffic baseline
+- สรุป cost baseline แบบ low/medium/high traffic
+
+ผลลัพธ์ที่ต้องได้:
+- decision memo 1 หน้า (เลือก profile แนะนำ + trade-offs)
+- cost table baseline สำหรับ dev/staging/prod
+- security baseline checklist (IAM, secrets, logging, encryption at rest/in transit)
+
+Definition of Done:
+- มี recommendation เดียวที่เชื่อมกับ Open Decisions ข้อ AWS stack
+- มี assumptions และ risk ที่ตรวจสอบได้
+
+### Stream B: Telemetry Baseline (Desktop + Cloud)
+
+ช่วงทำงาน: 2026-02-23 ถึง 2026-02-27
+
+งานหลัก:
+- นิยาม metrics กลาง 3 กลุ่ม:
+  - sync health
+  - conflict lifecycle
+  - connector reliability
+- กำหนด schema/log envelope กลางสำหรับ local session และ cloud ingestion
+- นิยาม threshold alert เบื้องต้นสำหรับ beta
+
+ผลลัพธ์ที่ต้องได้:
+- telemetry spec v0.1 (field list + units + sampling + retention)
+- mapping table ระหว่าง local diagnostics กับ cloud metrics
+- alert baseline สำหรับ critical failures/data safety
+
+Definition of Done:
+- เชื่อมกับ Open Decisions ข้อ telemetry scope ได้ชัดเจน
+- พร้อมใช้อ้างอิงตอนทำ implementation โดยไม่แก้ contract ใหญ่ซ้ำ
+
+### Stream C: P3-6 Breakdown to Execution
+
+ช่วงทำงาน: 2026-02-26 ถึง 2026-03-04
+
+งานหลัก:
+- แตก P3-6 เป็น milestone ย่อย:
+  - contract/spec
+  - server skeleton
+  - read tools wave-1
+  - test + hardening
+- define acceptance criteria ราย milestone
+- define dependency matrix กับ Stream A/B
+
+ผลลัพธ์ที่ต้องได้:
+- execution backlog สำหรับ P3-6 (order + estimate + risk)
+- first implementation ticket set (เริ่ม `get_tasks`, `get_projects`)
+- quality gates ต่อ milestone (test/build/performance bounds)
+
+Definition of Done:
+- เริ่ม implementation P3-6 ได้ทันทีโดยไม่ต้องกลับมา re-plan ใหญ่
+- ลด ambiguity ใน Open Decisions ข้อ MCP deployment/auth
+
+### Sprint Artifacts (2026-02-18)
+
+- AWS spike memo: `docs/aws-spike-v0.1.md`
+- Telemetry spec: `docs/telemetry-spec-v0.1.md`
+- P3-6 execution backlog: `docs/p3-6-execution-backlog-v0.1.md`
+- MCP read-tool contract: `docs/mcp-read-tools-contract-v0.1.md`
+- Agent usage playbook: `docs/agent-usage-playbook-v0.1.md`
+- MCP AWS hosted profile: `docs/mcp-aws-hosted-profile-v0.1.md`
+- MCP hardening report: `docs/mcp-hardening-report-v0.1.md`
+- MCP load matrix: `docs/mcp-load-matrix-v0.1.md`
