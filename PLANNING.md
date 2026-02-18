@@ -1,6 +1,6 @@
 # SoloStack Execution Planning
 
-อัปเดตล่าสุด: 2026-02-17
+อัปเดตล่าสุด: 2026-02-18
 แหล่งข้อมูลหลัก: `IDEA.md`
 
 ## 1) Planning Intent
@@ -143,6 +143,37 @@
   - data store (`DynamoDB` หรือ `RDS`)
   - auth (`Cognito`) และ observability baseline (`CloudWatch`)
 - ข้อเสนอเลือก provider ลำดับแรกพร้อมเกณฑ์ตัดสิน
+
+### Comparative Spike Snapshot (2026-02-18)
+
+Google Drive (`appDataFolder`) vs OneDrive (`approot`) ในมุม SoloStack sync connector:
+
+1. Integration complexity (MVP speed)
+- Google `appDataFolder`: API surface แคบกว่า, โฟลเดอร์ private ต่อแอปโดยตรง, path model ตรงไปตรงมา
+- OneDrive `approot`: ทำได้ดีแต่ต้องเผื่อความหลากหลายของ tenant/org policy และ Graph edge cases มากกว่า
+
+2. Data safety + connector semantics
+- ทั้งสองฝั่งเหมาะกับ app-private storage และรองรับไฟล์ metadata/payload ได้
+- ทั้งสองฝั่งยังต้องพึ่ง SoloStack sync core สำหรับ conflict/idempotency/domain merge logic อยู่ดี
+
+3. Ecosystem fit
+- Google: เหมาะกับ personal/workspace mix ที่ไม่ต้องเจอ org restriction หนัก
+- OneDrive: แข็งแรงมากในองค์กรที่ใช้ Microsoft 365 เป็นหลัก (โอกาสเจอ policy governance สูงกว่า)
+
+4. Operational risk (desktop beta)
+- Google-first ช่วยลด unknowns ในรอบ pilot แรก
+- OneDrive ควรเป็น wave ถัดไปพร้อม test matrix สำหรับ tenant policy / throttling / token refresh edge cases
+
+### Recommendation (for P3-5 Pilot)
+
+เลือก `Google appDataFolder` เป็น connector ลำดับแรกใน pilot และคง provider-neutral contract เดิม เพื่อให้ต่อ `OneDrive approot` ได้โดยไม่เปลี่ยน sync core.
+
+### Exit Conditions Before Connector Build
+
+- Freeze connector adapter contract (upload/download/list/delete + cursor metadata)
+- แยก secret/token storage policy ให้ชัดเจน (desktop secure store)
+- เพิ่ม integration fixture สำหรับ provider error mapping (`rate_limit`, `unauthorized`, `unavailable`)
+- เพิ่ม observability fields ต่อ connector (`provider`, `latency_ms`, `http_status`, `retry_after_ms`)
 
 ## Phase F: P3-6 MCP Server for SoloStack
 
@@ -378,10 +409,11 @@
 
 ## 11) Immediate Next Actions
 
-1. เริ่ม comparative spike: Google `appDataFolder` vs OneDrive `approot`
-2. เริ่ม AWS architecture spike พร้อม cost baseline สำหรับ sync + MCP
-3. สรุป telemetry baseline ที่ต้องส่งออกนอกแอป (desktop session vs cloud observability)
-4. แตกงาน P3-6 อ่านข้อมูลผ่าน MCP tool set ตาม contract v0.1
+1. [done] comparative spike: Google `appDataFolder` vs OneDrive `approot`
+2. ทำ connector adapter contract v0.1 ให้รองรับทั้ง Google/OneDrive ด้วย interface เดียว
+3. เริ่ม AWS architecture spike พร้อม cost baseline สำหรับ sync + MCP
+4. สรุป telemetry baseline ที่ต้องส่งออกนอกแอป (desktop session vs cloud observability)
+5. แตกงาน P3-6 อ่านข้อมูลผ่าน MCP tool set ตาม contract v0.1
 
 ## 12) Immediate Next Actions (P3-6 Kickoff)
 
