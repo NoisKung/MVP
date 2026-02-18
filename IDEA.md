@@ -33,10 +33,11 @@
 | --- | --- | --- | --- |
 | P3-1 | Sync Foundation + Desktop Beta (Windows/macOS/Linux) | In Progress | Sync หลักระหว่าง desktop ได้เสถียร |
 | P3-2 | Mobile Client Sync Beta (iOS/Android) | In Progress | ใช้งานข้าม desktop + mobile ได้ |
-| P3-3 | Conflict Center + Recovery Tools | In Progress | ให้ผู้ใช้แก้ conflict ได้ชัดเจน |
+| P3-3 | Conflict Center + Recovery Tools | Completed | ให้ผู้ใช้แก้ conflict ได้ชัดเจน |
 | P3-4 | Security Hardening | Planned | เพิ่มความปลอดภัยระดับ production |
 | P3-5 | Cloud Provider Connectors / Platform (Google/Microsoft/iCloud/AWS) | Discovery | เพิ่มทางเลือกการ sync ตาม ecosystem ผู้ใช้และตัวเลือก backend platform |
 | P3-6 | MCP Server for SoloStack Agent Data Access | In Progress | ให้ Agent ดึงข้อมูลไปวิเคราะห์/สรุป/วางแผนได้อย่างปลอดภัย |
+| P3-7 | Product Quality of Life (QoL) | In Progress | ลด friction การใช้งานรายวันและลด human error |
 
 ## Active Plan: P3-1 Sync Foundation + Desktop Beta
 
@@ -477,6 +478,91 @@
 
 - Migration จาก local-only ไป sync ทำให้ข้อมูลผิดรูป
 - ทำ preflight validation + backup ก่อนเปิด sync ครั้งแรก
+
+## QoL Improvement Ideas (Proposed)
+
+### Quick Wins (1-3 วัน)
+
+1. Global Undo Bar สำหรับ action เสี่ยง
+- ครอบคลุม `Delete Task`, `Delete Project`, `Resolve Conflict`, `Restore`
+- เป้าหมาย: ลด human error จาก mis-click ใน flow ที่ irreversible
+
+2. Keyboard Shortcut Help + Power Shortcuts
+- เพิ่ม shortcut สำหรับ `Sync now`, `Open Conflict Center`, `Open Settings`, `Export Backup`
+- เป้าหมาย: ลดจำนวนคลิกต่องานหลักใน daily workflow
+
+3. Autosave State Indicator ในฟอร์มสำคัญ
+- แสดงสถานะ `Saving...`, `Saved`, `Retry` ใน Task form/Manual merge draft
+- เป้าหมาย: ลดความไม่มั่นใจว่าข้อมูลถูกบันทึกแล้วหรือยัง
+
+4. Quick Capture Date Chips
+- แปลงภาษาธรรมชาติเป็น due/reminder พร้อม chip confirm (เช่น `พรุ่งนี้ 9 โมง`)
+- เป้าหมาย: เพิ่มความเร็วตอนจดงานแบบเร่งด่วน
+
+### Mid-size (3-7 วัน)
+
+1. Bulk Edit / Multi-select Tasks
+- แก้ `status`, `priority`, `project`, `due_at` พร้อมกันหลายรายการ
+- เป้าหมาย: ลดงานซ้ำตอน triage backlog
+
+2. Snooze Reminder from Notification
+- ตัวเลือกเร็ว `15m`, `1h`, `Tomorrow`
+- เป้าหมาย: ลดการหลุด reminder และลด context switch เข้าแอป
+
+3. Resume Last Context
+- เปิดแอปแล้วกลับไป view/filter/task ล่าสุดอัตโนมัติ
+- เป้าหมาย: ลดเวลา re-orient ทุกครั้งที่กลับมาใช้งาน
+
+4. Restore Dry-run Summary
+- ก่อน restore แสดงสรุปผลกระทบ (`tasks/projects/templates`, outbox/conflicts ที่จะถูกเคลียร์)
+- เป้าหมาย: เพิ่มความมั่นใจก่อนยืนยัน action ใหญ่
+
+### Stretch (1-2 สปรินต์)
+
+1. Personal Conflict Strategy Defaults
+- ตั้งค่า default strategy ต่อ conflict type (ยังคงมี per-item override)
+- เป้าหมาย: ลดเวลาการ resolve สำหรับ pattern ที่เกิดซ้ำ
+
+2. Command Palette Workflow Actions
+- สั่ง `Export Backup`, `Sync Diagnostics`, `Open Restore Preflight` จาก command palette
+- เป้าหมาย: ให้ power user ทำงานได้เร็วขึ้นโดยไม่ออกคีย์บอร์ด
+
+3. Lightweight Focus Mode
+- เริ่มจับเวลา focus จาก task row โดยไม่ต้องเปิดหลายหน้าจอ
+- เป้าหมาย: ลด friction จาก planning -> execution
+
+### Candidate QoL Sprint Plan
+
+1. QoL Sprint A
+- Global Undo Bar
+- Shortcut Help + Power Shortcuts
+- Autosave State Indicator
+
+2. QoL Sprint B
+- Bulk Edit / Multi-select Tasks
+- Resume Last Context
+- Restore Dry-run Summary
+
+3. QoL Sprint C
+- Snooze Reminder from Notification
+- Personal Conflict Strategy Defaults
+- Command Palette Workflow Actions
+
+### QoL Progress Snapshot (2026-02-18)
+
+- Done:
+  - เพิ่ม `Keyboard Shortcut Help` modal (เปิดจาก `?` และปุ่ม `Shortcuts ?` ใน sidebar)
+  - เพิ่ม power shortcuts:
+    - `Cmd/Ctrl + ,` -> เปิด `Settings`
+    - `Cmd/Ctrl + Shift + C` -> เปิด `Conflict Center`
+    - `Cmd/Ctrl + Shift + S` -> `Sync now`
+  - เพิ่ม `Autosave State Indicator` ใน sidebar footer:
+    - `Autosave ready`
+    - `Autosaving...`
+    - `Saved ...`
+    - `Autosave failed`
+- Next:
+  - Global undo bar สำหรับ action เสี่ยง
 
 ## Open Decisions (Proposed for Sign-off)
 

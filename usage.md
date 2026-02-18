@@ -17,6 +17,19 @@ Validation gate ที่ต้องรันตามลำดับ:
 2. `npm run test:e2e`
 3. `npm run build`
 
+## 1B) Keyboard Shortcuts (QoL)
+
+เปิด shortcut help:
+- กด `?`
+- หรือกดปุ่ม `Shortcuts ?` ใน sidebar footer
+
+Power shortcuts:
+- `Cmd/Ctrl + N`: Create new task
+- `Cmd/Ctrl + K`: Open command palette
+- `Cmd/Ctrl + ,`: เปิด `Settings`
+- `Cmd/Ctrl + Shift + C`: เปิด `Conflict Center`
+- `Cmd/Ctrl + Shift + S`: `Sync now` (เมื่อมี transport)
+
 ## 2) MVP CLI Quick Usage
 
 ```bash
@@ -180,6 +193,7 @@ console.log(summary);
 
 ตำแหน่งแสดงผล:
 - Sidebar footer: status badge ระดับแอป (เมื่อสถานะเป็น `Conflict` กดเพื่อเปิด `Conflict Center` ได้)
+- Sidebar footer: `Autosave` indicator ระดับ local write (`Autosave ready`, `Autosaving...`, `Saved ...`, `Autosave failed`)
 - Settings > Sync card: ปุ่ม `Sync now`, เวลาซิงก์ล่าสุด, error ล่าสุด
 - Settings > Sync > `Conflict Center`: ดูรายการ conflict ที่เปิดอยู่และกด resolve
 - Sidebar > `Conflicts`: dedicated view สำหรับจัดการ conflict แบบเต็มหน้า

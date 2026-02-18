@@ -13,6 +13,7 @@ import { WeeklyReviewView } from "./components/WeeklyReviewView";
 import { ReminderSettings } from "./components/ReminderSettings";
 import { TaskFiltersBar } from "./components/TaskFiltersBar";
 import { CommandPalette } from "./components/CommandPalette";
+import { ShortcutHelpModal } from "./components/ShortcutHelpModal";
 import {
   useTasks,
   useProjects,
@@ -88,6 +89,13 @@ function getErrorMessage(error: unknown): string {
   return "An unexpected error occurred. Please try again.";
 }
 
+function isEditableEventTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  if (target.isContentEditable) return true;
+  const tagName = target.tagName.toUpperCase();
+  return tagName === "INPUT" || tagName === "TEXTAREA" || tagName === "SELECT";
+}
+
 function formatRelativeSyncTime(value: string | null): string | null {
   if (!value) return null;
   const parsedDate = new Date(value);
@@ -132,6 +140,51 @@ function getSyncStatusLabel(input: {
     return "Sync paused";
   }
   return "Needs attention";
+}
+
+type AutosaveStatus = "ready" | "saving" | "saved" | "error";
+
+interface AutosaveIndicator {
+  status: AutosaveStatus;
+  label: string;
+  detail: string | null;
+}
+
+function getAutosaveIndicator(input: {
+  isSaving: boolean;
+  lastSavedAt: string | null;
+  lastError: string | null;
+}): AutosaveIndicator {
+  if (input.isSaving) {
+    return {
+      status: "saving",
+      label: "Autosaving...",
+      detail: "Saving local changes.",
+    };
+  }
+
+  if (input.lastError) {
+    return {
+      status: "error",
+      label: "Autosave failed",
+      detail: input.lastError,
+    };
+  }
+
+  if (input.lastSavedAt) {
+    const relativeTime = formatRelativeSyncTime(input.lastSavedAt);
+    return {
+      status: "saved",
+      label: relativeTime ? `Saved ${relativeTime}` : "Saved",
+      detail: `Last autosave at ${new Date(input.lastSavedAt).toLocaleString()}.`,
+    };
+  }
+
+  return {
+    status: "ready",
+    label: "Autosave ready",
+    detail: "Waiting for local changes.",
+  };
 }
 
 function isE2EBridgeEnabled(): boolean {
@@ -357,7 +410,13 @@ function AppContent() {
   const [quickCaptureError, setQuickCaptureError] = useState<string | null>(
     null,
   );
+  const [lastAutosavedAt, setLastAutosavedAt] = useState<string | null>(null);
+  const [lastAutosaveError, setLastAutosaveError] = useState<string | null>(
+    null,
+  );
+  const [autosaveClock, setAutosaveClock] = useState(0);
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
+  const [isShortcutHelpOpen, setIsShortcutHelpOpen] = useState(false);
   const [createModalProjectId, setCreateModalProjectId] = useState<
     string | null
   >(null);
@@ -433,6 +492,40 @@ function AppContent() {
       }),
     [visibleSyncIsOnline, visibleSyncLastSyncedAt, visibleSyncStatus],
   );
+  const markAutosaveSuccess = useCallback(() => {
+    setLastAutosaveError(null);
+    setLastAutosavedAt(new Date().toISOString());
+    setAutosaveClock((previous) => previous + 1);
+  }, []);
+  const markAutosaveFailure = useCallback((error: unknown) => {
+    setLastAutosaveError(getErrorMessage(error));
+    setAutosaveClock((previous) => previous + 1);
+  }, []);
+  const isAutosaveSaving =
+    createTask.isPending ||
+    updateTask.isPending ||
+    deleteTask.isPending ||
+    (e2eBridgeEnabled
+      ? isE2EConflictResolving
+      : resolveSyncConflict.isPending) ||
+    updateSyncSettings.isPending ||
+    updateSyncRuntimeSettings.isPending;
+  const autosaveIndicator = useMemo(
+    () =>
+      getAutosaveIndicator({
+        isSaving: isAutosaveSaving,
+        lastSavedAt: lastAutosavedAt,
+        lastError: lastAutosaveError,
+      }),
+    [autosaveClock, isAutosaveSaving, lastAutosaveError, lastAutosavedAt],
+  );
+  useEffect(() => {
+    if (!lastAutosavedAt || lastAutosaveError || isAutosaveSaving) return;
+    const timer = window.setInterval(() => {
+      setAutosaveClock((previous) => previous + 1);
+    }, 30_000);
+    return () => window.clearInterval(timer);
+  }, [isAutosaveSaving, lastAutosaveError, lastAutosavedAt]);
   const handleSaveSyncSettings = useCallback(
     async (input: UpdateSyncEndpointSettingsInput): Promise<void> => {
       if (e2eBridgeEnabled && e2eTransportModeEnabled) {
@@ -445,6 +538,7 @@ function AppContent() {
         if (!nextPushUrl || !nextPullUrl) {
           setE2ESyncStatus("LOCAL_ONLY");
           setE2ESyncLastError(null);
+          markAutosaveSuccess();
           return;
         }
 
@@ -452,19 +546,29 @@ function AppContent() {
         if (openConflictCount > 0) {
           setE2ESyncStatus("CONFLICT");
           setE2ESyncLastError(buildE2EConflictMessage(openConflictCount));
+          markAutosaveSuccess();
           return;
         }
 
         setE2ESyncStatus("SYNCED");
         setE2ESyncLastError(null);
+        markAutosaveSuccess();
         return;
       }
 
-      await updateSyncSettings.mutateAsync(input);
+      try {
+        await updateSyncSettings.mutateAsync(input);
+        markAutosaveSuccess();
+      } catch (error) {
+        markAutosaveFailure(error);
+        throw error;
+      }
     },
     [
       e2eBridgeEnabled,
       e2eTransportModeEnabled,
+      markAutosaveFailure,
+      markAutosaveSuccess,
       setE2ETransportPullUrl,
       setE2ETransportPushUrl,
       updateSyncSettings,
@@ -684,6 +788,7 @@ function AppContent() {
             });
             setE2ESyncStatus("CONFLICT");
             setE2ESyncLastError(buildE2EConflictMessage(nextConflictCount));
+            markAutosaveSuccess();
             return;
           }
 
@@ -712,22 +817,42 @@ function AppContent() {
               ? buildE2EConflictMessage(nextConflictCount)
               : "Conflicts resolved locally. Run Sync now to confirm.",
           );
+          markAutosaveSuccess();
           return;
         } finally {
           setIsE2EConflictResolving(false);
         }
       }
 
-      await resolveSyncConflict.mutateAsync(input);
-      await sync.syncNow();
+      try {
+        await resolveSyncConflict.mutateAsync(input);
+        await sync.syncNow();
+        markAutosaveSuccess();
+      } catch (error) {
+        markAutosaveFailure(error);
+        throw error;
+      }
     },
-    [e2eBridgeEnabled, e2eTransportModeEnabled, resolveSyncConflict, sync],
+    [
+      e2eBridgeEnabled,
+      e2eTransportModeEnabled,
+      markAutosaveFailure,
+      markAutosaveSuccess,
+      resolveSyncConflict,
+      sync,
+    ],
   );
   const handleSaveSyncRuntimeSettings = useCallback(
     async (input: UpdateSyncRuntimeSettingsInput): Promise<void> => {
-      await updateSyncRuntimeSettings.mutateAsync(input);
+      try {
+        await updateSyncRuntimeSettings.mutateAsync(input);
+        markAutosaveSuccess();
+      } catch (error) {
+        markAutosaveFailure(error);
+        throw error;
+      }
     },
-    [updateSyncRuntimeSettings],
+    [markAutosaveFailure, markAutosaveSuccess, updateSyncRuntimeSettings],
   );
 
   const closeQuickCapture = useCallback(() => {
@@ -737,6 +862,12 @@ function AppContent() {
 
   const closeCommandPalette = useCallback(() => {
     setIsCommandPaletteOpen(false);
+  }, []);
+  const closeShortcutHelp = useCallback(() => {
+    setIsShortcutHelpOpen(false);
+  }, []);
+  const openShortcutHelp = useCallback(() => {
+    setIsShortcutHelpOpen(true);
   }, []);
 
   const openQuickCapture = useCallback(() => {
@@ -897,20 +1028,90 @@ function AppContent() {
   }, [editingTask, isCreateOpen, isQuickCaptureOpen]);
 
   useEffect(() => {
+    const handlePowerShortcut = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || event.repeat) return;
+      if (isEditableEventTarget(event.target)) return;
+
+      const isQuestionMarkShortcut =
+        event.key === "?" || (event.key === "/" && event.shiftKey);
+      if (
+        isQuestionMarkShortcut &&
+        !event.metaKey &&
+        !event.ctrlKey &&
+        !event.altKey
+      ) {
+        event.preventDefault();
+        openShortcutHelp();
+        return;
+      }
+
+      if (!(event.metaKey || event.ctrlKey) || event.altKey) return;
+
+      const key = event.key.toLowerCase();
+      if (!event.shiftKey && key === ",") {
+        event.preventDefault();
+        setActiveView("settings");
+        return;
+      }
+
+      if (event.shiftKey && key === "c") {
+        event.preventDefault();
+        setActiveView("conflicts");
+        return;
+      }
+
+      if (event.shiftKey && key === "s") {
+        if (!visibleSyncHasTransport || visibleSyncIsRunning) return;
+        event.preventDefault();
+        void visibleSyncNow();
+      }
+    };
+
+    window.addEventListener("keydown", handlePowerShortcut);
+    return () => window.removeEventListener("keydown", handlePowerShortcut);
+  }, [
+    openShortcutHelp,
+    setActiveView,
+    visibleSyncHasTransport,
+    visibleSyncIsRunning,
+    visibleSyncNow,
+  ]);
+
+  useEffect(() => {
     if (!isCommandPaletteOpen) return;
     if (isCreateOpen || editingTask || isQuickCaptureOpen) {
       setIsCommandPaletteOpen(false);
     }
   }, [editingTask, isCommandPaletteOpen, isCreateOpen, isQuickCaptureOpen]);
 
+  useEffect(() => {
+    if (!isShortcutHelpOpen) return;
+    if (
+      isCreateOpen ||
+      editingTask ||
+      isQuickCaptureOpen ||
+      isCommandPaletteOpen
+    ) {
+      setIsShortcutHelpOpen(false);
+    }
+  }, [
+    editingTask,
+    isCommandPaletteOpen,
+    isCreateOpen,
+    isQuickCaptureOpen,
+    isShortcutHelpOpen,
+  ]);
+
   const handleCreate = async (input: CreateTaskInput | UpdateTaskInput) => {
     setActionError(null);
     try {
       await createTask.mutateAsync(input as CreateTaskInput);
+      markAutosaveSuccess();
       setIsCreateOpen(false);
       setCreateModalProjectId(null);
     } catch (error) {
       setActionError(getErrorMessage(error));
+      markAutosaveFailure(error);
     }
   };
 
@@ -918,9 +1119,11 @@ function AppContent() {
     setActionError(null);
     try {
       await updateTask.mutateAsync(input as UpdateTaskInput);
+      markAutosaveSuccess();
       setEditingTask(null);
     } catch (error) {
       setActionError(getErrorMessage(error));
+      markAutosaveFailure(error);
     }
   };
 
@@ -928,14 +1131,26 @@ function AppContent() {
     setActionError(null);
     void updateTask
       .mutateAsync({ id: taskId, status: newStatus })
-      .catch((error) => setActionError(getErrorMessage(error)));
+      .then(() => {
+        markAutosaveSuccess();
+      })
+      .catch((error) => {
+        setActionError(getErrorMessage(error));
+        markAutosaveFailure(error);
+      });
   };
 
   const handleDelete = (taskId: string) => {
     setActionError(null);
     void deleteTask
       .mutateAsync(taskId)
-      .catch((error) => setActionError(getErrorMessage(error)));
+      .then(() => {
+        markAutosaveSuccess();
+      })
+      .catch((error) => {
+        setActionError(getErrorMessage(error));
+        markAutosaveFailure(error);
+      });
   };
 
   const handleQuickCaptureCreate = useCallback(
@@ -951,12 +1166,14 @@ function AppContent() {
           remind_at: null,
           recurrence: "NONE",
         });
+        markAutosaveSuccess();
         setIsQuickCaptureOpen(false);
       } catch (error) {
         setQuickCaptureError(getErrorMessage(error));
+        markAutosaveFailure(error);
       }
     },
-    [createTask],
+    [createTask, markAutosaveFailure, markAutosaveSuccess],
   );
 
   const taskViewState =
@@ -1242,7 +1459,11 @@ function AppContent() {
       onCreateClick={() => openCreateModal(null)}
       syncStatus={visibleSyncStatus}
       syncStatusLabel={syncStatusLabel}
+      autosaveStatus={autosaveIndicator.status}
+      autosaveStatusLabel={autosaveIndicator.label}
+      autosaveStatusDetail={autosaveIndicator.detail}
       onOpenConflictCenter={() => setActiveView("conflicts")}
+      onOpenShortcutHelp={openShortcutHelp}
     >
       {taskViewState && !taskViewState.isLoading && !taskViewState.isError && (
         <TaskFiltersBar
@@ -1293,6 +1514,10 @@ function AppContent() {
         onEditTask={handleEditTask}
         onChangeTaskStatus={handleStatusChange}
         onChangeView={setActiveView}
+      />
+      <ShortcutHelpModal
+        isOpen={isShortcutHelpOpen}
+        onClose={closeShortcutHelp}
       />
 
       {isQuickCaptureOpen && (
