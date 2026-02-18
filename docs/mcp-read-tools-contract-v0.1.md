@@ -19,7 +19,8 @@ Status: Draft (read-only baseline)
 
 Rules:
 - `request_id` ต้อง unique ต่อ call
-- ทุก tool ต้องมี query bounds (`limit`, `cursor`, `timeout_ms`) ตามที่เกี่ยวข้อง
+- ทุก tool ต้องมี query bounds (`limit`, `cursor`) ตามที่เกี่ยวข้อง
+- เรียกได้ทั้ง path mode (`POST /tools/<tool>`) และ generic mode (`POST /tools` + `tool` ใน body)
 
 ## 2) Common Response Envelope
 
@@ -58,7 +59,6 @@ Args:
 - `status` (`TODO|DOING|DONE|ARCHIVED`, optional)
 - `project_id` (optional)
 - `search` (optional)
-- `timeout_ms` (default 1500, max 5000)
 
 Returns:
 - `items`: task[]
@@ -70,7 +70,6 @@ Args:
 - `limit` (default 50, max 200)
 - `cursor` (optional)
 - `status` (`ACTIVE|COMPLETED|ARCHIVED`, optional)
-- `timeout_ms` (default 1500, max 5000)
 
 Returns:
 - `items`: project[]
@@ -80,11 +79,11 @@ Returns:
 
 Args:
 - `week_start_iso` (optional; default current week)
-- `timezone` (optional)
-- `timeout_ms` (default 1500, max 5000)
+- `item_limit` (default 20, max 100)
 
 Returns:
-- `snapshot`: weekly review payload ตาม model ปัจจุบัน
+- `completed_count`, `created_count`, `pending_count`, `overdue_count`, `carry_over_count`, `due_this_week_open_count`
+- `completed_tasks`, `pending_tasks`, `overdue_tasks`
 
 ## `search_tasks`
 
@@ -92,7 +91,7 @@ Args:
 - `query` (required)
 - `limit` (default 30, max 200)
 - `cursor` (optional)
-- `timeout_ms` (default 1500, max 5000)
+- `status` (`TODO|DOING|DONE|ARCHIVED`, optional)
 
 Returns:
 - `items`: matched task[]
@@ -104,7 +103,6 @@ Args:
 - `task_id` (required)
 - `limit` (default 20, max 200)
 - `cursor` (optional)
-- `timeout_ms` (default 1500, max 5000)
 
 Returns:
 - `items`: changelog[]
@@ -123,6 +121,5 @@ Returns:
 ## 5) Guardrails
 
 - Read-only only (no mutation tools)
-- Enforce `limit` and `timeout_ms` ทุก call
-- Reject unknown fields ใน args
+- Enforce `limit` bounds ทุก call
 - Return deterministic ordering สำหรับ pagination safety

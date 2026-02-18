@@ -40,7 +40,6 @@ function createFixtureDb() {
   const dir = mkdtempSync(path.join(tmpdir(), "solostack-mcp-app-test-"));
   const dbPath = path.join(dir, "fixture.db");
   const db = new DatabaseSync(dbPath);
-  const now = new Date().toISOString();
 
   db.exec(`
     CREATE TABLE projects (
@@ -70,32 +69,69 @@ function createFixtureDb() {
       updated_at TEXT NOT NULL
     );
   `);
+  db.exec(`
+    CREATE TABLE task_changelogs (
+      id TEXT PRIMARY KEY,
+      task_id TEXT NOT NULL,
+      action TEXT NOT NULL,
+      field_name TEXT NOT NULL,
+      old_value TEXT,
+      new_value TEXT,
+      created_at TEXT NOT NULL
+    );
+  `);
 
   const projectId = `project-${randomUUID()}`;
+  const taskId = `task-${randomUUID()}`;
+
   db.prepare(
     `INSERT INTO projects (id, name, description, color, status, created_at, updated_at)
       VALUES (?, ?, ?, ?, ?, ?, ?)`,
-  ).run(projectId, "SoloStack", "Main project", "#7c69ff", "ACTIVE", now, now);
+  ).run(
+    projectId,
+    "SoloStack",
+    "Main project",
+    "#3B82F6",
+    "ACTIVE",
+    "2025-01-01T00:00:00.000Z",
+    "2025-01-09T12:00:00.000Z",
+  );
+
   db.prepare(
     `INSERT INTO tasks (
       id, title, description, notes_markdown, project_id, status, priority,
       is_important, due_at, remind_at, recurrence, created_at, updated_at
     ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   ).run(
-    `task-${randomUUID()}`,
+    taskId,
     "Prepare release notes",
     "for v0.1.2",
-    null,
+    "release checklist",
     projectId,
     "TODO",
     "NORMAL",
     1,
-    null,
+    "2025-01-10T18:00:00.000Z",
     null,
     "NONE",
-    now,
-    now,
+    "2025-01-07T10:00:00.000Z",
+    "2025-01-10T10:00:00.000Z",
   );
+
+  db.prepare(
+    `INSERT INTO task_changelogs (
+      id, task_id, action, field_name, old_value, new_value, created_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?)`,
+  ).run(
+    `log-${randomUUID()}`,
+    taskId,
+    "STATUS_CHANGED",
+    "status",
+    "DOING",
+    "DONE",
+    "2025-01-09T13:00:00.000Z",
+  );
+
   db.close();
   return dbPath;
 }
@@ -110,7 +146,7 @@ afterEach(async () => {
   }
 });
 
-describe("mcp-solostack app health routes", () => {
+describe("mcp-solostack app", () => {
   it("returns health payload for /health", async () => {
     const config = loadMcpConfigFromEnv({
       SOLOSTACK_MCP_PORT: "9000",
@@ -130,6 +166,8 @@ describe("mcp-solostack app health routes", () => {
     expect(payload.service).toBe("mcp-solostack");
     expect(payload.ready).toBe(true);
     expect(payload.mode).toBe("read_only");
+    expect(Array.isArray(payload.tools)).toBe(true);
+    expect((payload.tools as unknown[]).length).toBe(5);
   });
 
   it("returns 404 for unknown route", async () => {
@@ -174,5 +212,68 @@ describe("mcp-solostack app health routes", () => {
     expect(payload.ok).toBe(true);
     const data = payload.data as { items?: unknown[] } | undefined;
     expect(data?.items?.length).toBeGreaterThan(0);
+  });
+
+  it("supports generic /tools route with tool in request body", async () => {
+    const dbPath = createFixtureDb();
+    const config = loadMcpConfigFromEnv({
+      SOLOSTACK_MCP_DB_PATH: dbPath,
+    });
+    const { baseUrl, close } = await startServer(
+      createMcpRequestHandler({ config }),
+    );
+    closers.push(close);
+
+    const response = await fetch(`${baseUrl}/tools`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        request_id: "req-2",
+        tool: "search_tasks",
+        args: {
+          query: "release",
+          limit: 5,
+        },
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    const payload = (await response.json()) as Record<string, unknown>;
+    expect(payload.ok).toBe(true);
+    expect(payload.tool).toBe("search_tasks");
+  });
+
+  it("returns weekly review payload for /tools/get_weekly_review", async () => {
+    const dbPath = createFixtureDb();
+    const config = loadMcpConfigFromEnv({
+      SOLOSTACK_MCP_DB_PATH: dbPath,
+    });
+    const { baseUrl, close } = await startServer(
+      createMcpRequestHandler({ config }),
+    );
+    closers.push(close);
+
+    const response = await fetch(`${baseUrl}/tools/get_weekly_review`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        request_id: "req-3",
+        args: {
+          week_start_iso: "2025-01-06T00:00:00.000Z",
+          item_limit: 5,
+        },
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    const payload = (await response.json()) as Record<string, unknown>;
+    expect(payload.ok).toBe(true);
+    expect(payload.tool).toBe("get_weekly_review");
+    const data = payload.data as { completed_count?: number } | undefined;
+    expect(data?.completed_count).toBeGreaterThanOrEqual(0);
   });
 });

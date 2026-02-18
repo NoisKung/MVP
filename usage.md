@@ -250,6 +250,10 @@ health endpoints:
 read tool endpoints:
 - `POST /tools/get_tasks`
 - `POST /tools/get_projects`
+- `POST /tools/get_weekly_review`
+- `POST /tools/search_tasks`
+- `POST /tools/get_task_changelogs`
+- `POST /tools` (generic route, ส่ง `tool` ผ่าน body)
 
 config env vars:
 - `SOLOSTACK_MCP_HOST`
@@ -267,3 +271,5 @@ config env vars:
 - Telemetry spec baseline: `docs/telemetry-spec-v0.1.md`
 - MCP execution backlog: `docs/p3-6-execution-backlog-v0.1.md`
 - MCP read-tool contract: `docs/mcp-read-tools-contract-v0.1.md`
+- Agent usage playbook: `docs/agent-usage-playbook-v0.1.md`
+- MCP AWS hosted profile: `docs/mcp-aws-hosted-profile-v0.1.md`

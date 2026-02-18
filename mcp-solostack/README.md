@@ -20,6 +20,25 @@ Health endpoints:
 Read tool endpoints (POST JSON):
 - `/tools/get_tasks`
 - `/tools/get_projects`
+- `/tools/get_weekly_review`
+- `/tools/search_tasks`
+- `/tools/get_task_changelogs`
+
+Generic tool route:
+- `/tools` (ส่งชื่อ tool ผ่าน request body)
+
+Example:
+
+```json
+{
+  "request_id": "req-1",
+  "tool": "search_tasks",
+  "args": {
+    "query": "release",
+    "limit": 20
+  }
+}
+```
 
 Tool endpoints require `SOLOSTACK_MCP_DB_PATH` to point to a valid SQLite file.
 

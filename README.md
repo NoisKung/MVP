@@ -83,7 +83,7 @@ CLI options:
 ### MCP Server Skeleton
 
 ```bash
-# Run local MCP server skeleton (health endpoints only)
+# Run local MCP server
 npm run mcp:dev
 ```
 
@@ -91,6 +91,14 @@ Default health endpoints:
 - `GET http://127.0.0.1:8799/`
 - `GET http://127.0.0.1:8799/health`
 - `GET http://127.0.0.1:8799/healthz`
+
+Read tool endpoints:
+- `POST http://127.0.0.1:8799/tools/get_tasks`
+- `POST http://127.0.0.1:8799/tools/get_projects`
+- `POST http://127.0.0.1:8799/tools/get_weekly_review`
+- `POST http://127.0.0.1:8799/tools/search_tasks`
+- `POST http://127.0.0.1:8799/tools/get_task_changelogs`
+- `POST http://127.0.0.1:8799/tools` (generic route)
 
 See `mcp-solostack/README.md` for env configuration.
 

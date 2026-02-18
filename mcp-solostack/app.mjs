@@ -1,4 +1,8 @@
-import { ToolExecutionError, executeReadTool } from "./tools.mjs";
+import {
+  MCP_READ_TOOLS,
+  ToolExecutionError,
+  executeReadTool,
+} from "./tools.mjs";
 
 function sendJson(response, statusCode, payload, extraHeaders = {}) {
   response.writeHead(statusCode, {
@@ -69,19 +73,29 @@ export function createMcpRequestHandler(input) {
       return;
     }
 
-    if (method === "POST" && pathname.startsWith("/tools/")) {
+    const isToolRoute =
+      method === "POST" &&
+      (pathname === "/tools" ||
+        pathname === "/tools/" ||
+        pathname.startsWith("/tools/"));
+
+    if (isToolRoute) {
+      let requestId = null;
+      let toolName = null;
       try {
         const parsedBody = await parseJsonBody(request);
-        const requestId =
+        requestId =
           (typeof parsedBody?.request_id === "string" &&
             parsedBody.request_id.trim()) ||
           null;
-        const toolFromPath = pathname.replace("/tools/", "").trim();
-        const tool = toolFromPath || parsedBody?.tool;
+        const toolFromPath = pathname.startsWith("/tools/")
+          ? pathname.slice("/tools/".length).trim()
+          : null;
+        toolName = toolFromPath || parsedBody?.tool || null;
         const args =
           parsedBody && typeof parsedBody === "object" ? parsedBody.args : null;
         const result = executeReadTool({
-          tool,
+          tool: toolName,
           args,
           db_path: config.db_path,
         });
@@ -108,8 +122,8 @@ export function createMcpRequestHandler(input) {
             response,
             error.status,
             {
-              request_id: null,
-              tool: null,
+              request_id: requestId,
+              tool: toolName,
               ok: false,
               data: null,
               meta: null,
@@ -129,8 +143,8 @@ export function createMcpRequestHandler(input) {
           response,
           400,
           {
-            request_id: null,
-            tool: null,
+            request_id: requestId,
+            tool: toolName,
             ok: false,
             data: null,
             meta: null,
@@ -178,7 +192,7 @@ export function createMcpRequestHandler(input) {
           timestamp_iso: new Date().toISOString(),
           ready: true,
           mode: config.read_only ? "read_only" : "read_write",
-          tools: ["get_tasks", "get_projects"],
+          tools: MCP_READ_TOOLS,
         },
         corsHeaders,
       );
@@ -191,7 +205,13 @@ export function createMcpRequestHandler(input) {
       {
         status: "error",
         message: "Not found.",
-        available_routes: ["/", "/health", "/healthz"],
+        available_routes: [
+          "/",
+          "/health",
+          "/healthz",
+          "/tools",
+          "/tools/<tool>",
+        ],
       },
       corsHeaders,
     );

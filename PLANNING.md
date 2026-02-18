@@ -206,6 +206,18 @@ Google Drive (`appDataFolder`) vs OneDrive (`approot`) ในมุม SoloStack
 - ไม่มี direct DB corruption case จาก MCP read path
 - Query ที่หนักมี guardrails (limit/timeout/rate-limit) และไม่ทำให้ UI lag
 
+### Current Progress (2026-02-18)
+
+- เสร็จแล้ว:
+  - local MCP skeleton + health/config loader (`mcp-solostack/server.mjs`, `mcp-solostack/config.mjs`)
+  - read tools ครบ wave-1 และ wave-2 (`get_tasks`, `get_projects`, `get_weekly_review`, `search_tasks`, `get_task_changelogs`)
+  - รองรับทั้ง route mode (`/tools/<tool>`) และ generic mode (`/tools`)
+  - integration tests สำหรับ app/tool routes พร้อม fixture DB (`mcp-solostack/app.test.ts`, `mcp-solostack/tools.test.ts`)
+  - เอกสาร agent playbook และ AWS hosted profile baseline
+- คงเหลือ:
+  - เพิ่ม audit log baseline ต่อ tool call
+  - performance/failure hardening report ก่อน internal rollout
+
 ## 5) Workstream Breakdown (P3-1 Priority)
 
 1. Data Layer & Migration
@@ -431,8 +443,8 @@ Google Drive (`appDataFolder`) vs OneDrive (`approot`) ในมุม SoloStack
 2. [done] สร้าง `mcp-solostack` skeleton + health check + config loader (`mcp-solostack/server.mjs`)
 3. [done] ต่อ `get_tasks` และ `get_projects` ให้ใช้งานได้ end-to-end (`POST /tools/get_tasks`, `POST /tools/get_projects`)
 4. [done] เพิ่ม integration tests กับ fixture DB ขนาดเล็กและกลาง (`mcp-solostack/app.test.ts`, `mcp-solostack/tools.test.ts`)
-5. เขียน agent usage playbook สำหรับเคส weekly summary รุ่นแรก
-6. นิยาม hosted MCP deployment profile บน AWS (ถ้าเลือก cloud mode)
+5. [done] เขียน agent usage playbook สำหรับเคส weekly summary รุ่นแรก (`docs/agent-usage-playbook-v0.1.md`)
+6. [done] นิยาม hosted MCP deployment profile บน AWS (ถ้าเลือก cloud mode) (`docs/mcp-aws-hosted-profile-v0.1.md`)
 
 ## 13) Next Sprint Plan (2026-02-19 ถึง 2026-03-04)
 
@@ -510,3 +522,5 @@ Definition of Done:
 - Telemetry spec: `docs/telemetry-spec-v0.1.md`
 - P3-6 execution backlog: `docs/p3-6-execution-backlog-v0.1.md`
 - MCP read-tool contract: `docs/mcp-read-tools-contract-v0.1.md`
+- Agent usage playbook: `docs/agent-usage-playbook-v0.1.md`
+- MCP AWS hosted profile: `docs/mcp-aws-hosted-profile-v0.1.md`
