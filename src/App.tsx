@@ -40,6 +40,7 @@ import type {
   Task,
   SyncConflictRecord,
   ResolveSyncConflictInput,
+  SyncPushChange,
   SyncStatus,
   UpdateSyncEndpointSettingsInput,
   UpdateSyncRuntimeSettingsInput,
@@ -51,6 +52,12 @@ import {
 import { applyTaskFilters } from "./lib/task-filters";
 import { detectSyncRuntimeProfilePreset } from "./lib/runtime-platform";
 import { installE2EBridge } from "./lib/e2e-bridge";
+import {
+  buildSyncPullRequest,
+  buildSyncPushRequest,
+  parseSyncPullResponse,
+  parseSyncPushResponse,
+} from "./lib/sync-contract";
 import "./index.css";
 
 const queryClient = new QueryClient({
@@ -133,6 +140,57 @@ function isE2EBridgeEnabled(): boolean {
   return searchParams.get("e2e") === "1";
 }
 
+function isE2ETransportModeEnabled(): boolean {
+  if (typeof window === "undefined") return false;
+  const searchParams = new URLSearchParams(window.location.search);
+  return searchParams.get("e2e_transport") === "1";
+}
+
+const E2E_SYNC_DEVICE_ID = "e2e-local-device";
+
+function normalizeE2EEndpointUrl(
+  value: string | null | undefined,
+): string | null {
+  if (typeof value !== "string") return null;
+  const normalized = value.trim();
+  return normalized || null;
+}
+
+async function postE2ETransportJson(input: {
+  url: string;
+  payload: unknown;
+}): Promise<unknown> {
+  const response = await fetch(input.url, {
+    method: "POST",
+    headers: {
+      "content-type": "application/json",
+    },
+    body: JSON.stringify(input.payload),
+  });
+  const responseText = await response.text();
+
+  let responsePayload: unknown = {};
+  if (responseText.trim()) {
+    try {
+      responsePayload = JSON.parse(responseText) as unknown;
+    } catch {
+      throw new Error("E2E transport returned invalid JSON.");
+    }
+  }
+
+  if (!response.ok) {
+    if (typeof responsePayload === "object" && responsePayload !== null) {
+      const message = (responsePayload as { message?: unknown }).message;
+      if (typeof message === "string" && message.trim()) {
+        throw new Error(message);
+      }
+    }
+    throw new Error(`E2E transport request failed (${response.status}).`);
+  }
+
+  return responsePayload;
+}
+
 function createE2EConflictFixture(): SyncConflictRecord {
   const nowIso = new Date().toISOString();
   const uniqueSuffix = `${Date.now()}-${Math.floor(Math.random() * 1_000_000)}`;
@@ -167,6 +225,61 @@ function createE2EConflictFixture(): SyncConflictRecord {
   };
 }
 
+function createE2EConflictFixtureFromIncomingChange(
+  change: SyncPushChange,
+): SyncConflictRecord {
+  const nowIso = new Date().toISOString();
+  const conflictId = `e2e-conflict-${Date.now()}-${Math.floor(
+    Math.random() * 1_000_000,
+  )}`;
+  return {
+    id: conflictId,
+    incoming_idempotency_key: change.idempotency_key,
+    entity_type: change.entity_type,
+    entity_id: change.entity_id,
+    operation: change.operation,
+    conflict_type: "field_conflict",
+    reason_code: "MISSING_TASK_TITLE",
+    message: "Task title is required in incoming payload.",
+    local_payload_json: null,
+    remote_payload_json: JSON.stringify(change.payload ?? {}),
+    base_payload_json: null,
+    status: "open",
+    resolution_strategy: null,
+    resolution_payload_json: null,
+    resolved_by_device: null,
+    detected_at: nowIso,
+    resolved_at: null,
+    created_at: nowIso,
+    updated_at: nowIso,
+  };
+}
+
+function createE2EConflictResolutionOutboxChange(input: {
+  conflictId: string;
+  strategy: ResolveSyncConflictInput["strategy"];
+  resolutionPayload: ResolveSyncConflictInput["resolution_payload"];
+}): SyncPushChange {
+  const nowIso = new Date().toISOString();
+  const entityId = `local.sync.conflict_resolution.${input.conflictId}`;
+  return {
+    entity_type: "SETTING",
+    entity_id: entityId,
+    operation: "UPSERT",
+    updated_at: nowIso,
+    updated_by_device: E2E_SYNC_DEVICE_ID,
+    sync_version: 1,
+    payload: {
+      conflict_id: input.conflictId,
+      strategy: input.strategy,
+      resolution_payload: input.resolutionPayload ?? null,
+      resolved_by_device: E2E_SYNC_DEVICE_ID,
+      resolved_at: nowIso,
+    },
+    idempotency_key: `e2e-conflict-resolution:${input.conflictId}:${input.strategy}`,
+  };
+}
+
 function buildE2EConflictMessage(conflictCount: number): string {
   const normalizedCount = Math.max(0, Math.floor(conflictCount));
   if (normalizedCount <= 0) return "Sync requires attention.";
@@ -175,6 +288,10 @@ function buildE2EConflictMessage(conflictCount: number): string {
 
 function AppContent() {
   const e2eBridgeEnabled = useMemo(() => isE2EBridgeEnabled(), []);
+  const e2eTransportModeEnabled = useMemo(
+    () => isE2ETransportModeEnabled(),
+    [],
+  );
   const syncRuntimePreset = useMemo(() => detectSyncRuntimeProfilePreset(), []);
   const {
     activeView,
@@ -251,9 +368,20 @@ function AppContent() {
     SyncConflictRecord[]
   >([]);
   const e2eOpenConflictsRef = useRef<SyncConflictRecord[]>([]);
+  const [e2eTransportPushUrl, setE2ETransportPushUrl] = useState<string | null>(
+    null,
+  );
+  const [e2eTransportPullUrl, setE2ETransportPullUrl] = useState<string | null>(
+    null,
+  );
+  const e2eTransportCursorRef = useRef<string | null>(null);
+  const e2eTransportOutboxRef = useRef<SyncPushChange[]>([]);
+  const e2eResolvedIncomingKeysRef = useRef<Set<string>>(new Set());
   const [isE2EConflictResolving, setIsE2EConflictResolving] = useState(false);
   const e2eSyncFailureBudgetRef = useRef(0);
-  const [e2eSyncStatus, setE2ESyncStatus] = useState<SyncStatus>("SYNCED");
+  const [e2eSyncStatus, setE2ESyncStatus] = useState<SyncStatus>(() =>
+    e2eBridgeEnabled && e2eTransportModeEnabled ? "LOCAL_ONLY" : "SYNCED",
+  );
   const [e2eSyncLastSyncedAt, setE2ESyncLastSyncedAt] = useState<string | null>(
     null,
   );
@@ -281,8 +409,21 @@ function AppContent() {
   const visibleSyncIsRunning = e2eBridgeEnabled
     ? isE2ESyncRunning
     : sync.isSyncing;
-  const visibleSyncHasTransport = e2eBridgeEnabled ? true : sync.hasTransport;
+  const e2eHasTransport = e2eTransportModeEnabled
+    ? Boolean(e2eTransportPushUrl && e2eTransportPullUrl)
+    : true;
+  const visibleSyncHasTransport = e2eBridgeEnabled
+    ? e2eHasTransport
+    : sync.hasTransport;
   const visibleSyncIsOnline = e2eBridgeEnabled ? true : sync.isOnline;
+  const visibleSyncPushUrl =
+    e2eBridgeEnabled && e2eTransportModeEnabled
+      ? e2eTransportPushUrl
+      : (syncSettings?.push_url ?? null);
+  const visibleSyncPullUrl =
+    e2eBridgeEnabled && e2eTransportModeEnabled
+      ? e2eTransportPullUrl
+      : (syncSettings?.pull_url ?? null);
   const syncStatusLabel = useMemo(
     () =>
       getSyncStatusLabel({
@@ -294,9 +435,40 @@ function AppContent() {
   );
   const handleSaveSyncSettings = useCallback(
     async (input: UpdateSyncEndpointSettingsInput): Promise<void> => {
+      if (e2eBridgeEnabled && e2eTransportModeEnabled) {
+        const nextPushUrl = normalizeE2EEndpointUrl(input.push_url);
+        const nextPullUrl = normalizeE2EEndpointUrl(input.pull_url);
+        setE2ETransportPushUrl(nextPushUrl);
+        setE2ETransportPullUrl(nextPullUrl);
+        e2eTransportCursorRef.current = null;
+
+        if (!nextPushUrl || !nextPullUrl) {
+          setE2ESyncStatus("LOCAL_ONLY");
+          setE2ESyncLastError(null);
+          return;
+        }
+
+        const openConflictCount = e2eOpenConflictsRef.current.length;
+        if (openConflictCount > 0) {
+          setE2ESyncStatus("CONFLICT");
+          setE2ESyncLastError(buildE2EConflictMessage(openConflictCount));
+          return;
+        }
+
+        setE2ESyncStatus("SYNCED");
+        setE2ESyncLastError(null);
+        return;
+      }
+
       await updateSyncSettings.mutateAsync(input);
     },
-    [updateSyncSettings],
+    [
+      e2eBridgeEnabled,
+      e2eTransportModeEnabled,
+      setE2ETransportPullUrl,
+      setE2ETransportPushUrl,
+      updateSyncSettings,
+    ],
   );
   const handleE2ESyncNow = useCallback(async (): Promise<void> => {
     setIsE2ESyncRunning(true);
@@ -307,28 +479,147 @@ function AppContent() {
       window.setTimeout(() => resolve(), 80);
     });
 
-    if (e2eSyncFailureBudgetRef.current > 0) {
-      e2eSyncFailureBudgetRef.current -= 1;
-      setE2ESyncStatus("CONFLICT");
-      setE2ESyncLastError("E2E simulated transport failure.");
+    if (!e2eTransportModeEnabled) {
+      if (e2eSyncFailureBudgetRef.current > 0) {
+        e2eSyncFailureBudgetRef.current -= 1;
+        setE2ESyncStatus("CONFLICT");
+        setE2ESyncLastError("E2E simulated transport failure.");
+        setIsE2ESyncRunning(false);
+        return;
+      }
+
+      const openConflictCount = e2eOpenConflictsRef.current.length;
+      if (openConflictCount > 0) {
+        setE2ESyncStatus("CONFLICT");
+        setE2ESyncLastError(buildE2EConflictMessage(openConflictCount));
+        setIsE2ESyncRunning(false);
+        return;
+      }
+
+      const nowIso = new Date().toISOString();
+      setE2ESyncStatus("SYNCED");
+      setE2ESyncLastSyncedAt(nowIso);
+      setE2ESyncLastError(null);
       setIsE2ESyncRunning(false);
       return;
     }
 
-    const openConflictCount = e2eOpenConflictsRef.current.length;
-    if (openConflictCount > 0) {
-      setE2ESyncStatus("CONFLICT");
-      setE2ESyncLastError(buildE2EConflictMessage(openConflictCount));
+    const pushUrl = e2eTransportPushUrl;
+    const pullUrl = e2eTransportPullUrl;
+    if (!pushUrl || !pullUrl) {
+      setE2ESyncStatus("LOCAL_ONLY");
+      setE2ESyncLastError(null);
       setIsE2ESyncRunning(false);
       return;
     }
 
-    const nowIso = new Date().toISOString();
-    setE2ESyncStatus("SYNCED");
-    setE2ESyncLastSyncedAt(nowIso);
-    setE2ESyncLastError(null);
-    setIsE2ESyncRunning(false);
-  }, []);
+    try {
+      const pushRequest = buildSyncPushRequest({
+        deviceId: E2E_SYNC_DEVICE_ID,
+        baseCursor: e2eTransportCursorRef.current,
+        changes: e2eTransportOutboxRef.current,
+      });
+      const rawPushResponse = await postE2ETransportJson({
+        url: pushUrl,
+        payload: pushRequest,
+      });
+      const pushResponse = parseSyncPushResponse(rawPushResponse);
+      e2eTransportCursorRef.current = pushResponse.server_cursor;
+
+      if (pushResponse.accepted.length > 0) {
+        const acceptedKeys = new Set(pushResponse.accepted);
+        e2eTransportOutboxRef.current = e2eTransportOutboxRef.current.filter(
+          (change) => !acceptedKeys.has(change.idempotency_key),
+        );
+      }
+
+      const pullRequest = buildSyncPullRequest({
+        deviceId: E2E_SYNC_DEVICE_ID,
+        cursor: e2eTransportCursorRef.current,
+      });
+      const rawPullResponse = await postE2ETransportJson({
+        url: pullUrl,
+        payload: pullRequest,
+      });
+      const pullResponse = parseSyncPullResponse(rawPullResponse);
+      e2eTransportCursorRef.current = pullResponse.server_cursor;
+
+      let nextConflicts = [...e2eOpenConflictsRef.current];
+      for (const change of pullResponse.changes) {
+        if (
+          change.updated_by_device.trim().toLowerCase() ===
+          E2E_SYNC_DEVICE_ID.toLowerCase()
+        ) {
+          continue;
+        }
+        if (e2eResolvedIncomingKeysRef.current.has(change.idempotency_key)) {
+          continue;
+        }
+
+        const isTaskUpsert =
+          change.entity_type === "TASK" && change.operation === "UPSERT";
+        const taskPayload =
+          change.payload && typeof change.payload === "object"
+            ? (change.payload as Record<string, unknown>)
+            : null;
+        const taskTitle =
+          typeof taskPayload?.title === "string"
+            ? taskPayload.title.trim()
+            : "";
+
+        if (isTaskUpsert && !taskTitle) {
+          const existingConflictIndex = nextConflicts.findIndex(
+            (conflict) =>
+              conflict.incoming_idempotency_key === change.idempotency_key,
+          );
+          if (existingConflictIndex >= 0) {
+            const nowIso = new Date().toISOString();
+            const existing = nextConflicts[existingConflictIndex];
+            nextConflicts[existingConflictIndex] = {
+              ...existing,
+              status: "open",
+              resolution_strategy: null,
+              resolved_by_device: null,
+              resolved_at: null,
+              remote_payload_json: JSON.stringify(change.payload ?? {}),
+              updated_at: nowIso,
+            };
+          } else {
+            nextConflicts = [
+              createE2EConflictFixtureFromIncomingChange(change),
+              ...nextConflicts,
+            ];
+          }
+          continue;
+        }
+
+        nextConflicts = nextConflicts.filter(
+          (conflict) =>
+            conflict.incoming_idempotency_key !== change.idempotency_key,
+        );
+      }
+
+      e2eOpenConflictsRef.current = nextConflicts;
+      setE2eOpenConflicts(nextConflicts);
+
+      const openConflictCount = nextConflicts.length;
+      if (openConflictCount > 0) {
+        setE2ESyncStatus("CONFLICT");
+        setE2ESyncLastError(buildE2EConflictMessage(openConflictCount));
+        return;
+      }
+
+      const nowIso = new Date().toISOString();
+      setE2ESyncStatus("SYNCED");
+      setE2ESyncLastSyncedAt(nowIso);
+      setE2ESyncLastError(null);
+    } catch (error) {
+      setE2ESyncStatus("CONFLICT");
+      setE2ESyncLastError(getErrorMessage(error));
+    } finally {
+      setIsE2ESyncRunning(false);
+    }
+  }, [e2eTransportModeEnabled, e2eTransportPullUrl, e2eTransportPushUrl]);
 
   const handleE2ESetSyncFailureBudget = useCallback((count: number) => {
     const normalizedCount = Number.isFinite(count)
@@ -353,6 +644,24 @@ function AppContent() {
         setIsE2EConflictResolving(true);
         try {
           const nowIso = new Date().toISOString();
+          const targetConflict = e2eOpenConflictsRef.current.find(
+            (conflict) => conflict.id === input.conflict_id,
+          );
+
+          if (e2eTransportModeEnabled) {
+            const resolutionChange = createE2EConflictResolutionOutboxChange({
+              conflictId: input.conflict_id,
+              strategy: input.strategy,
+              resolutionPayload: input.resolution_payload ?? null,
+            });
+            e2eTransportOutboxRef.current = [
+              resolutionChange,
+              ...e2eTransportOutboxRef.current.filter(
+                (change) => change.entity_id !== resolutionChange.entity_id,
+              ),
+            ];
+          }
+
           if (input.strategy === "retry") {
             const nextConflictCount = Math.max(
               1,
@@ -376,6 +685,15 @@ function AppContent() {
             setE2ESyncStatus("CONFLICT");
             setE2ESyncLastError(buildE2EConflictMessage(nextConflictCount));
             return;
+          }
+
+          if (
+            e2eTransportModeEnabled &&
+            targetConflict?.incoming_idempotency_key
+          ) {
+            e2eResolvedIncomingKeysRef.current.add(
+              targetConflict.incoming_idempotency_key,
+            );
           }
 
           const nextConflictCount = e2eOpenConflictsRef.current.filter(
@@ -403,7 +721,7 @@ function AppContent() {
       await resolveSyncConflict.mutateAsync(input);
       await sync.syncNow();
     },
-    [e2eBridgeEnabled, resolveSyncConflict, sync],
+    [e2eBridgeEnabled, e2eTransportModeEnabled, resolveSyncConflict, sync],
   );
   const handleSaveSyncRuntimeSettings = useCallback(
     async (input: UpdateSyncRuntimeSettingsInput): Promise<void> => {
@@ -452,12 +770,17 @@ function AppContent() {
   const handleE2EResetSyncState = useCallback(() => {
     e2eOpenConflictsRef.current = [];
     setE2eOpenConflicts([]);
+    setE2ETransportPushUrl(null);
+    setE2ETransportPullUrl(null);
+    e2eTransportCursorRef.current = null;
+    e2eTransportOutboxRef.current = [];
+    e2eResolvedIncomingKeysRef.current = new Set();
     e2eSyncFailureBudgetRef.current = 0;
-    setE2ESyncStatus("SYNCED");
+    setE2ESyncStatus(e2eTransportModeEnabled ? "LOCAL_ONLY" : "SYNCED");
     setE2ESyncLastSyncedAt(null);
     setE2ESyncLastError(null);
     setIsE2ESyncRunning(false);
-  }, []);
+  }, [e2eTransportModeEnabled]);
 
   const handleE2ESeedTaskFieldConflict = useCallback(() => {
     const fixture = createE2EConflictFixture();
@@ -884,9 +1207,13 @@ function AppContent() {
       syncHasTransport={visibleSyncHasTransport}
       onSyncNow={visibleSyncNow}
       onRetryLastFailedSync={visibleRetryLastFailedSync}
-      syncPushUrl={syncSettings?.push_url ?? null}
-      syncPullUrl={syncSettings?.pull_url ?? null}
-      syncConfigSaving={updateSyncSettings.isPending}
+      syncPushUrl={visibleSyncPushUrl}
+      syncPullUrl={visibleSyncPullUrl}
+      syncConfigSaving={
+        e2eBridgeEnabled && e2eTransportModeEnabled
+          ? false
+          : updateSyncSettings.isPending
+      }
       onSaveSyncSettings={handleSaveSyncSettings}
       syncAutoIntervalSeconds={
         syncRuntimeSettings?.auto_sync_interval_seconds ?? 60
