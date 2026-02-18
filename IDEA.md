@@ -432,7 +432,7 @@
   2. `npm run test:e2e`
   3. test matrix conflict/recovery scenarios ผ่านครบ
 
-### Progress Snapshot (2026-02-17)
+### Progress Snapshot (2026-02-18)
 
 - Done:
   - schema + index สำหรับ conflict/event tables
@@ -444,10 +444,9 @@
   - retry confirmation UX ใน conflict actions
   - Playwright coverage สำหรับ restore preflight/force flow
   - Playwright coverage สำหรับ conflict retry confirmation + re-resolve matrix
-  - quality gates ปัจจุบันของ repo ผ่าน (`test`, `test:e2e`, `build`)
-- Remaining:
-  - test matrix conflict/recovery แบบ end-to-end ที่ผูก sync success path จริง
+  - Playwright coverage สำหรับ resolve strategy matrix (`Keep Local`, `Keep Remote`, `Manual Merge`) และ sync success path
   - integration coverage สำหรับ idempotent retry/resolve replay
+  - quality gates ปัจจุบันของ repo ผ่าน (`test`, `test:e2e`, `build`)
 
 ### Initial Milestones (Suggested)
 
@@ -456,11 +455,11 @@
 - เพิ่ม conflict persist path ใน incoming apply flow
 - ได้ baseline conflict types + resolution/event model
 
-2. Sprint B (1 สัปดาห์) - In Progress
+2. Sprint B (1 สัปดาห์) - Completed
 - สร้าง `Conflict Center` + detail panel + resolve actions ใน Settings แล้ว
 - เพิ่ม timeline + export report แล้ว
 - เพิ่ม dedicated view + deep-link จาก status แล้ว
-- เหลือ E2E resolve coverage
+- ปิด E2E resolve coverage แล้ว (resolve matrix + sync success path)
 
 3. Sprint C (3-4 วัน) - In Progress
 - เพิ่ม restore preflight/force flow และ recovery guardrails (done)
@@ -477,29 +476,55 @@
 - Migration จาก local-only ไป sync ทำให้ข้อมูลผิดรูป
 - ทำ preflight validation + backup ก่อนเปิด sync ครั้งแรก
 
-## Open Decisions
+## Open Decisions (Proposed for Sign-off)
 
-- Backend stack สำหรับ sync service (hosting/runtime/database)
-- Auth/session model สำหรับหลายอุปกรณ์
-- Sync interval ที่เหมาะสมระหว่าง responsiveness กับ battery
-- ขอบเขต telemetry ที่ต้องมีตั้งแต่ desktop beta
-- Conflict resolution policy:
-  - default strategy ต่อ entity (`keep-local`, `keep-remote`, merge)
-  - ผู้ใช้เปลี่ยน policy ได้ระดับ global หรือเฉพาะรายการ
-- Recovery boundaries:
-  - restore ได้ถึงระดับไหน (ทั้ง DB vs เฉพาะ sync tables)
-  - ต้องบังคับ outbox empty ก่อน restore หรืออนุญาต force restore
-- Provider connector strategy ระยะกลาง:
-  - Google-first หรือ Microsoft-first
-  - เกณฑ์ตัดสิน (adoption, latency, complexity, support load)
-- AWS architecture decision:
-  - API Gateway + Lambda + DynamoDB vs API service + RDS
-  - Cognito scope สำหรับ device/session auth
-  - baseline observability (CloudWatch metrics/log/alarms)
-- MCP deployment mode:
-  - local-only sidecar vs hosted service
-  - read-only first นานแค่ไหนก่อนเปิด write tools
-  - auth model ระหว่าง agent runtime กับ MCP server
+อิงจาก:
+- `docs/aws-spike-v0.1.md`
+- `docs/telemetry-spec-v0.1.md`
+- `docs/mcp-aws-hosted-profile-v0.1.md`
+- `docs/mcp-read-tools-contract-v0.1.md`
+- `docs/p3-6-execution-backlog-v0.1.md`
+
+1. Backend stack สำหรับ sync service (hosting/runtime/database)
+- **Proposal:** ใช้ `Lambda-first` เป็น baseline ในช่วง beta (`API Gateway HTTP API + Lambda + DynamoDB on-demand + Cognito + CloudWatch`)
+- **Revisit trigger:** ถ้าโหลดต่อเนื่องสูงและ `p95 latency` เกินเป้าหมายต่อเนื่อง ให้พิจารณา `service-first (ECS + RDS)`
+
+2. Auth/session model สำหรับหลายอุปกรณ์
+- **Proposal:** ใช้ Cognito User Pool + `Authorization Code + PKCE` สำหรับ public clients (desktop/mobile) และแยก device session ด้วย `device_id`
+- **Policy:** access token อายุสั้น, refresh token ตาม environment policy, รองรับ revoke per device
+
+3. Sync interval ที่เหมาะสมระหว่าง responsiveness กับ battery
+- **Proposal:** ใช้ค่าเริ่มต้นตาม implementation ปัจจุบัน
+- `desktop`: foreground 60s / background 300s
+- `mobile beta`: foreground 120s / background 600s
+- **Guardrail:** exponential backoff สูงสุด 300s และมี `Sync now` manual override
+
+4. ขอบเขต telemetry สำหรับ desktop beta
+- **Proposal:** freeze ตาม `telemetry-spec v0.1` (Sync Health + Conflict Lifecycle + Connector Reliability + MCP Runtime)
+- **Privacy baseline:** ไม่ส่ง task payload ดิบขึ้น telemetry, ส่งเฉพาะ count/timing/status/hash
+
+5. Conflict resolution policy
+- **Proposal:** ใช้แนวทาง conservative
+- default เป็น user-assisted resolution ใน `Conflict Center`
+- `notes_collision` ให้ `manual_merge` เป็นตัวเลือกแนะนำ
+- เก็บ global policy เฉพาะ non-destructive defaults และให้ per-item override ได้เสมอ
+
+6. Recovery boundaries
+- **Proposal:** รองรับ restore ทั้ง DB ผ่าน backup payload (ไม่ใช่เฉพาะ sync tables)
+- **Safety:** preflight ทุกครั้ง, ถ้ามี pending outbox/open conflicts ให้ require explicit force
+
+7. Provider connector strategy ระยะกลาง
+- **Proposal:** `Google-first` (ใช้ `appDataFolder`) ใน pilot, ตามด้วย `OneDrive approot`
+- **เหตุผล:** scope แคบกว่าและ surface area ง่ายกว่าในรอบเริ่มต้น แต่คง provider-neutral contract เดิม
+
+8. AWS architecture decision (รายละเอียดเชิงแพลตฟอร์ม)
+- **Proposal:** ใช้ `API Gateway + Lambda + DynamoDB on-demand` เป็น default profile
+- **Observability:** ใช้ CloudWatch metric/log/alarm ตาม baseline ใน telemetry spec
+
+9. MCP deployment mode + write tools phase
+- **Proposal:** `local sidecar` เป็น default ใน production ช่วงแรก
+- hosted MCP เปิดใน phase ถัดไปสำหรับ tenant ที่ต้องการ centralized control
+- read-only tools เป็นค่าเริ่มต้น และเปิด write tools หลังผ่าน guardrails (allowlist + audit + latency/error gate) อย่างน้อย 1 release cycle
 
 ## Immediate Next Actions
 
