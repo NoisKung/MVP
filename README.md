@@ -1,5 +1,7 @@
 # ⚡ SoloStack
 
+![image](screenshot/SoloStachHome.png)
+
 A minimal, beautiful solo task management app built with **Tauri + React + TypeScript**.
 
 Designed for individual developers who want a distraction-free, lightning-fast kanban board running natively on their desktop.
