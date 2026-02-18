@@ -186,16 +186,44 @@ function formatPayloadJson(payloadJson: string | null): string {
 }
 
 function buildRestoreConfirmationMessage(preflight: BackupRestorePreflight) {
-  const hasPendingOutbox = preflight.pending_outbox_changes > 0;
-  if (!hasPendingOutbox) {
+  const forceReasonSegments: string[] = [];
+  if (preflight.pending_outbox_changes > 0) {
+    forceReasonSegments.push(
+      `${preflight.pending_outbox_changes} pending outbox change(s)`,
+    );
+  }
+  if (preflight.open_conflicts > 0) {
+    forceReasonSegments.push(`${preflight.open_conflicts} open conflict(s)`);
+  }
+
+  if (forceReasonSegments.length === 0) {
     return "Restore will replace all local data and reset sync state (outbox/conflicts). Continue?";
   }
 
   return [
-    `There are ${preflight.pending_outbox_changes} pending outbox change(s) not synced yet.`,
+    `Restore requires force because ${forceReasonSegments.join(" and ")} currently exist.`,
     "Force restore will discard pending outbox changes and clear open conflicts.",
     "Continue with force restore?",
   ].join("\n");
+}
+
+function buildRestoreForceReasonLabel(
+  preflight: BackupRestorePreflight,
+): string {
+  const reasonSegments: string[] = [];
+  if (preflight.pending_outbox_changes > 0) {
+    reasonSegments.push("pending outbox changes");
+  }
+  if (preflight.open_conflicts > 0) {
+    reasonSegments.push("open conflicts");
+  }
+  if (reasonSegments.length === 0) {
+    return "active restore guardrails";
+  }
+  if (reasonSegments.length === 1) {
+    return reasonSegments[0];
+  }
+  return `${reasonSegments[0]} and ${reasonSegments[1]}`;
 }
 
 function buildRestoreResultLabel(result: {
@@ -1340,8 +1368,8 @@ export function ReminderSettings({
             </p>
             {backupPreflight.requires_force_restore && (
               <p className="settings-feedback settings-feedback-warn">
-                Restore currently requires force because pending outbox changes
-                exist.
+                Restore currently requires force because{" "}
+                {buildRestoreForceReasonLabel(backupPreflight)} are present.
               </p>
             )}
           </div>

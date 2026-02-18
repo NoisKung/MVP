@@ -206,7 +206,7 @@ console.log(summary);
 
 Recovery (Backup & Restore):
 - ก่อน restore ระบบจะทำ preflight (`pending outbox`, `open conflicts`, `latest backup`)
-- ถ้า outbox ยังไม่ว่าง ระบบจะบังคับเป็น force restore flow พร้อม confirmation ชัดเจน
+- ถ้ามี `pending outbox` หรือ `open conflicts` ระบบจะบังคับเป็น force restore flow พร้อม confirmation ชัดเจน
 - มีปุ่ม `Restore Latest Backup` (snapshot ล่าสุดที่ export ภายในเครื่อง)
 - หลัง restore ระบบจะ clear stale sync state (`sync_outbox`, `sync_conflicts`, checkpoint) และ trigger sync รอบใหม่อัตโนมัติเมื่อมี transport
 

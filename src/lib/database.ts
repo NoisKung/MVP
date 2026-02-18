@@ -3930,7 +3930,7 @@ async function getBackupRestorePreflightFromDb(
     open_conflicts: openConflicts,
     has_latest_backup: hasLatestBackup,
     latest_backup_exported_at: latestBackupSettings.latestExportedAt,
-    requires_force_restore: pendingOutboxChanges > 0,
+    requires_force_restore: pendingOutboxChanges > 0 || openConflicts > 0,
   };
 }
 
@@ -4192,8 +4192,21 @@ export async function importBackupPayload(
   const backupPayload = normalizeBackupPayload(rawPayload);
   const preflight = await getBackupRestorePreflightFromDb(db);
   if (preflight.requires_force_restore && !options?.force) {
+    const restoreBlockReasons: string[] = [];
+    if (preflight.pending_outbox_changes > 0) {
+      restoreBlockReasons.push(
+        `${preflight.pending_outbox_changes} pending outbox change(s)`,
+      );
+    }
+    if (preflight.open_conflicts > 0) {
+      restoreBlockReasons.push(`${preflight.open_conflicts} open conflict(s)`);
+    }
+    const reasonLabel =
+      restoreBlockReasons.length > 0
+        ? restoreBlockReasons.join(" and ")
+        : "active restore guardrails";
     throw new Error(
-      `Restore is blocked: ${preflight.pending_outbox_changes} pending outbox change(s). Sync pending changes first, or confirm force restore.`,
+      `Restore is blocked: ${reasonLabel}. Resolve or sync pending state first, or confirm force restore.`,
     );
   }
 

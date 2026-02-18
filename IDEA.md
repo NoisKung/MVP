@@ -442,10 +442,12 @@
   - diff-based `Manual Merge` editor (replace prompt flow)
   - restore guardrails: preflight (`outbox/conflicts/latest backup`) + force restore + `Restore Latest Backup`
   - retry confirmation UX ใน conflict actions
+  - restore guardrail hardening: force restore ต้องใช้เมื่อมี pending outbox หรือ open conflicts
   - Playwright coverage สำหรับ restore preflight/force flow
   - Playwright coverage สำหรับ conflict retry confirmation + re-resolve matrix
   - Playwright coverage สำหรับ resolve strategy matrix (`Keep Local`, `Keep Remote`, `Manual Merge`) และ sync success path
   - integration coverage สำหรับ idempotent retry/resolve replay
+  - unit coverage สำหรับ restore guardrails (force-required preflight + blocked restore + force restore success)
   - quality gates ปัจจุบันของ repo ผ่าน (`test`, `test:e2e`, `build`)
 
 ### Initial Milestones (Suggested)
@@ -461,9 +463,9 @@
 - เพิ่ม dedicated view + deep-link จาก status แล้ว
 - ปิด E2E resolve coverage แล้ว (resolve matrix + sync success path)
 
-3. Sprint C (3-4 วัน) - In Progress
+3. Sprint C (3-4 วัน) - Completed
 - เพิ่ม restore preflight/force flow และ recovery guardrails (done)
-- hardening conflict/recovery flows ก่อน internal beta
+- hardening conflict/recovery flows ก่อน internal beta (done)
 
 ## Risks and Mitigations
 
