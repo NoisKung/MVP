@@ -56,12 +56,20 @@ export interface PullBatchSummary {
   applied: number;
   skipped: number;
   conflicts: number;
+  conflict_envelopes: PullConflictEnvelope[];
   skipped_self: number;
   failed: number;
   failures: PullApplyFailure[];
   server_cursor: string;
   server_time: string;
   has_more: boolean;
+}
+
+export interface PullConflictEnvelope {
+  idempotency_key: string;
+  entity_type: SyncPushChange["entity_type"];
+  entity_id: string;
+  reason: string | null;
 }
 
 interface PreparedPushCandidate {
@@ -280,6 +288,7 @@ export async function applyPullBatch(input: {
   let applied = 0;
   let skipped = 0;
   let conflicts = 0;
+  const conflictEnvelopes: PullConflictEnvelope[] = [];
   let skippedSelf = 0;
   let failed = 0;
   const failures: PullApplyFailure[] = [];
@@ -306,6 +315,12 @@ export async function applyPullBatch(input: {
         applied += 1;
       } else if (result.status === "conflict") {
         conflicts += 1;
+        conflictEnvelopes.push({
+          idempotency_key: idempotencyKey,
+          entity_type: change.entity_type,
+          entity_id: change.entity_id,
+          reason: result.reason ?? null,
+        });
       } else {
         skipped += 1;
       }
@@ -323,6 +338,7 @@ export async function applyPullBatch(input: {
     applied,
     skipped,
     conflicts,
+    conflict_envelopes: conflictEnvelopes,
     skipped_self: skippedSelf,
     failed,
     failures,

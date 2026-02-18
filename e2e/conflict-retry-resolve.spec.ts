@@ -89,5 +89,36 @@ test.describe("Conflict retry and re-resolve flow", () => {
     expect(openConflictIdsAfterResolve).not.toContain(
       seededConflict.conflict_id,
     );
+
+    await sidebar
+      .getByRole("button", { name: "Settings", exact: true })
+      .click();
+    await expect(page.getByRole("heading", { name: "Settings" })).toBeVisible();
+
+    const syncCard = page
+      .locator("section.settings-card")
+      .filter({
+        has: page.getByRole("heading", { name: "Sync" }),
+      })
+      .first();
+    await expect(syncCard).toBeVisible();
+    await expect(syncCard.locator(".sync-pill")).toContainText(
+      "Needs attention",
+    );
+    await expect(
+      syncCard.getByText(
+        "Conflicts resolved locally. Run Sync now to confirm.",
+      ),
+    ).toBeVisible();
+
+    await syncCard
+      .getByRole("button", { name: /Sync now|Syncing\.\.\./u })
+      .click();
+    await expect(syncCard.locator(".sync-pill")).toContainText("Synced");
+    await expect(
+      syncCard.getByText(
+        "Conflicts resolved locally. Run Sync now to confirm.",
+      ),
+    ).toHaveCount(0);
   });
 });

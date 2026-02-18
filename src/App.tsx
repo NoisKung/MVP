@@ -167,6 +167,12 @@ function createE2EConflictFixture(): SyncConflictRecord {
   };
 }
 
+function buildE2EConflictMessage(conflictCount: number): string {
+  const normalizedCount = Math.max(0, Math.floor(conflictCount));
+  if (normalizedCount <= 0) return "Sync requires attention.";
+  return `${normalizedCount} conflict(s) detected.`;
+}
+
 function AppContent() {
   const e2eBridgeEnabled = useMemo(() => isE2EBridgeEnabled(), []);
   const syncRuntimePreset = useMemo(() => detectSyncRuntimeProfilePreset(), []);
@@ -244,6 +250,7 @@ function AppContent() {
   const [e2eOpenConflicts, setE2eOpenConflicts] = useState<
     SyncConflictRecord[]
   >([]);
+  const e2eOpenConflictsRef = useRef<SyncConflictRecord[]>([]);
   const [isE2EConflictResolving, setIsE2EConflictResolving] = useState(false);
   const e2eSyncFailureBudgetRef = useRef(0);
   const [e2eSyncStatus, setE2ESyncStatus] = useState<SyncStatus>("SYNCED");
@@ -308,6 +315,14 @@ function AppContent() {
       return;
     }
 
+    const openConflictCount = e2eOpenConflictsRef.current.length;
+    if (openConflictCount > 0) {
+      setE2ESyncStatus("CONFLICT");
+      setE2ESyncLastError(buildE2EConflictMessage(openConflictCount));
+      setIsE2ESyncRunning(false);
+      return;
+    }
+
     const nowIso = new Date().toISOString();
     setE2ESyncStatus("SYNCED");
     setE2ESyncLastSyncedAt(nowIso);
@@ -322,6 +337,15 @@ function AppContent() {
     e2eSyncFailureBudgetRef.current = normalizedCount;
   }, []);
   const visibleSyncNow = e2eBridgeEnabled ? handleE2ESyncNow : sync.syncNow;
+  const handleE2ERetryLastFailedSync =
+    useCallback(async (): Promise<boolean> => {
+      if (!e2eSyncLastError || isE2ESyncRunning) return false;
+      await handleE2ESyncNow();
+      return true;
+    }, [e2eSyncLastError, handleE2ESyncNow, isE2ESyncRunning]);
+  const visibleRetryLastFailedSync = e2eBridgeEnabled
+    ? handleE2ERetryLastFailedSync
+    : sync.retryLastFailedSync;
 
   const handleResolveSyncConflict = useCallback(
     async (input: ResolveSyncConflictInput): Promise<void> => {
@@ -330,24 +354,45 @@ function AppContent() {
         try {
           const nowIso = new Date().toISOString();
           if (input.strategy === "retry") {
-            setE2eOpenConflicts((previous) =>
-              previous.map((conflict) =>
+            const nextConflictCount = Math.max(
+              1,
+              e2eOpenConflictsRef.current.length,
+            );
+            setE2eOpenConflicts((previous) => {
+              const next = previous.map((conflict) =>
                 conflict.id === input.conflict_id
                   ? {
                       ...conflict,
-                      resolution_strategy: "retry",
+                      resolution_strategy: "retry" as const,
                       resolved_by_device: "e2e-local-device",
                       resolved_at: null,
                       updated_at: nowIso,
                     }
                   : conflict,
-              ),
-            );
+              );
+              e2eOpenConflictsRef.current = next;
+              return next;
+            });
+            setE2ESyncStatus("CONFLICT");
+            setE2ESyncLastError(buildE2EConflictMessage(nextConflictCount));
             return;
           }
 
-          setE2eOpenConflicts((previous) =>
-            previous.filter((conflict) => conflict.id !== input.conflict_id),
+          const nextConflictCount = e2eOpenConflictsRef.current.filter(
+            (conflict) => conflict.id !== input.conflict_id,
+          ).length;
+          setE2eOpenConflicts((previous) => {
+            const next = previous.filter(
+              (conflict) => conflict.id !== input.conflict_id,
+            );
+            e2eOpenConflictsRef.current = next;
+            return next;
+          });
+          setE2ESyncStatus("CONFLICT");
+          setE2ESyncLastError(
+            nextConflictCount > 0
+              ? buildE2EConflictMessage(nextConflictCount)
+              : "Conflicts resolved locally. Run Sync now to confirm.",
           );
           return;
         } finally {
@@ -405,6 +450,7 @@ function AppContent() {
   }, []);
 
   const handleE2EResetSyncState = useCallback(() => {
+    e2eOpenConflictsRef.current = [];
     setE2eOpenConflicts([]);
     e2eSyncFailureBudgetRef.current = 0;
     setE2ESyncStatus("SYNCED");
@@ -415,7 +461,14 @@ function AppContent() {
 
   const handleE2ESeedTaskFieldConflict = useCallback(() => {
     const fixture = createE2EConflictFixture();
-    setE2eOpenConflicts((previous) => [fixture, ...previous]);
+    const nextConflictCount = e2eOpenConflictsRef.current.length + 1;
+    setE2eOpenConflicts((previous) => {
+      const next = [fixture, ...previous];
+      e2eOpenConflictsRef.current = next;
+      return next;
+    });
+    setE2ESyncStatus("CONFLICT");
+    setE2ESyncLastError(buildE2EConflictMessage(nextConflictCount));
     return {
       conflict_id: fixture.id,
       entity_id: fixture.entity_id,
@@ -423,8 +476,8 @@ function AppContent() {
   }, []);
 
   const handleE2EListOpenConflictIds = useCallback(
-    () => e2eOpenConflicts.map((conflict) => conflict.id),
-    [e2eOpenConflicts],
+    () => e2eOpenConflictsRef.current.map((conflict) => conflict.id),
+    [],
   );
 
   useEffect(() => {
@@ -830,6 +883,7 @@ function AppContent() {
       syncIsRunning={visibleSyncIsRunning}
       syncHasTransport={visibleSyncHasTransport}
       onSyncNow={visibleSyncNow}
+      onRetryLastFailedSync={visibleRetryLastFailedSync}
       syncPushUrl={syncSettings?.push_url ?? null}
       syncPullUrl={syncSettings?.pull_url ?? null}
       syncConfigSaving={updateSyncSettings.isPending}

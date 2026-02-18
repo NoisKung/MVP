@@ -58,6 +58,7 @@ interface ReminderSettingsProps {
   syncIsRunning: boolean;
   syncHasTransport: boolean;
   onSyncNow: () => Promise<void>;
+  onRetryLastFailedSync: () => Promise<boolean>;
   syncPushUrl: string | null;
   syncPullUrl: string | null;
   syncConfigSaving: boolean;
@@ -203,6 +204,7 @@ export function ReminderSettings({
   syncIsRunning,
   syncHasTransport,
   onSyncNow,
+  onRetryLastFailedSync,
   syncPushUrl,
   syncPullUrl,
   syncConfigSaving,
@@ -1211,6 +1213,16 @@ export function ReminderSettings({
             <RefreshCw size={14} className={syncIsRunning ? "sync-spin" : ""} />
             {syncIsRunning ? "Syncing..." : "Sync now"}
           </button>
+          {syncLastError && (
+            <button
+              type="button"
+              className="settings-btn"
+              onClick={() => void onRetryLastFailedSync()}
+              disabled={syncIsRunning || !syncHasTransport}
+            >
+              Retry Last Failed Sync
+            </button>
+          )}
           <button
             type="button"
             className="settings-btn"

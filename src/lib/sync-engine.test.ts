@@ -225,7 +225,12 @@ describe("sync-engine", () => {
       localDeviceId: "device-local",
       applyChange: async (change) => {
         applyOrder.push(change.idempotency_key);
-        if (change.idempotency_key === "k-3") return "conflict";
+        if (change.idempotency_key === "k-3") {
+          return {
+            status: "conflict",
+            reason: "notes_collision",
+          };
+        }
         return "applied";
       },
     });
@@ -233,6 +238,14 @@ describe("sync-engine", () => {
     expect(applyOrder).toEqual(["k-2", "k-3"]);
     expect(summary.applied).toBe(1);
     expect(summary.conflicts).toBe(1);
+    expect(summary.conflict_envelopes).toEqual([
+      {
+        idempotency_key: "k-3",
+        entity_type: "TASK",
+        entity_id: "t-3",
+        reason: "notes_collision",
+      },
+    ]);
     expect(summary.skipped_self).toBe(1);
     expect(summary.failed).toBe(0);
   });

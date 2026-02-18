@@ -48,6 +48,12 @@ export interface RunSyncCycleSummary {
     applied: number;
     skipped: number;
     conflicts: number;
+    conflict_envelopes: Array<{
+      idempotency_key: string;
+      entity_type: SyncOutboxRecord["entity_type"];
+      entity_id: string;
+      reason: string | null;
+    }>;
     skipped_self: number;
     failed: number;
     has_more: boolean;
@@ -127,6 +133,7 @@ export async function runSyncCycle(input: {
     applied: 0,
     skipped: 0,
     conflicts: 0,
+    conflict_envelopes: [],
     skipped_self: 0,
     failed: 0,
     has_more: false,
@@ -154,6 +161,10 @@ export async function runSyncCycle(input: {
       applied: aggregatedPullSummary.applied + pullSummary.applied,
       skipped: aggregatedPullSummary.skipped + pullSummary.skipped,
       conflicts: aggregatedPullSummary.conflicts + pullSummary.conflicts,
+      conflict_envelopes: [
+        ...aggregatedPullSummary.conflict_envelopes,
+        ...pullSummary.conflict_envelopes,
+      ],
       skipped_self:
         aggregatedPullSummary.skipped_self + pullSummary.skipped_self,
       failed: aggregatedPullSummary.failed + pullSummary.failed,

@@ -9,7 +9,9 @@ async function waitForE2EBridge(page: Page): Promise<void> {
 }
 
 async function clickSyncNow(syncCard: Locator): Promise<void> {
-  await syncCard.getByRole("button", { name: /Sync now|Syncing\.\.\./u }).click();
+  await syncCard
+    .getByRole("button", { name: /Sync now|Syncing\.\.\./u })
+    .click();
 }
 
 test.describe("Sync retry after failed transport", () => {
@@ -45,10 +47,17 @@ test.describe("Sync retry after failed transport", () => {
 
     await clickSyncNow(syncCard);
     await expect(syncFailureMessage).toBeVisible();
-    await expect(syncCard.locator(".sync-pill")).toContainText("Needs attention");
+    await expect(syncCard.locator(".sync-pill")).toContainText(
+      "Needs attention",
+    );
+    const retryButton = syncCard.getByRole("button", {
+      name: "Retry Last Failed Sync",
+    });
+    await expect(retryButton).toBeVisible();
 
-    await clickSyncNow(syncCard);
+    await retryButton.click();
     await expect(syncFailureMessage).toHaveCount(0);
     await expect(syncCard.locator(".sync-pill")).toContainText("Synced");
+    await expect(retryButton).toHaveCount(0);
   });
 });

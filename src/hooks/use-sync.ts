@@ -24,6 +24,7 @@ interface UseSyncState {
   lastError: string | null;
   diagnostics: SyncSessionDiagnostics;
   syncNow: () => Promise<void>;
+  retryLastFailedSync: () => Promise<boolean>;
 }
 
 interface UseSyncOptions {
@@ -400,6 +401,13 @@ export function useSync(options: UseSyncOptions): UseSyncState {
     await runSync(true);
   }, [runSync]);
 
+  const retryLastFailedSync = useCallback(async (): Promise<boolean> => {
+    if (!lastError) return false;
+    if (inFlightRef.current) return false;
+    await runSync(true);
+    return true;
+  }, [lastError, runSync]);
+
   useEffect(() => {
     const handleOnline = () => setIsOnline(true);
     const handleOffline = () => setIsOnline(false);
@@ -475,5 +483,6 @@ export function useSync(options: UseSyncOptions): UseSyncState {
     lastError,
     diagnostics,
     syncNow,
+    retryLastFailedSync,
   };
 }

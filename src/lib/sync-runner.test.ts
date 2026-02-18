@@ -447,6 +447,14 @@ describe("sync-runner", () => {
       failed: 0,
       has_more: false,
     });
+    expect(summary.pull?.conflict_envelopes).toEqual([
+      {
+        idempotency_key: "remote-replay-1",
+        entity_type: "TASK",
+        entity_id: "task-replay",
+        reason: null,
+      },
+    ]);
   });
 
   it("stops pulling when maxPullPages is reached", async () => {
