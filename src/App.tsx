@@ -13,6 +13,7 @@ import { WeeklyReviewView } from "./components/WeeklyReviewView";
 import { ReminderSettings } from "./components/ReminderSettings";
 import { TaskFiltersBar } from "./components/TaskFiltersBar";
 import { CommandPalette } from "./components/CommandPalette";
+import { GlobalUndoBar } from "./components/GlobalUndoBar";
 import { ShortcutHelpModal } from "./components/ShortcutHelpModal";
 import {
   useTasks,
@@ -22,6 +23,7 @@ import {
   useCreateTask,
   useUpdateTask,
   useDeleteTask,
+  useDeleteProject,
   useResolveSyncConflict,
   useSyncConflicts,
   useSyncRuntimeSettings,
@@ -148,6 +150,29 @@ interface AutosaveIndicator {
   status: AutosaveStatus;
   label: string;
   detail: string | null;
+}
+
+interface UndoQueueItem {
+  id: string;
+  label: string;
+  timeoutMs: number;
+  dedupeKey: string | null;
+  execute: () => Promise<void>;
+  onExecuteError?: (error: unknown) => void;
+}
+
+interface EnqueueUndoActionInput {
+  label: string;
+  timeoutMs?: number;
+  dedupeKey?: string;
+  execute: () => Promise<void>;
+  onExecuteError?: (error: unknown) => void;
+}
+
+const DEFAULT_UNDO_WINDOW_MS = 5_000;
+
+function createUndoQueueItemId(): string {
+  return `undo-${Date.now()}-${Math.floor(Math.random() * 100000)}`;
 }
 
 function getAutosaveIndicator(input: {
@@ -379,6 +404,7 @@ function AppContent() {
   const createTask = useCreateTask();
   const updateTask = useUpdateTask();
   const deleteTask = useDeleteTask();
+  const deleteProject = useDeleteProject();
   const { data: syncConflicts = [], isLoading: isSyncConflictsLoading } =
     useSyncConflicts("open", 50);
   const resolveSyncConflict = useResolveSyncConflict();
@@ -415,6 +441,7 @@ function AppContent() {
     null,
   );
   const [autosaveClock, setAutosaveClock] = useState(0);
+  const [undoQueue, setUndoQueue] = useState<UndoQueueItem[]>([]);
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
   const [isShortcutHelpOpen, setIsShortcutHelpOpen] = useState(false);
   const [createModalProjectId, setCreateModalProjectId] = useState<
@@ -446,6 +473,8 @@ function AppContent() {
   );
   const [e2eSyncLastError, setE2ESyncLastError] = useState<string | null>(null);
   const [isE2ESyncRunning, setIsE2ESyncRunning] = useState(false);
+  const undoQueueRef = useRef<UndoQueueItem[]>([]);
+  const undoTimerRef = useRef<number | null>(null);
   const sync = useSync({
     pushUrl: syncSettings?.push_url ?? null,
     pullUrl: syncSettings?.pull_url ?? null,
@@ -501,10 +530,54 @@ function AppContent() {
     setLastAutosaveError(getErrorMessage(error));
     setAutosaveClock((previous) => previous + 1);
   }, []);
+  const enqueueUndoAction = useCallback((input: EnqueueUndoActionInput) => {
+    const dedupeKey = input.dedupeKey ?? null;
+    if (
+      dedupeKey &&
+      undoQueueRef.current.some((action) => action.dedupeKey === dedupeKey)
+    ) {
+      return false;
+    }
+
+    const action: UndoQueueItem = {
+      id: createUndoQueueItemId(),
+      label: input.label,
+      timeoutMs: input.timeoutMs ?? DEFAULT_UNDO_WINDOW_MS,
+      dedupeKey,
+      execute: input.execute,
+      onExecuteError: input.onExecuteError,
+    };
+    const nextQueue = [...undoQueueRef.current, action];
+    undoQueueRef.current = nextQueue;
+    setUndoQueue(nextQueue);
+    return true;
+  }, []);
+  const undoNextQueuedAction = useCallback(() => {
+    const currentQueue = undoQueueRef.current;
+    if (currentQueue.length === 0) return;
+    const nextQueue = currentQueue.slice(1);
+    undoQueueRef.current = nextQueue;
+    setUndoQueue(nextQueue);
+  }, []);
+  const hasPendingConflictUndo = useMemo(
+    () =>
+      undoQueue.some((action) =>
+        action.dedupeKey?.startsWith("conflict-resolution:"),
+      ),
+    [undoQueue],
+  );
+  const hasPendingProjectDeleteUndo = useMemo(
+    () =>
+      undoQueue.some((action) =>
+        action.dedupeKey?.startsWith("project-delete:"),
+      ),
+    [undoQueue],
+  );
   const isAutosaveSaving =
     createTask.isPending ||
     updateTask.isPending ||
     deleteTask.isPending ||
+    deleteProject.isPending ||
     (e2eBridgeEnabled
       ? isE2EConflictResolving
       : resolveSyncConflict.isPending) ||
@@ -526,6 +599,40 @@ function AppContent() {
     }, 30_000);
     return () => window.clearInterval(timer);
   }, [isAutosaveSaving, lastAutosaveError, lastAutosavedAt]);
+  useEffect(() => {
+    if (undoTimerRef.current !== null) {
+      window.clearTimeout(undoTimerRef.current);
+      undoTimerRef.current = null;
+    }
+
+    const nextAction = undoQueue[0];
+    if (!nextAction) return;
+
+    undoTimerRef.current = window.setTimeout(() => {
+      void (async () => {
+        try {
+          await nextAction.execute();
+        } catch (error) {
+          nextAction.onExecuteError?.(error);
+        } finally {
+          const currentQueue = undoQueueRef.current;
+          const nextQueue =
+            currentQueue[0]?.id === nextAction.id
+              ? currentQueue.slice(1)
+              : currentQueue.filter((action) => action.id !== nextAction.id);
+          undoQueueRef.current = nextQueue;
+          setUndoQueue(nextQueue);
+        }
+      })();
+    }, nextAction.timeoutMs);
+
+    return () => {
+      if (undoTimerRef.current !== null) {
+        window.clearTimeout(undoTimerRef.current);
+        undoTimerRef.current = null;
+      }
+    };
+  }, [undoQueue]);
   const handleSaveSyncSettings = useCallback(
     async (input: UpdateSyncEndpointSettingsInput): Promise<void> => {
       if (e2eBridgeEnabled && e2eTransportModeEnabled) {
@@ -824,21 +931,34 @@ function AppContent() {
         }
       }
 
-      try {
-        await resolveSyncConflict.mutateAsync(input);
-        await sync.syncNow();
-        markAutosaveSuccess();
-      } catch (error) {
-        markAutosaveFailure(error);
-        throw error;
+      const queued = enqueueUndoAction({
+        label:
+          input.strategy === "retry"
+            ? `Retry conflict ${input.conflict_id.slice(0, 8)}`
+            : `Resolve conflict ${input.conflict_id.slice(0, 8)}`,
+        dedupeKey: `conflict-resolution:${input.conflict_id}`,
+        execute: async () => {
+          await resolveSyncConflict.mutateAsync(input);
+          await sync.syncNow();
+          markAutosaveSuccess();
+        },
+        onExecuteError: (error) => {
+          setActionError(getErrorMessage(error));
+          markAutosaveFailure(error);
+        },
+      });
+      if (!queued) {
+        throw new Error("This conflict already has a pending undo action.");
       }
     },
     [
+      enqueueUndoAction,
       e2eBridgeEnabled,
       e2eTransportModeEnabled,
       markAutosaveFailure,
       markAutosaveSuccess,
       resolveSyncConflict,
+      setActionError,
       sync,
     ],
   );
@@ -1142,16 +1262,55 @@ function AppContent() {
 
   const handleDelete = (taskId: string) => {
     setActionError(null);
-    void deleteTask
-      .mutateAsync(taskId)
-      .then(() => {
+    const matchedTask = allTasks.find((task) => task.id === taskId);
+    const label = matchedTask?.title?.trim()
+      ? `Delete task "${matchedTask.title.trim()}"`
+      : "Delete task";
+
+    const queued = enqueueUndoAction({
+      label,
+      dedupeKey: `task-delete:${taskId}`,
+      execute: async () => {
+        await deleteTask.mutateAsync(taskId);
         markAutosaveSuccess();
-      })
-      .catch((error) => {
+      },
+      onExecuteError: (error) => {
         setActionError(getErrorMessage(error));
         markAutosaveFailure(error);
-      });
+      },
+    });
+    if (!queued) {
+      setActionError("This task already has a pending undo action.");
+    }
   };
+  const handleDeleteProject = useCallback(
+    (input: { projectId: string; projectName: string }) => {
+      setActionError(null);
+
+      const queued = enqueueUndoAction({
+        label: `Delete project "${input.projectName}"`,
+        dedupeKey: `project-delete:${input.projectId}`,
+        execute: async () => {
+          await deleteProject.mutateAsync(input.projectId);
+          markAutosaveSuccess();
+        },
+        onExecuteError: (error) => {
+          setActionError(getErrorMessage(error));
+          markAutosaveFailure(error);
+        },
+      });
+      if (!queued) {
+        setActionError("This project already has a pending undo action.");
+      }
+    },
+    [
+      deleteProject,
+      enqueueUndoAction,
+      markAutosaveFailure,
+      markAutosaveSuccess,
+      setActionError,
+    ],
+  );
 
   const handleQuickCaptureCreate = useCallback(
     async (title: string): Promise<void> => {
@@ -1225,7 +1384,8 @@ function AppContent() {
     : isSyncConflictsLoading;
   const visibleSyncConflictResolving = e2eBridgeEnabled
     ? isE2EConflictResolving
-    : resolveSyncConflict.isPending;
+    : resolveSyncConflict.isPending || hasPendingConflictUndo;
+  const activeUndoAction = undoQueue[0] ?? null;
 
   const content = taskViewState?.isLoading ? (
     <div
@@ -1321,6 +1481,10 @@ function AppContent() {
       onStatusChange={handleStatusChange}
       onDelete={handleDelete}
       onCreateClick={openCreateModal}
+      onDeleteProject={handleDeleteProject}
+      isDeleteProjectPending={
+        deleteProject.isPending || hasPendingProjectDeleteUndo
+      }
     />
   ) : activeView === "calendar" ? (
     isLoadingAllTasks ? (
@@ -1503,6 +1667,14 @@ function AppContent() {
         </div>
       )}
       {content}
+      {activeUndoAction && (
+        <GlobalUndoBar
+          actionLabel={activeUndoAction.label}
+          pendingCount={undoQueue.length}
+          undoWindowMs={activeUndoAction.timeoutMs}
+          onUndo={undoNextQueuedAction}
+        />
+      )}
 
       <CommandPalette
         isOpen={isCommandPaletteOpen}

@@ -561,8 +561,12 @@
     - `Autosaving...`
     - `Saved ...`
     - `Autosave failed`
+  - เพิ่ม `Global Undo Bar` พร้อม undo window 5 วินาทีสำหรับ:
+    - `Delete task`
+    - `Delete project`
+    - `Resolve conflict` / `Retry conflict`
 - Next:
-  - Global undo bar สำหรับ action เสี่ยง
+  - ขยาย Global Undo Bar ให้รองรับ restore/import flow
 
 ## Open Decisions (Proposed for Sign-off)
 

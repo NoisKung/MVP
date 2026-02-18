@@ -30,6 +30,15 @@ Power shortcuts:
 - `Cmd/Ctrl + Shift + C`: เปิด `Conflict Center`
 - `Cmd/Ctrl + Shift + S`: `Sync now` (เมื่อมี transport)
 
+## 1C) Global Undo Bar (QoL)
+
+- เมื่อกด action เสี่ยงบางรายการ ระบบจะยังไม่ commit ทันที แต่เข้า queue เพื่อให้ `Undo` ได้ภายใน 5 วินาที
+- ตอนนี้ครอบคลุม:
+  - `Delete task`
+  - `Delete project`
+  - `Resolve conflict` / `Retry conflict`
+- ถ้ามีหลาย action ต่อเนื่อง แถบจะแสดง action แรกและจำนวนคิวที่เหลือ (`+N more`)
+
 ## 2) MVP CLI Quick Usage
 
 ```bash

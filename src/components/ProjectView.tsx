@@ -2,7 +2,6 @@ import { useEffect, useMemo, useState } from "react";
 import type { Task, TaskStatus } from "@/lib/types";
 import {
   useCreateProject,
-  useDeleteProject,
   useProjects,
   useTaskSubtaskStats,
   useUpdateProject,
@@ -29,6 +28,8 @@ interface ProjectViewProps {
   onStatusChange: (taskId: string, newStatus: TaskStatus) => void;
   onDelete: (taskId: string) => void;
   onCreateClick: (projectId: string | null) => void;
+  onDeleteProject: (input: { projectId: string; projectName: string }) => void;
+  isDeleteProjectPending: boolean;
 }
 
 interface ProjectMetrics {
@@ -124,6 +125,8 @@ export function ProjectView({
   onStatusChange,
   onDelete,
   onCreateClick,
+  onDeleteProject,
+  isDeleteProjectPending,
 }: ProjectViewProps) {
   const {
     data: projects = [],
@@ -133,7 +136,6 @@ export function ProjectView({
   } = useProjects();
   const createProject = useCreateProject();
   const updateProject = useUpdateProject();
-  const deleteProject = useDeleteProject();
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(
     null,
   );
@@ -380,7 +382,10 @@ export function ProjectView({
 
     setActionError(null);
     try {
-      await deleteProject.mutateAsync(selectedProject.id);
+      onDeleteProject({
+        projectId: selectedProject.id,
+        projectName: selectedProject.name,
+      });
     } catch (error) {
       setActionError(getErrorMessage(error));
     }
@@ -929,7 +934,7 @@ export function ProjectView({
                     type="button"
                     className="project-ghost-btn danger"
                     onClick={() => void handleDeleteSelectedProject()}
-                    disabled={deleteProject.isPending || isEditingDetails}
+                    disabled={isDeleteProjectPending || isEditingDetails}
                   >
                     <Trash2 size={12} />
                     Delete
