@@ -172,10 +172,12 @@ describe("mcp-solostack app", () => {
       | {
           rate_limit_enabled?: boolean;
           timeout_guard_enabled?: boolean;
+          timeout_strategy?: string;
         }
       | undefined;
     expect(guardrails?.rate_limit_enabled).toBe(false);
     expect(guardrails?.timeout_guard_enabled).toBe(false);
+    expect(guardrails?.timeout_strategy).toBe("soft");
   });
 
   it("returns 404 for unknown route", async () => {
@@ -370,6 +372,41 @@ describe("mcp-solostack app", () => {
         }
       | undefined;
     expect(error?.code).toBe("TIMEOUT");
+  });
+
+  it("does not apply soft timeout check when timeout strategy is worker_hard", async () => {
+    const config = loadMcpConfigFromEnv({
+      SOLOSTACK_MCP_TIMEOUT_GUARD_ENABLED: "true",
+      SOLOSTACK_MCP_TIMEOUT_STRATEGY: "worker_hard",
+      SOLOSTACK_MCP_TOOL_TIMEOUT_MS: "100",
+    });
+    const { baseUrl, close } = await startServer(
+      createMcpRequestHandler({
+        config,
+        execute_tool: () => ({
+          tool: "get_tasks",
+          data: {
+            items: [],
+            next_cursor: null,
+          },
+          duration_ms: 150,
+        }),
+      }),
+    );
+    closers.push(close);
+
+    const response = await fetch(`${baseUrl}/tools/get_tasks`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        request_id: "req-timeout-worker-hard",
+        args: { limit: 5 },
+      }),
+    });
+
+    expect(response.status).toBe(200);
   });
 
   it("emits audit payload for successful tool call", async () => {

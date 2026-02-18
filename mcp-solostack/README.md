@@ -57,7 +57,9 @@ Tool endpoints require `SOLOSTACK_MCP_DB_PATH` to point to a valid SQLite file.
 
 Guardrails runtime:
 - rate limit ต่อ `/tools*` (ปิดโดย default)
-- timeout guard (soft limit จาก `duration_ms`, ปิดโดย default)
+- timeout guard:
+  - `soft` = ตรวจหลัง query จบจาก `duration_ms`
+  - `worker_hard` = รัน query ใน worker และ terminate เมื่อ timeout เกิน
 
 ## Environment Variables
 
@@ -71,4 +73,16 @@ Guardrails runtime:
 - `SOLOSTACK_MCP_RATE_LIMIT_WINDOW_MS` (`1000..3600000`, default: `60000`)
 - `SOLOSTACK_MCP_RATE_LIMIT_MAX_REQUESTS` (`1..100000`, default: `120`)
 - `SOLOSTACK_MCP_TIMEOUT_GUARD_ENABLED` (`true|false`, default: `false`)
+- `SOLOSTACK_MCP_TIMEOUT_STRATEGY` (`soft|worker_hard`, default: `soft`)
 - `SOLOSTACK_MCP_TOOL_TIMEOUT_MS` (`100..60000`, default: `2000`)
+
+## Load Matrix
+
+รัน baseline load/perf matrix (small + medium fixture):
+
+```bash
+npm run mcp:load-matrix
+```
+
+output default:
+- `docs/mcp-load-matrix-v0.1.md`

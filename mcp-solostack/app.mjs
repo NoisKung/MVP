@@ -197,14 +197,17 @@ export function createMcpRequestHandler(input) {
           }
         }
 
-        const result = executeTool({
-          tool: toolName,
-          args,
-          db_path: config.db_path,
-        });
+        const result = await Promise.resolve(
+          executeTool({
+            tool: toolName,
+            args,
+            db_path: config.db_path,
+          }),
+        );
 
         if (
           config.timeout_guard_enabled &&
+          config.timeout_strategy !== "worker_hard" &&
           result.duration_ms > config.tool_timeout_ms
         ) {
           throw new ToolExecutionError({
@@ -361,6 +364,7 @@ export function createMcpRequestHandler(input) {
             rate_limit_window_ms: config.rate_limit_window_ms,
             rate_limit_max_requests: config.rate_limit_max_requests,
             timeout_guard_enabled: config.timeout_guard_enabled,
+            timeout_strategy: config.timeout_strategy,
             tool_timeout_ms: config.tool_timeout_ms,
           },
         },

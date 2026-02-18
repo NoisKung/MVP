@@ -11,7 +11,9 @@ Scope: `mcp-solostack` read-only runtime baseline
 - Structured error envelope with stable codes (`INVALID_ARGUMENT`, `NOT_FOUND`, `INTERNAL_ERROR`)
 - Audit logging baseline for every tool call (`event = mcp.tool_call`)
 - In-memory rate limiter สำหรับ `/tools*` (fixed window, configurable)
-- Timeout guard แบบ soft limit (`duration_ms` > threshold -> `TIMEOUT`)
+- Timeout guard แบบ configurable:
+  - `soft` (duration-based post-check)
+  - `worker_hard` (terminate worker on timeout)
 
 ## 2) Failure Handling Coverage
 
@@ -27,20 +29,21 @@ Scope: `mcp-solostack` read-only runtime baseline
 
 Validation commands run:
 - `npx vitest run mcp-solostack/*.test.ts`
+- `npm run mcp:load-matrix`
 - `npm run build`
 
 Result summary:
-- MCP test suite passed (`config`, `app`, `tools`, `logger`)
+- MCP test suite passed (`config`, `app`, `tools`, `logger`, `tool-executor`)
+- load/perf matrix baseline ถูก generate ที่ `docs/mcp-load-matrix-v0.1.md`
 - Build passed on current branch
 
 ## 4) Known Gaps (Next Hardening Wave)
 
-- timeout guard ยังเป็น soft enforcement หลัง query จบ (ยังไม่มี query cancellation)
 - ยังไม่มี persistent audit sink (ปัจจุบันเป็น stdout JSON)
-- ยังไม่มี load-test profile และ p95/p99 latency report ที่ reproducible
+- ยังไม่มี hosted staging load/perf comparison กับ local baseline
 
 ## 5) Recommended Next Steps
 
-1. เพิ่ม query-timeout/cancellation strategy สำหรับ hosted mode
-2. เพิ่ม synthetic load script + baseline report (small/medium fixture)
-3. ส่ง audit log เข้า centralized sink เมื่อเปิด hosted profile
+1. รัน load matrix ใน hosted staging แล้วเทียบกับ `docs/mcp-load-matrix-v0.1.md`
+2. ส่ง audit log เข้า centralized sink พร้อม retention policy
+3. เพิ่ม alert threshold จาก p95/p99 ใน hosted profile

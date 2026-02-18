@@ -2,6 +2,7 @@ export const MCP_SERVICE_NAME = "mcp-solostack";
 export const MCP_SERVICE_VERSION = "0.1.0";
 
 const SUPPORTED_LOG_LEVELS = new Set(["debug", "info", "warn", "error"]);
+const SUPPORTED_TIMEOUT_STRATEGIES = new Set(["soft", "worker_hard"]);
 const TRUE_VALUES = new Set(["1", "true", "yes", "on"]);
 const FALSE_VALUES = new Set(["0", "false", "no", "off"]);
 
@@ -16,6 +17,7 @@ const DEFAULTS = Object.freeze({
   rate_limit_max_requests: 120,
   timeout_guard_enabled: false,
   tool_timeout_ms: 2_000,
+  timeout_strategy: "soft",
 });
 
 function asOptionalString(value) {
@@ -44,6 +46,18 @@ function parseLogLevel(rawValue) {
   if (!SUPPORTED_LOG_LEVELS.has(lowerCaseValue)) {
     throw new Error(
       "SOLOSTACK_MCP_LOG_LEVEL must be one of: debug, info, warn, error.",
+    );
+  }
+  return lowerCaseValue;
+}
+
+function parseTimeoutStrategy(rawValue) {
+  const normalized = asOptionalString(rawValue);
+  if (normalized === null) return DEFAULTS.timeout_strategy;
+  const lowerCaseValue = normalized.toLowerCase();
+  if (!SUPPORTED_TIMEOUT_STRATEGIES.has(lowerCaseValue)) {
+    throw new Error(
+      "SOLOSTACK_MCP_TIMEOUT_STRATEGY must be one of: soft, worker_hard.",
     );
   }
   return lowerCaseValue;
@@ -116,6 +130,7 @@ export function loadMcpConfigFromEnv(env = process.env) {
       env.SOLOSTACK_MCP_TIMEOUT_GUARD_ENABLED,
       DEFAULTS.timeout_guard_enabled,
     ),
+    timeout_strategy: parseTimeoutStrategy(env.SOLOSTACK_MCP_TIMEOUT_STRATEGY),
     tool_timeout_ms: parseBoundedInteger(env.SOLOSTACK_MCP_TOOL_TIMEOUT_MS, {
       env_name: "SOLOSTACK_MCP_TOOL_TIMEOUT_MS",
       min: 100,
@@ -137,6 +152,7 @@ export function getMcpSafeConfigSummary(config) {
     rate_limit_window_ms: config.rate_limit_window_ms,
     rate_limit_max_requests: config.rate_limit_max_requests,
     timeout_guard_enabled: config.timeout_guard_enabled,
+    timeout_strategy: config.timeout_strategy,
     tool_timeout_ms: config.tool_timeout_ms,
     db_path_set: Boolean(config.db_path),
   };

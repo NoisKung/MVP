@@ -2,6 +2,7 @@ import { createServer } from "node:http";
 import { createMcpRequestHandler } from "./app.mjs";
 import { getMcpSafeConfigSummary, loadMcpConfigFromEnv } from "./config.mjs";
 import { createMcpLogger } from "./logger.mjs";
+import { createToolExecutor } from "./tool-executor.mjs";
 
 async function startServer(server, config) {
   return new Promise((resolve, reject) => {
@@ -37,11 +38,13 @@ async function main() {
     service_name: config.service_name,
     log_level: config.log_level,
   });
+  const toolExecutor = createToolExecutor(config);
   const startedAtMs = Date.now();
   const server = createServer(
     createMcpRequestHandler({
       config,
       started_at_ms: startedAtMs,
+      execute_tool: (toolCallInput) => toolExecutor.execute(toolCallInput),
       on_tool_call: (auditPayload) => {
         logger.auditToolCall(auditPayload);
       },
@@ -49,7 +52,10 @@ async function main() {
   );
 
   await startServer(server, config);
-  logger.info("MCP server started.", getMcpSafeConfigSummary(config));
+  logger.info("MCP server started.", {
+    ...getMcpSafeConfigSummary(config),
+    tool_executor_mode: toolExecutor.mode,
+  });
 
   let shuttingDown = false;
   const shutdown = async (signal) => {

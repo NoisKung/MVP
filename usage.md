@@ -270,7 +270,12 @@ config env vars:
 - `SOLOSTACK_MCP_RATE_LIMIT_WINDOW_MS`
 - `SOLOSTACK_MCP_RATE_LIMIT_MAX_REQUESTS`
 - `SOLOSTACK_MCP_TIMEOUT_GUARD_ENABLED`
+- `SOLOSTACK_MCP_TIMEOUT_STRATEGY`
 - `SOLOSTACK_MCP_TOOL_TIMEOUT_MS`
+
+load/perf matrix baseline:
+- รัน `npm run mcp:load-matrix`
+- output ที่ `docs/mcp-load-matrix-v0.1.md`
 
 รายละเอียดเพิ่มเติม: `mcp-solostack/README.md`
 
@@ -283,3 +288,4 @@ config env vars:
 - Agent usage playbook: `docs/agent-usage-playbook-v0.1.md`
 - MCP AWS hosted profile: `docs/mcp-aws-hosted-profile-v0.1.md`
 - MCP hardening report: `docs/mcp-hardening-report-v0.1.md`
+- MCP load matrix: `docs/mcp-load-matrix-v0.1.md`

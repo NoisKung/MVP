@@ -215,11 +215,13 @@ Google Drive (`appDataFolder`) vs OneDrive (`approot`) ในมุม SoloStack
   - integration tests สำหรับ app/tool routes พร้อม fixture DB (`mcp-solostack/app.test.ts`, `mcp-solostack/tools.test.ts`)
   - audit log baseline ต่อ 1 tool call (`event = mcp.tool_call`)
   - เพิ่ม rate limiter (`RATE_LIMITED`) และ timeout guard (`TIMEOUT`) สำหรับ `/tools*`
+  - เพิ่ม hosted timeout strategy แบบ `worker_hard` (terminate worker เมื่อ timeout เกิน)
+  - เพิ่ม load/perf matrix baseline สำหรับ small/medium fixture (`docs/mcp-load-matrix-v0.1.md`)
   - เอกสาร agent playbook และ AWS hosted profile baseline
   - hardening snapshot v0.1 (`docs/mcp-hardening-report-v0.1.md`)
 - คงเหลือ:
-  - เพิ่ม query-timeout/cancellation strategy ระดับ hosted profile
-  - ทำ load/perf matrix สำหรับ small/medium fixture ก่อน internal rollout
+  - ทำซ้ำ load/perf matrix ใน hosted staging เพื่อเทียบกับ local baseline
+  - ตัดสินใจ sink/retention สำหรับ audit log ใน hosted profile
 
 ## 5) Workstream Breakdown (P3-1 Priority)
 
@@ -528,3 +530,4 @@ Definition of Done:
 - Agent usage playbook: `docs/agent-usage-playbook-v0.1.md`
 - MCP AWS hosted profile: `docs/mcp-aws-hosted-profile-v0.1.md`
 - MCP hardening report: `docs/mcp-hardening-report-v0.1.md`
+- MCP load matrix: `docs/mcp-load-matrix-v0.1.md`
