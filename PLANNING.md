@@ -294,7 +294,7 @@
 
 ## Week 3 (2026-05-04 ถึง 2026-05-08)
 - เพิ่ม recovery tools (`retry`, `restore`, `export report`) (done: มี preflight/force + restore latest backup)
-- เพิ่ม conflict timeline event log + observability counters (partial: event log done, counters pending)
+- เพิ่ม conflict timeline event log + observability counters (done: event log + aggregate counters + median resolve time)
 - hardening + bugfix + ผ่าน quality gates ก่อนประกาศ internal beta
 
 ## 6D) P3-3 Implementation Checklist (Dev Team)
@@ -313,6 +313,7 @@
 - [x] ทุก `resolveConflict` ต้องสร้าง idempotency key และ enqueue outbox change
 - [x] เพิ่ม `retryLastFailedSync` แบบกันยิงซ้ำและ safe re-entry
 - [x] เพิ่ม `exportConflictReport` เป็น structured JSON
+- [x] เพิ่ม `getSyncConflictObservabilityCounters` (total/open/resolved, retried/exported events, median resolve time)
 
 ## UI / UX
 - [x] เพิ่ม global status entry point เมื่อสถานะเป็น `Conflict`
@@ -377,11 +378,10 @@
 
 ## 11) Immediate Next Actions
 
-1. เพิ่ม conflict test matrix + Playwright coverage สำหรับ resolve/retry/recovery
-2. เพิ่ม integration tests สำหรับ resolve replay + idempotent retry
-3. เพิ่ม observability counters สำหรับ conflict lifecycle
-4. เริ่ม comparative spike: Google `appDataFolder` vs OneDrive `approot`
-5. เริ่ม AWS architecture spike พร้อม cost baseline สำหรับ sync + MCP
+1. เริ่ม comparative spike: Google `appDataFolder` vs OneDrive `approot`
+2. เริ่ม AWS architecture spike พร้อม cost baseline สำหรับ sync + MCP
+3. สรุป telemetry baseline ที่ต้องส่งออกนอกแอป (desktop session vs cloud observability)
+4. แตกงาน P3-6 อ่านข้อมูลผ่าน MCP tool set ตาม contract v0.1
 
 ## 12) Immediate Next Actions (P3-6 Kickoff)
 

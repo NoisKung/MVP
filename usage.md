@@ -1,6 +1,6 @@
 # SoloStack Usage Guide
 
-อัปเดตล่าสุด: 2026-02-17
+อัปเดตล่าสุด: 2026-02-18
 
 ## 1) Development Commands
 
@@ -38,7 +38,7 @@ Core files:
 - `src/lib/sync-runner.ts`: orchestration หนึ่งรอบของ sync cycle
 - `src/lib/sync-service.ts`: wiring เข้ากับ local DB functions
 - `src/lib/database.ts`: mutation path + outbox + incoming apply + conflict persistence/report
-- `src/hooks/use-tasks.ts`: hooks สำหรับ conflict list/events/resolve/report export
+- `src/hooks/use-tasks.ts`: hooks สำหรับ conflict list/events/resolve/report export/observability
 
 Syncable entities:
 - `PROJECT`
@@ -88,6 +88,7 @@ P3-2 runtime tuning (Settings > Sync > `Sync Runtime Profile`):
 - first launch บน iOS/Android (ถ้ายังไม่เคยตั้งค่า runtime มาก่อน) จะ seed ค่าเริ่มต้นเป็น `Mobile Beta Preset` อัตโนมัติ
 - background interval ต้องมากกว่าหรือเท่ากับ foreground interval
 - มี `Sync Diagnostics (Session)` ในหน้า Settings แสดง success rate, cycle latency, failure streak และ conflict cycles เพื่อช่วย tune mobile beta
+- มี `Conflict Observability` ในหน้าเดียวกัน แสดง total/open/resolved conflicts, resolution rate, median resolve time, และ retried/exported event counters
 
 ต้องมี server ไหม:
 - ไม่ต้องมี ถ้าใช้งานเครื่องเดียว (สถานะ `LOCAL_ONLY`)
@@ -183,6 +184,7 @@ console.log(summary);
 - กด `Details` เพื่อดู payload (`local`/`remote`) และ timeline events ของ conflict นั้น
 - กด `Export Report` เพื่อดาวน์โหลด conflict report เป็น JSON (รวม events)
 - ทุกครั้งที่ export report ระบบจะเพิ่ม timeline event ประเภท `exported`
+- มี aggregate counters สำหรับ conflict lifecycle เพื่อช่วย monitor แนวโน้ม (resolution rate + median time-to-resolve)
 
 พฤติกรรมปัจจุบัน:
 - เมื่อกด resolve ระบบจะบันทึก resolution/event ลง DB ทันที

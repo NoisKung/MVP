@@ -28,6 +28,7 @@ import {
   useImportBackup,
   useRestoreLatestBackup,
   useSyncConflictEvents,
+  useSyncConflictObservability,
 } from "@/hooks/use-tasks";
 import {
   buildManualMergeInitialText,
@@ -120,6 +121,17 @@ function formatDurationMs(value: number | null): string {
   if (value === null || !Number.isFinite(value)) return "N/A";
   if (value < 1000) return `${value} ms`;
   return `${(value / 1000).toFixed(2)} s`;
+}
+
+function formatResolutionDurationMs(value: number | null): string {
+  if (value === null || !Number.isFinite(value)) return "N/A";
+  if (value < 1000) return `${value} ms`;
+  const seconds = value / 1000;
+  if (seconds < 60) return `${seconds.toFixed(1)} s`;
+  const minutes = seconds / 60;
+  if (minutes < 60) return `${minutes.toFixed(1)} min`;
+  const hours = minutes / 60;
+  return `${hours.toFixed(1)} h`;
 }
 
 function normalizeUrlDraft(value: string): string | null {
@@ -278,6 +290,8 @@ export function ReminderSettings({
     data: selectedConflictEvents = [],
     isLoading: isConflictEventsLoading,
   } = useSyncConflictEvents(selectedConflict?.id, 100);
+  const syncConflictObservability = useSyncConflictObservability();
+  const conflictObservability = syncConflictObservability.data;
   const backupPreflight = backupRestorePreflight.data;
 
   useEffect(() => {
@@ -1201,6 +1215,56 @@ export function ReminderSettings({
               Conflict cycles: {syncDiagnostics.conflict_cycles}
             </p>
           </div>
+          <div className="sync-observability-card">
+            <p className="settings-row-title">Conflict Observability</p>
+            {syncConflictObservability.isLoading ? (
+              <p className="settings-row-subtitle">Loading counters...</p>
+            ) : conflictObservability ? (
+              <>
+                <p className="settings-row-subtitle">
+                  Total conflicts: {conflictObservability.total_conflicts}
+                </p>
+                <p className="settings-row-subtitle">
+                  Open/Resolved/Ignored: {conflictObservability.open_conflicts}/
+                  {conflictObservability.resolved_conflicts}/
+                  {conflictObservability.ignored_conflicts}
+                </p>
+                <p className="settings-row-subtitle">
+                  Resolution rate:{" "}
+                  {conflictObservability.resolution_rate_percent.toFixed(1)}%
+                </p>
+                <p className="settings-row-subtitle">
+                  Median time to resolve:{" "}
+                  {formatResolutionDurationMs(
+                    conflictObservability.median_resolution_time_ms,
+                  )}
+                </p>
+                <p className="settings-row-subtitle">
+                  Retried events: {conflictObservability.retried_events}
+                </p>
+                <p className="settings-row-subtitle">
+                  Exported events: {conflictObservability.exported_events}
+                </p>
+                <p className="settings-row-subtitle">
+                  Last detected:{" "}
+                  {formatSyncDateTime(conflictObservability.latest_detected_at)}
+                </p>
+                <p className="settings-row-subtitle">
+                  Last resolved:{" "}
+                  {formatSyncDateTime(conflictObservability.latest_resolved_at)}
+                </p>
+              </>
+            ) : (
+              <p className="settings-row-subtitle">
+                Conflict observability is unavailable.
+              </p>
+            )}
+            {syncConflictObservability.isError && (
+              <p className="settings-feedback settings-feedback-error">
+                Unable to load conflict observability counters.
+              </p>
+            )}
+          </div>
         </div>
 
         <div className="settings-actions">
@@ -1680,6 +1744,11 @@ export function ReminderSettings({
           background: var(--bg-surface);
           padding: 10px;
           margin-bottom: 10px;
+        }
+        .sync-observability-card {
+          border-top: 1px solid var(--border-default);
+          margin-top: 10px;
+          padding-top: 10px;
         }
         .sync-runtime-head {
           margin-bottom: 8px;
