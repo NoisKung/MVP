@@ -11,6 +11,11 @@ const DEFAULTS = Object.freeze({
   log_level: "info",
   read_only: true,
   enable_cors: false,
+  rate_limit_enabled: false,
+  rate_limit_window_ms: 60_000,
+  rate_limit_max_requests: 120,
+  timeout_guard_enabled: false,
+  tool_timeout_ms: 2_000,
 });
 
 function asOptionalString(value) {
@@ -55,6 +60,21 @@ function parseBoolean(rawValue, fallback) {
   );
 }
 
+function parseBoundedInteger(rawValue, input) {
+  const normalized = asOptionalString(rawValue);
+  if (normalized === null) return input.fallback;
+  const parsed = Number(normalized);
+  if (!Number.isFinite(parsed) || Math.floor(parsed) !== parsed) {
+    throw new Error(`${input.env_name} must be an integer.`);
+  }
+  if (parsed < input.min || parsed > input.max) {
+    throw new Error(
+      `${input.env_name} must be between ${input.min} and ${input.max}.`,
+    );
+  }
+  return parsed;
+}
+
 export function loadMcpConfigFromEnv(env = process.env) {
   const host = asOptionalString(env.SOLOSTACK_MCP_HOST) ?? DEFAULTS.host;
   const dbPath = asOptionalString(env.SOLOSTACK_MCP_DB_PATH);
@@ -70,6 +90,38 @@ export function loadMcpConfigFromEnv(env = process.env) {
       env.SOLOSTACK_MCP_ENABLE_CORS,
       DEFAULTS.enable_cors,
     ),
+    rate_limit_enabled: parseBoolean(
+      env.SOLOSTACK_MCP_RATE_LIMIT_ENABLED,
+      DEFAULTS.rate_limit_enabled,
+    ),
+    rate_limit_window_ms: parseBoundedInteger(
+      env.SOLOSTACK_MCP_RATE_LIMIT_WINDOW_MS,
+      {
+        env_name: "SOLOSTACK_MCP_RATE_LIMIT_WINDOW_MS",
+        min: 1000,
+        max: 3_600_000,
+        fallback: DEFAULTS.rate_limit_window_ms,
+      },
+    ),
+    rate_limit_max_requests: parseBoundedInteger(
+      env.SOLOSTACK_MCP_RATE_LIMIT_MAX_REQUESTS,
+      {
+        env_name: "SOLOSTACK_MCP_RATE_LIMIT_MAX_REQUESTS",
+        min: 1,
+        max: 100_000,
+        fallback: DEFAULTS.rate_limit_max_requests,
+      },
+    ),
+    timeout_guard_enabled: parseBoolean(
+      env.SOLOSTACK_MCP_TIMEOUT_GUARD_ENABLED,
+      DEFAULTS.timeout_guard_enabled,
+    ),
+    tool_timeout_ms: parseBoundedInteger(env.SOLOSTACK_MCP_TOOL_TIMEOUT_MS, {
+      env_name: "SOLOSTACK_MCP_TOOL_TIMEOUT_MS",
+      min: 100,
+      max: 60_000,
+      fallback: DEFAULTS.tool_timeout_ms,
+    }),
     db_path: dbPath,
   };
 }
@@ -81,6 +133,11 @@ export function getMcpSafeConfigSummary(config) {
     log_level: config.log_level,
     read_only: config.read_only,
     enable_cors: config.enable_cors,
+    rate_limit_enabled: config.rate_limit_enabled,
+    rate_limit_window_ms: config.rate_limit_window_ms,
+    rate_limit_max_requests: config.rate_limit_max_requests,
+    timeout_guard_enabled: config.timeout_guard_enabled,
+    tool_timeout_ms: config.tool_timeout_ms,
     db_path_set: Boolean(config.db_path),
   };
 }

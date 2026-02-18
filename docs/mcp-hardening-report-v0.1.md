@@ -10,6 +10,8 @@ Scope: `mcp-solostack` read-only runtime baseline
 - Deterministic ordering for pagination safety (`updated_at DESC, id DESC` / `created_at DESC, id DESC`)
 - Structured error envelope with stable codes (`INVALID_ARGUMENT`, `NOT_FOUND`, `INTERNAL_ERROR`)
 - Audit logging baseline for every tool call (`event = mcp.tool_call`)
+- In-memory rate limiter สำหรับ `/tools*` (fixed window, configurable)
+- Timeout guard แบบ soft limit (`duration_ms` > threshold -> `TIMEOUT`)
 
 ## 2) Failure Handling Coverage
 
@@ -17,6 +19,8 @@ Scope: `mcp-solostack` read-only runtime baseline
 - Missing/invalid tool args -> `400 INVALID_ARGUMENT`
 - Missing DB path -> `400 INVALID_ARGUMENT`
 - SQLite file not found -> `404 NOT_FOUND`
+- Rate limit exceeded -> `429 RATE_LIMITED`
+- Tool duration exceeded timeout guard -> `504 TIMEOUT`
 - Unexpected runtime/query failure -> `500 INTERNAL_ERROR`
 
 ## 3) Verification Snapshot
@@ -31,14 +35,12 @@ Result summary:
 
 ## 4) Known Gaps (Next Hardening Wave)
 
-- ยังไม่มี rate limiter ระดับ endpoint/tool
-- ยังไม่มี per-call timeout enforcement ใน query layer
+- timeout guard ยังเป็น soft enforcement หลัง query จบ (ยังไม่มี query cancellation)
 - ยังไม่มี persistent audit sink (ปัจจุบันเป็น stdout JSON)
 - ยังไม่มี load-test profile และ p95/p99 latency report ที่ reproducible
 
 ## 5) Recommended Next Steps
 
-1. เพิ่ม in-memory token bucket rate limiter สำหรับ `/tools*`
-2. ทำ query timeout strategy สำหรับ heavy reads (hosted mode priority)
-3. เพิ่ม synthetic load script + baseline report (small/medium fixture)
-4. ส่ง audit log เข้า centralized sink เมื่อเปิด hosted profile
+1. เพิ่ม query-timeout/cancellation strategy สำหรับ hosted mode
+2. เพิ่ม synthetic load script + baseline report (small/medium fixture)
+3. ส่ง audit log เข้า centralized sink เมื่อเปิด hosted profile

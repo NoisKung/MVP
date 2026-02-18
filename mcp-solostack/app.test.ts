@@ -168,6 +168,14 @@ describe("mcp-solostack app", () => {
     expect(payload.mode).toBe("read_only");
     expect(Array.isArray(payload.tools)).toBe(true);
     expect((payload.tools as unknown[]).length).toBe(5);
+    const guardrails = payload.guardrails as
+      | {
+          rate_limit_enabled?: boolean;
+          timeout_guard_enabled?: boolean;
+        }
+      | undefined;
+    expect(guardrails?.rate_limit_enabled).toBe(false);
+    expect(guardrails?.timeout_guard_enabled).toBe(false);
   });
 
   it("returns 404 for unknown route", async () => {
@@ -275,6 +283,93 @@ describe("mcp-solostack app", () => {
     expect(payload.tool).toBe("get_weekly_review");
     const data = payload.data as { completed_count?: number } | undefined;
     expect(data?.completed_count).toBeGreaterThanOrEqual(0);
+  });
+
+  it("returns RATE_LIMITED when rate limit is exceeded", async () => {
+    const dbPath = createFixtureDb();
+    const config = loadMcpConfigFromEnv({
+      SOLOSTACK_MCP_DB_PATH: dbPath,
+      SOLOSTACK_MCP_RATE_LIMIT_ENABLED: "true",
+      SOLOSTACK_MCP_RATE_LIMIT_MAX_REQUESTS: "1",
+      SOLOSTACK_MCP_RATE_LIMIT_WINDOW_MS: "60000",
+    });
+    const { baseUrl, close } = await startServer(
+      createMcpRequestHandler({ config }),
+    );
+    closers.push(close);
+
+    const firstResponse = await fetch(`${baseUrl}/tools/get_tasks`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        request_id: "req-rate-1",
+        args: { limit: 5 },
+      }),
+    });
+    expect(firstResponse.status).toBe(200);
+
+    const secondResponse = await fetch(`${baseUrl}/tools/get_tasks`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        request_id: "req-rate-2",
+        args: { limit: 5 },
+      }),
+    });
+    expect(secondResponse.status).toBe(429);
+    const payload = (await secondResponse.json()) as Record<string, unknown>;
+    const error = payload.error as
+      | {
+          code?: string;
+          retry_after_ms?: number | null;
+        }
+      | undefined;
+    expect(error?.code).toBe("RATE_LIMITED");
+    expect(typeof error?.retry_after_ms).toBe("number");
+  });
+
+  it("returns TIMEOUT when timeout guard is exceeded", async () => {
+    const config = loadMcpConfigFromEnv({
+      SOLOSTACK_MCP_TIMEOUT_GUARD_ENABLED: "true",
+      SOLOSTACK_MCP_TOOL_TIMEOUT_MS: "100",
+    });
+    const { baseUrl, close } = await startServer(
+      createMcpRequestHandler({
+        config,
+        execute_tool: () => ({
+          tool: "get_tasks",
+          data: {
+            items: [],
+            next_cursor: null,
+          },
+          duration_ms: 150,
+        }),
+      }),
+    );
+    closers.push(close);
+
+    const response = await fetch(`${baseUrl}/tools/get_tasks`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        request_id: "req-timeout-1",
+        args: { limit: 5 },
+      }),
+    });
+    expect(response.status).toBe(504);
+    const payload = (await response.json()) as Record<string, unknown>;
+    const error = payload.error as
+      | {
+          code?: string;
+        }
+      | undefined;
+    expect(error?.code).toBe("TIMEOUT");
   });
 
   it("emits audit payload for successful tool call", async () => {

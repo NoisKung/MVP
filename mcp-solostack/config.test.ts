@@ -14,6 +14,11 @@ describe("mcp-solostack config loader", () => {
       log_level: "info",
       read_only: true,
       enable_cors: false,
+      rate_limit_enabled: false,
+      rate_limit_window_ms: 60000,
+      rate_limit_max_requests: 120,
+      timeout_guard_enabled: false,
+      tool_timeout_ms: 2000,
       db_path: null,
     });
   });
@@ -26,6 +31,11 @@ describe("mcp-solostack config loader", () => {
       SOLOSTACK_MCP_LOG_LEVEL: "debug",
       SOLOSTACK_MCP_READ_ONLY: "false",
       SOLOSTACK_MCP_ENABLE_CORS: "true",
+      SOLOSTACK_MCP_RATE_LIMIT_ENABLED: "true",
+      SOLOSTACK_MCP_RATE_LIMIT_WINDOW_MS: "30000",
+      SOLOSTACK_MCP_RATE_LIMIT_MAX_REQUESTS: "500",
+      SOLOSTACK_MCP_TIMEOUT_GUARD_ENABLED: "true",
+      SOLOSTACK_MCP_TOOL_TIMEOUT_MS: "2500",
     });
 
     expect(config).toMatchObject({
@@ -35,6 +45,11 @@ describe("mcp-solostack config loader", () => {
       log_level: "debug",
       read_only: false,
       enable_cors: true,
+      rate_limit_enabled: true,
+      rate_limit_window_ms: 30000,
+      rate_limit_max_requests: 500,
+      timeout_guard_enabled: true,
+      tool_timeout_ms: 2500,
     });
     expect(getMcpSafeConfigSummary(config)).toEqual({
       host: "0.0.0.0",
@@ -42,6 +57,11 @@ describe("mcp-solostack config loader", () => {
       log_level: "debug",
       read_only: false,
       enable_cors: true,
+      rate_limit_enabled: true,
+      rate_limit_window_ms: 30000,
+      rate_limit_max_requests: 500,
+      timeout_guard_enabled: true,
+      tool_timeout_ms: 2500,
       db_path_set: true,
     });
   });
@@ -64,5 +84,23 @@ describe("mcp-solostack config loader", () => {
         SOLOSTACK_MCP_READ_ONLY: "maybe",
       }),
     ).toThrow('Invalid boolean value "maybe".');
+
+    expect(() =>
+      loadMcpConfigFromEnv({
+        SOLOSTACK_MCP_RATE_LIMIT_WINDOW_MS: "abc",
+      }),
+    ).toThrow("SOLOSTACK_MCP_RATE_LIMIT_WINDOW_MS must be an integer.");
+
+    expect(() =>
+      loadMcpConfigFromEnv({
+        SOLOSTACK_MCP_RATE_LIMIT_MAX_REQUESTS: "0",
+      }),
+    ).toThrow("SOLOSTACK_MCP_RATE_LIMIT_MAX_REQUESTS must be between");
+
+    expect(() =>
+      loadMcpConfigFromEnv({
+        SOLOSTACK_MCP_TOOL_TIMEOUT_MS: "90",
+      }),
+    ).toThrow("SOLOSTACK_MCP_TOOL_TIMEOUT_MS must be between");
   });
 });

@@ -21,6 +21,68 @@ function buildCorsHeaders(enableCors) {
   };
 }
 
+function getClientIp(request) {
+  const rawForwardedFor = request.headers["x-forwarded-for"];
+  const forwardedFor = Array.isArray(rawForwardedFor)
+    ? rawForwardedFor[0]
+    : rawForwardedFor;
+  if (typeof forwardedFor === "string" && forwardedFor.trim()) {
+    const firstIp = forwardedFor.split(",")[0]?.trim();
+    if (firstIp) return firstIp;
+  }
+
+  if (typeof request.socket?.remoteAddress === "string") {
+    return request.socket.remoteAddress;
+  }
+  return null;
+}
+
+function createFixedWindowRateLimiter(input) {
+  const buckets = new Map();
+
+  return {
+    consume(key, nowMs = Date.now()) {
+      const normalizedKey = key || "unknown";
+      const windowStartThreshold = nowMs - input.window_ms;
+      const currentBucket = buckets.get(normalizedKey);
+
+      if (
+        !currentBucket ||
+        currentBucket.window_started_at_ms <= windowStartThreshold
+      ) {
+        buckets.set(normalizedKey, {
+          window_started_at_ms: nowMs,
+          count: 1,
+        });
+        return {
+          allowed: true,
+          retry_after_ms: null,
+          remaining: Math.max(0, input.max_requests - 1),
+        };
+      }
+
+      if (currentBucket.count >= input.max_requests) {
+        const retryAfterMs = Math.max(
+          1,
+          currentBucket.window_started_at_ms + input.window_ms - nowMs,
+        );
+        return {
+          allowed: false,
+          retry_after_ms: retryAfterMs,
+          remaining: 0,
+        };
+      }
+
+      currentBucket.count += 1;
+      return {
+        allowed: true,
+        retry_after_ms: null,
+        remaining: Math.max(0, input.max_requests - currentBucket.count),
+      };
+    },
+  };
+}
+
 async function parseJsonBody(request) {
   return new Promise((resolve, reject) => {
     const chunks = [];
@@ -60,8 +122,18 @@ async function parseJsonBody(request) {
 export function createMcpRequestHandler(input) {
   const config = input.config;
   const startedAtMs = input.started_at_ms ?? Date.now();
+  const executeTool =
+    typeof input.execute_tool === "function"
+      ? input.execute_tool
+      : executeReadTool;
   const onToolCall =
     typeof input.on_tool_call === "function" ? input.on_tool_call : null;
+  const rateLimiter = config.rate_limit_enabled
+    ? createFixedWindowRateLimiter({
+        window_ms: config.rate_limit_window_ms,
+        max_requests: config.rate_limit_max_requests,
+      })
+    : null;
 
   function emitToolCallAudit(payload) {
     if (!onToolCall) return;
@@ -94,10 +166,8 @@ export function createMcpRequestHandler(input) {
       let requestId = null;
       let toolName = null;
       const requestStartedAtMs = Date.now();
-      const clientIp =
-        (typeof request.socket?.remoteAddress === "string" &&
-          request.socket.remoteAddress) ||
-        null;
+      const clientIp = getClientIp(request);
+      let rateLimitState = null;
       try {
         const parsedBody = await parseJsonBody(request);
         requestId =
@@ -110,11 +180,44 @@ export function createMcpRequestHandler(input) {
         toolName = toolFromPath || parsedBody?.tool || null;
         const args =
           parsedBody && typeof parsedBody === "object" ? parsedBody.args : null;
-        const result = executeReadTool({
+
+        if (rateLimiter) {
+          rateLimitState = rateLimiter.consume(clientIp);
+          if (!rateLimitState.allowed) {
+            throw new ToolExecutionError({
+              code: "RATE_LIMITED",
+              status: 429,
+              message: "Rate limit exceeded for tool calls.",
+              retry_after_ms: rateLimitState.retry_after_ms,
+              details: {
+                window_ms: config.rate_limit_window_ms,
+                max_requests: config.rate_limit_max_requests,
+              },
+            });
+          }
+        }
+
+        const result = executeTool({
           tool: toolName,
           args,
           db_path: config.db_path,
         });
+
+        if (
+          config.timeout_guard_enabled &&
+          result.duration_ms > config.tool_timeout_ms
+        ) {
+          throw new ToolExecutionError({
+            code: "TIMEOUT",
+            status: 504,
+            message: `Tool execution exceeded timeout guard (${config.tool_timeout_ms}ms).`,
+            retry_after_ms: 250,
+            details: {
+              duration_ms: result.duration_ms,
+              timeout_limit_ms: config.tool_timeout_ms,
+            },
+          });
+        }
 
         sendJson(
           response,
@@ -144,6 +247,7 @@ export function createMcpRequestHandler(input) {
           duration_ms: Math.max(0, Date.now() - requestStartedAtMs),
           tool_duration_ms: result.duration_ms,
           next_cursor: result.data.next_cursor ?? null,
+          rate_limit_remaining: rateLimitState?.remaining ?? null,
         });
       } catch (error) {
         if (error instanceof ToolExecutionError) {
@@ -159,6 +263,8 @@ export function createMcpRequestHandler(input) {
             duration_ms: Math.max(0, Date.now() - requestStartedAtMs),
             tool_duration_ms: null,
             next_cursor: null,
+            retry_after_ms: error.retry_after_ms,
+            rate_limit_remaining: rateLimitState?.remaining ?? null,
           });
           sendJson(
             response,
@@ -193,6 +299,8 @@ export function createMcpRequestHandler(input) {
           duration_ms: Math.max(0, Date.now() - requestStartedAtMs),
           tool_duration_ms: null,
           next_cursor: null,
+          retry_after_ms: null,
+          rate_limit_remaining: rateLimitState?.remaining ?? null,
         });
         sendJson(
           response,
@@ -248,6 +356,13 @@ export function createMcpRequestHandler(input) {
           ready: true,
           mode: config.read_only ? "read_only" : "read_write",
           tools: MCP_READ_TOOLS,
+          guardrails: {
+            rate_limit_enabled: config.rate_limit_enabled,
+            rate_limit_window_ms: config.rate_limit_window_ms,
+            rate_limit_max_requests: config.rate_limit_max_requests,
+            timeout_guard_enabled: config.timeout_guard_enabled,
+            tool_timeout_ms: config.tool_timeout_ms,
+          },
         },
         corsHeaders,
       );

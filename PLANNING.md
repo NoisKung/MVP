@@ -214,10 +214,11 @@ Google Drive (`appDataFolder`) vs OneDrive (`approot`) ในมุม SoloStack
   - รองรับทั้ง route mode (`/tools/<tool>`) และ generic mode (`/tools`)
   - integration tests สำหรับ app/tool routes พร้อม fixture DB (`mcp-solostack/app.test.ts`, `mcp-solostack/tools.test.ts`)
   - audit log baseline ต่อ 1 tool call (`event = mcp.tool_call`)
+  - เพิ่ม rate limiter (`RATE_LIMITED`) และ timeout guard (`TIMEOUT`) สำหรับ `/tools*`
   - เอกสาร agent playbook และ AWS hosted profile baseline
   - hardening snapshot v0.1 (`docs/mcp-hardening-report-v0.1.md`)
 - คงเหลือ:
-  - เพิ่ม rate limiter + timeout guardrails ระดับ production-hosted profile
+  - เพิ่ม query-timeout/cancellation strategy ระดับ hosted profile
   - ทำ load/perf matrix สำหรับ small/medium fixture ก่อน internal rollout
 
 ## 5) Workstream Breakdown (P3-1 Priority)
