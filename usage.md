@@ -231,8 +231,35 @@ Recovery (Backup & Restore):
 - ถ้า behavior ของ implementation เปลี่ยน:
   - ต้องอัปเดตตัวอย่างการใช้งานใน `usage.md` ให้ตรง behavior ล่าสุด
 
-## 9) Planning Artifacts (P3-5 / P3-6)
+## 9) MCP Local Skeleton (P3-6 Kickoff)
+
+รัน MCP server skeleton:
+
+```bash
+npm run mcp:dev
+```
+
+default bind:
+- `127.0.0.1:8799`
+
+health endpoints:
+- `GET /`
+- `GET /health`
+- `GET /healthz`
+
+config env vars:
+- `SOLOSTACK_MCP_HOST`
+- `SOLOSTACK_MCP_PORT`
+- `SOLOSTACK_MCP_DB_PATH`
+- `SOLOSTACK_MCP_LOG_LEVEL`
+- `SOLOSTACK_MCP_READ_ONLY`
+- `SOLOSTACK_MCP_ENABLE_CORS`
+
+รายละเอียดเพิ่มเติม: `mcp-solostack/README.md`
+
+## 10) Planning Artifacts (P3-5 / P3-6)
 
 - AWS spike memo: `docs/aws-spike-v0.1.md`
 - Telemetry spec baseline: `docs/telemetry-spec-v0.1.md`
 - MCP execution backlog: `docs/p3-6-execution-backlog-v0.1.md`
+- MCP read-tool contract: `docs/mcp-read-tools-contract-v0.1.md`

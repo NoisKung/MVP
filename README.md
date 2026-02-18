@@ -80,6 +80,20 @@ CLI options:
 - Use `--db <path>` to target a specific SQLite file.
 - `mvp-cli` requires Node.js 22+ (uses built-in `node:sqlite`).
 
+### MCP Server Skeleton
+
+```bash
+# Run local MCP server skeleton (health endpoints only)
+npm run mcp:dev
+```
+
+Default health endpoints:
+- `GET http://127.0.0.1:8799/`
+- `GET http://127.0.0.1:8799/health`
+- `GET http://127.0.0.1:8799/healthz`
+
+See `mcp-solostack/README.md` for env configuration.
+
 ### Build for Production
 
 ```bash
@@ -101,6 +115,7 @@ MVP/
 │   ├── src/                # Rust source (lib.rs, db.rs)
 │   ├── icons/              # App icons
 │   └── tauri.conf.json     # Tauri configuration
+├── mcp-solostack/          # MCP server skeleton (Node.js)
 └── package.json
 ```
 

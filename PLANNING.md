@@ -427,9 +427,9 @@ Google Drive (`appDataFolder`) vs OneDrive (`approot`) ในมุม SoloStack
 
 ## 12) Immediate Next Actions (P3-6 Kickoff)
 
-1. สรุป MCP read-tool contract v0.1 ในไฟล์ spec เดียว
-2. สร้าง `mcp-solostack` skeleton + health check + config loader
-3. ต่อ `get_tasks` และ `get_projects` ให้ใช้งานได้ end-to-end ก่อน
+1. [done] สรุป MCP read-tool contract v0.1 (`docs/mcp-read-tools-contract-v0.1.md`)
+2. [done] สร้าง `mcp-solostack` skeleton + health check + config loader (`mcp-solostack/server.mjs`)
+3. [next] ต่อ `get_tasks` และ `get_projects` ให้ใช้งานได้ end-to-end ก่อน
 4. เพิ่ม integration tests กับ fixture DB ขนาดเล็กและกลาง
 5. เขียน agent usage playbook สำหรับเคส weekly summary รุ่นแรก
 6. นิยาม hosted MCP deployment profile บน AWS (ถ้าเลือก cloud mode)
@@ -509,3 +509,4 @@ Definition of Done:
 - AWS spike memo: `docs/aws-spike-v0.1.md`
 - Telemetry spec: `docs/telemetry-spec-v0.1.md`
 - P3-6 execution backlog: `docs/p3-6-execution-backlog-v0.1.md`
+- MCP read-tool contract: `docs/mcp-read-tools-contract-v0.1.md`
