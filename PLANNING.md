@@ -213,10 +213,12 @@ Google Drive (`appDataFolder`) vs OneDrive (`approot`) ในมุม SoloStack
   - read tools ครบ wave-1 และ wave-2 (`get_tasks`, `get_projects`, `get_weekly_review`, `search_tasks`, `get_task_changelogs`)
   - รองรับทั้ง route mode (`/tools/<tool>`) และ generic mode (`/tools`)
   - integration tests สำหรับ app/tool routes พร้อม fixture DB (`mcp-solostack/app.test.ts`, `mcp-solostack/tools.test.ts`)
+  - audit log baseline ต่อ 1 tool call (`event = mcp.tool_call`)
   - เอกสาร agent playbook และ AWS hosted profile baseline
+  - hardening snapshot v0.1 (`docs/mcp-hardening-report-v0.1.md`)
 - คงเหลือ:
-  - เพิ่ม audit log baseline ต่อ tool call
-  - performance/failure hardening report ก่อน internal rollout
+  - เพิ่ม rate limiter + timeout guardrails ระดับ production-hosted profile
+  - ทำ load/perf matrix สำหรับ small/medium fixture ก่อน internal rollout
 
 ## 5) Workstream Breakdown (P3-1 Priority)
 
@@ -524,3 +526,4 @@ Definition of Done:
 - MCP read-tool contract: `docs/mcp-read-tools-contract-v0.1.md`
 - Agent usage playbook: `docs/agent-usage-playbook-v0.1.md`
 - MCP AWS hosted profile: `docs/mcp-aws-hosted-profile-v0.1.md`
+- MCP hardening report: `docs/mcp-hardening-report-v0.1.md`

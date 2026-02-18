@@ -42,6 +42,19 @@ Example:
 
 Tool endpoints require `SOLOSTACK_MCP_DB_PATH` to point to a valid SQLite file.
 
+## Audit Logging (Baseline)
+
+ทุก tool call จะถูก log แบบ structured JSON ผ่าน stdout:
+- `event`: `mcp.tool_call`
+- `request_id`
+- `tool`
+- `ok`
+- `status_code`
+- `error_code`
+- `duration_ms`
+- `tool_duration_ms`
+- `next_cursor`
+
 ## Environment Variables
 
 - `SOLOSTACK_MCP_HOST` (default: `127.0.0.1`)

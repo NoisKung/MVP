@@ -255,6 +255,10 @@ read tool endpoints:
 - `POST /tools/get_task_changelogs`
 - `POST /tools` (generic route, ส่ง `tool` ผ่าน body)
 
+audit log baseline:
+- MCP จะเขียน structured log ต่อ 1 tool call ลง stdout (event `mcp.tool_call`)
+- payload หลัก: `request_id`, `tool`, `ok`, `status_code`, `error_code`, `duration_ms`
+
 config env vars:
 - `SOLOSTACK_MCP_HOST`
 - `SOLOSTACK_MCP_PORT`
@@ -273,3 +277,4 @@ config env vars:
 - MCP read-tool contract: `docs/mcp-read-tools-contract-v0.1.md`
 - Agent usage playbook: `docs/agent-usage-playbook-v0.1.md`
 - MCP AWS hosted profile: `docs/mcp-aws-hosted-profile-v0.1.md`
+- MCP hardening report: `docs/mcp-hardening-report-v0.1.md`

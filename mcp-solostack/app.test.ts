@@ -276,4 +276,76 @@ describe("mcp-solostack app", () => {
     const data = payload.data as { completed_count?: number } | undefined;
     expect(data?.completed_count).toBeGreaterThanOrEqual(0);
   });
+
+  it("emits audit payload for successful tool call", async () => {
+    const dbPath = createFixtureDb();
+    const config = loadMcpConfigFromEnv({
+      SOLOSTACK_MCP_DB_PATH: dbPath,
+    });
+    const auditEvents: Array<Record<string, unknown>> = [];
+    const { baseUrl, close } = await startServer(
+      createMcpRequestHandler({
+        config,
+        on_tool_call: (payload) => {
+          auditEvents.push(payload as Record<string, unknown>);
+        },
+      }),
+    );
+    closers.push(close);
+
+    const response = await fetch(`${baseUrl}/tools/get_projects`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        request_id: "req-audit-success",
+        args: {
+          limit: 5,
+        },
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    expect(auditEvents.length).toBe(1);
+    expect(auditEvents[0]?.ok).toBe(true);
+    expect(auditEvents[0]?.status_code).toBe(200);
+    expect(auditEvents[0]?.tool).toBe("get_projects");
+    expect(typeof auditEvents[0]?.duration_ms).toBe("number");
+  });
+
+  it("emits audit payload for failed tool call", async () => {
+    const dbPath = createFixtureDb();
+    const config = loadMcpConfigFromEnv({
+      SOLOSTACK_MCP_DB_PATH: dbPath,
+    });
+    const auditEvents: Array<Record<string, unknown>> = [];
+    const { baseUrl, close } = await startServer(
+      createMcpRequestHandler({
+        config,
+        on_tool_call: (payload) => {
+          auditEvents.push(payload as Record<string, unknown>);
+        },
+      }),
+    );
+    closers.push(close);
+
+    const response = await fetch(`${baseUrl}/tools/search_tasks`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({
+        request_id: "req-audit-fail",
+        args: {},
+      }),
+    });
+
+    expect(response.status).toBe(400);
+    expect(auditEvents.length).toBe(1);
+    expect(auditEvents[0]?.ok).toBe(false);
+    expect(auditEvents[0]?.status_code).toBe(400);
+    expect(auditEvents[0]?.error_code).toBe("INVALID_ARGUMENT");
+    expect(auditEvents[0]?.tool).toBe("search_tasks");
+  });
 });

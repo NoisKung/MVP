@@ -60,6 +60,17 @@ async function parseJsonBody(request) {
 export function createMcpRequestHandler(input) {
   const config = input.config;
   const startedAtMs = input.started_at_ms ?? Date.now();
+  const onToolCall =
+    typeof input.on_tool_call === "function" ? input.on_tool_call : null;
+
+  function emitToolCallAudit(payload) {
+    if (!onToolCall) return;
+    try {
+      onToolCall(payload);
+    } catch {
+      // Best-effort logging only; never block request path.
+    }
+  }
 
   return async function handleRequest(request, response) {
     const corsHeaders = buildCorsHeaders(config.enable_cors);
@@ -82,6 +93,11 @@ export function createMcpRequestHandler(input) {
     if (isToolRoute) {
       let requestId = null;
       let toolName = null;
+      const requestStartedAtMs = Date.now();
+      const clientIp =
+        (typeof request.socket?.remoteAddress === "string" &&
+          request.socket.remoteAddress) ||
+        null;
       try {
         const parsedBody = await parseJsonBody(request);
         requestId =
@@ -116,8 +132,34 @@ export function createMcpRequestHandler(input) {
           },
           corsHeaders,
         );
+        emitToolCallAudit({
+          request_id: requestId,
+          tool: result.tool,
+          ok: true,
+          status_code: 200,
+          error_code: null,
+          route: pathname,
+          method,
+          client_ip: clientIp,
+          duration_ms: Math.max(0, Date.now() - requestStartedAtMs),
+          tool_duration_ms: result.duration_ms,
+          next_cursor: result.data.next_cursor ?? null,
+        });
       } catch (error) {
         if (error instanceof ToolExecutionError) {
+          emitToolCallAudit({
+            request_id: requestId,
+            tool: toolName,
+            ok: false,
+            status_code: error.status,
+            error_code: error.code,
+            route: pathname,
+            method,
+            client_ip: clientIp,
+            duration_ms: Math.max(0, Date.now() - requestStartedAtMs),
+            tool_duration_ms: null,
+            next_cursor: null,
+          });
           sendJson(
             response,
             error.status,
@@ -139,6 +181,19 @@ export function createMcpRequestHandler(input) {
           return;
         }
 
+        emitToolCallAudit({
+          request_id: requestId,
+          tool: toolName,
+          ok: false,
+          status_code: 400,
+          error_code: "INVALID_ARGUMENT",
+          route: pathname,
+          method,
+          client_ip: clientIp,
+          duration_ms: Math.max(0, Date.now() - requestStartedAtMs),
+          tool_duration_ms: null,
+          next_cursor: null,
+        });
         sendJson(
           response,
           400,

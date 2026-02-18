@@ -1,18 +1,7 @@
 import { createServer } from "node:http";
 import { createMcpRequestHandler } from "./app.mjs";
 import { getMcpSafeConfigSummary, loadMcpConfigFromEnv } from "./config.mjs";
-
-function log(level, message, metadata = null) {
-  const payload = {
-    timestamp_iso: new Date().toISOString(),
-    level,
-    service: "mcp-solostack",
-    message,
-    ...(metadata ? { metadata } : {}),
-  };
-  // eslint-disable-next-line no-console
-  console.log(JSON.stringify(payload));
-}
+import { createMcpLogger } from "./logger.mjs";
 
 async function startServer(server, config) {
   return new Promise((resolve, reject) => {
@@ -44,28 +33,35 @@ async function closeServer(server) {
 
 async function main() {
   const config = loadMcpConfigFromEnv(process.env);
+  const logger = createMcpLogger({
+    service_name: config.service_name,
+    log_level: config.log_level,
+  });
   const startedAtMs = Date.now();
   const server = createServer(
     createMcpRequestHandler({
       config,
       started_at_ms: startedAtMs,
+      on_tool_call: (auditPayload) => {
+        logger.auditToolCall(auditPayload);
+      },
     }),
   );
 
   await startServer(server, config);
-  log("info", "MCP server started.", getMcpSafeConfigSummary(config));
+  logger.info("MCP server started.", getMcpSafeConfigSummary(config));
 
   let shuttingDown = false;
   const shutdown = async (signal) => {
     if (shuttingDown) return;
     shuttingDown = true;
-    log("info", "Shutdown signal received.", { signal });
+    logger.info("Shutdown signal received.", { signal });
     try {
       await closeServer(server);
-      log("info", "MCP server stopped.");
+      logger.info("MCP server stopped.");
       process.exit(0);
     } catch (error) {
-      log("error", "Failed to close MCP server cleanly.", {
+      logger.error("Failed to close MCP server cleanly.", {
         error: error instanceof Error ? error.message : String(error),
       });
       process.exit(1);
@@ -81,7 +77,11 @@ async function main() {
 }
 
 main().catch((error) => {
-  log("error", "Unable to start MCP server.", {
+  const logger = createMcpLogger({
+    service_name: "mcp-solostack",
+    log_level: "error",
+  });
+  logger.error("Unable to start MCP server.", {
     error: error instanceof Error ? error.message : String(error),
   });
   process.exit(1);
