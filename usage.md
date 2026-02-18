@@ -37,6 +37,7 @@ Core files:
 - `src/lib/sync-engine.ts`: prepare/ack/apply/advance helpers
 - `src/lib/sync-runner.ts`: orchestration หนึ่งรอบของ sync cycle
 - `src/lib/sync-service.ts`: wiring เข้ากับ local DB functions
+- `src/lib/sync-connector-contract.ts`: provider-neutral connector contract v0.1 (Google/OneDrive baseline)
 - `src/lib/database.ts`: mutation path + outbox + incoming apply + conflict persistence/report
 - `src/hooks/use-tasks.ts`: hooks สำหรับ conflict list/events/resolve/report export/observability
 
@@ -157,6 +158,17 @@ console.log(summary);
 - checkpoint ก่อน/หลัง
 - จำนวน outbox ที่ส่งสำเร็จ/ล้มเหลว/ค้าง
 - ผล apply pull (`applied`, `skipped`, `conflicts`, `failed`)
+
+## 5B) Connector Contract Baseline (P3-5)
+
+- มี interface กลาง `SyncConnectorAdapter` ใน `src/lib/sync-connector-contract.ts`
+- ครอบคลุม operation พื้นฐาน:
+  - `list`
+  - `read`
+  - `write`
+  - `remove`
+- มี capability map ต่อ provider (`google_appdata`, `onedrive_approot`) และ helper สำหรับ normalize request bounds + error shape
+- ไฟล์นี้เป็น contract layer (ยังไม่ใช่ provider implementation จริง)
 
 ## 6) Sync Status Semantics
 

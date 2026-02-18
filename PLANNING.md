@@ -175,6 +175,16 @@ Google Drive (`appDataFolder`) vs OneDrive (`approot`) ในมุม SoloStack
 - เพิ่ม integration fixture สำหรับ provider error mapping (`rate_limit`, `unauthorized`, `unavailable`)
 - เพิ่ม observability fields ต่อ connector (`provider`, `latency_ms`, `http_status`, `retry_after_ms`)
 
+### Current Progress (2026-02-18)
+
+- เสร็จแล้ว:
+  - comparative spike snapshot (Google vs OneDrive) พร้อม recommendation สำหรับ pilot
+  - connector adapter contract v0.1 ใน `src/lib/sync-connector-contract.ts`
+- คงเหลือ:
+  - provider implementation stubs (Google/OneDrive)
+  - token storage + refresh flow integration
+  - connector integration tests กับ fixture responses
+
 ## Phase F: P3-6 MCP Server for SoloStack
 
 ช่วงเป้าหมาย: 2026-06-29 ถึง 2026-07-24
@@ -410,7 +420,7 @@ Google Drive (`appDataFolder`) vs OneDrive (`approot`) ในมุม SoloStack
 ## 11) Immediate Next Actions
 
 1. [done] comparative spike: Google `appDataFolder` vs OneDrive `approot`
-2. ทำ connector adapter contract v0.1 ให้รองรับทั้ง Google/OneDrive ด้วย interface เดียว
+2. [done] ทำ connector adapter contract v0.1 ให้รองรับทั้ง Google/OneDrive ด้วย interface เดียว
 3. เริ่ม AWS architecture spike พร้อม cost baseline สำหรับ sync + MCP
 4. สรุป telemetry baseline ที่ต้องส่งออกนอกแอป (desktop session vs cloud observability)
 5. แตกงาน P3-6 อ่านข้อมูลผ่าน MCP tool set ตาม contract v0.1
