@@ -421,9 +421,9 @@ Google Drive (`appDataFolder`) vs OneDrive (`approot`) ในมุม SoloStack
 
 1. [done] comparative spike: Google `appDataFolder` vs OneDrive `approot`
 2. [done] ทำ connector adapter contract v0.1 ให้รองรับทั้ง Google/OneDrive ด้วย interface เดียว
-3. [next] เริ่ม AWS architecture spike พร้อม cost baseline สำหรับ sync + MCP
-4. [next] สรุป telemetry baseline ที่ต้องส่งออกนอกแอป (desktop session vs cloud observability)
-5. [next] แตกงาน P3-6 อ่านข้อมูลผ่าน MCP tool set ตาม contract v0.1
+3. [done] เริ่ม AWS architecture spike พร้อม cost baseline สำหรับ sync + MCP (`docs/aws-spike-v0.1.md`)
+4. [done] สรุป telemetry baseline ที่ต้องส่งออกนอกแอป (`docs/telemetry-spec-v0.1.md`)
+5. [done] แตกงาน P3-6 อ่านข้อมูลผ่าน MCP tool set ตาม contract v0.1 (`docs/p3-6-execution-backlog-v0.1.md`)
 
 ## 12) Immediate Next Actions (P3-6 Kickoff)
 
@@ -503,3 +503,9 @@ Definition of Done:
 Definition of Done:
 - เริ่ม implementation P3-6 ได้ทันทีโดยไม่ต้องกลับมา re-plan ใหญ่
 - ลด ambiguity ใน Open Decisions ข้อ MCP deployment/auth
+
+### Sprint Artifacts (2026-02-18)
+
+- AWS spike memo: `docs/aws-spike-v0.1.md`
+- Telemetry spec: `docs/telemetry-spec-v0.1.md`
+- P3-6 execution backlog: `docs/p3-6-execution-backlog-v0.1.md`

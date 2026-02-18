@@ -230,3 +230,9 @@ Recovery (Backup & Restore):
   - ต้องอัปเดต `usage.md` ใน change set เดียวกัน
 - ถ้า behavior ของ implementation เปลี่ยน:
   - ต้องอัปเดตตัวอย่างการใช้งานใน `usage.md` ให้ตรง behavior ล่าสุด
+
+## 9) Planning Artifacts (P3-5 / P3-6)
+
+- AWS spike memo: `docs/aws-spike-v0.1.md`
+- Telemetry spec baseline: `docs/telemetry-spec-v0.1.md`
+- MCP execution backlog: `docs/p3-6-execution-backlog-v0.1.md`
