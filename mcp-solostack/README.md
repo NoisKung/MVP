@@ -17,6 +17,12 @@ Health endpoints:
 - `GET /health`
 - `GET /healthz`
 
+Read tool endpoints (POST JSON):
+- `/tools/get_tasks`
+- `/tools/get_projects`
+
+Tool endpoints require `SOLOSTACK_MCP_DB_PATH` to point to a valid SQLite file.
+
 ## Environment Variables
 
 - `SOLOSTACK_MCP_HOST` (default: `127.0.0.1`)

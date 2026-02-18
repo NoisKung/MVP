@@ -429,8 +429,8 @@ Google Drive (`appDataFolder`) vs OneDrive (`approot`) ในมุม SoloStack
 
 1. [done] สรุป MCP read-tool contract v0.1 (`docs/mcp-read-tools-contract-v0.1.md`)
 2. [done] สร้าง `mcp-solostack` skeleton + health check + config loader (`mcp-solostack/server.mjs`)
-3. [next] ต่อ `get_tasks` และ `get_projects` ให้ใช้งานได้ end-to-end ก่อน
-4. เพิ่ม integration tests กับ fixture DB ขนาดเล็กและกลาง
+3. [done] ต่อ `get_tasks` และ `get_projects` ให้ใช้งานได้ end-to-end (`POST /tools/get_tasks`, `POST /tools/get_projects`)
+4. [done] เพิ่ม integration tests กับ fixture DB ขนาดเล็กและกลาง (`mcp-solostack/app.test.ts`, `mcp-solostack/tools.test.ts`)
 5. เขียน agent usage playbook สำหรับเคส weekly summary รุ่นแรก
 6. นิยาม hosted MCP deployment profile บน AWS (ถ้าเลือก cloud mode)
 

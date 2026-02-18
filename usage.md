@@ -247,6 +247,10 @@ health endpoints:
 - `GET /health`
 - `GET /healthz`
 
+read tool endpoints:
+- `POST /tools/get_tasks`
+- `POST /tools/get_projects`
+
 config env vars:
 - `SOLOSTACK_MCP_HOST`
 - `SOLOSTACK_MCP_PORT`
