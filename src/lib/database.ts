@@ -48,6 +48,12 @@ import type {
   UpdateTaskInput,
 } from "./types";
 import { v4 as uuidv4 } from "uuid";
+import { createSyncIdempotencyKey } from "./sync-contract";
+import {
+  isMissingTaskTitleConflict,
+  isTaskNotesCollision,
+  isTaskProjectNotFoundConflict,
+} from "./sync-conflict-rules";
 
 const DATABASE_NAME = "sqlite:solostack.db";
 
@@ -155,6 +161,8 @@ const MOBILE_SYNC_PUSH_LIMIT = 120;
 const MOBILE_SYNC_PULL_LIMIT = 120;
 const MOBILE_SYNC_MAX_PULL_PAGES = 3;
 const LOCAL_ONLY_SETTING_PREFIX = "local.";
+const SYNC_CONFLICT_EVENT_MAX_PER_CONFLICT = 200;
+const SYNC_CONFLICT_EVENT_RETENTION_DAYS = 90;
 
 /** Get or create the database connection singleton */
 async function getDb(): Promise<Database> {
@@ -1469,6 +1477,106 @@ async function addSyncConflictEvent(
       nowIso,
     ],
   );
+  await pruneSyncConflictEvents(db, input.conflict_id, nowIso);
+}
+
+async function pruneSyncConflictEvents(
+  db: Database,
+  conflictId: string,
+  retentionAnchorIso: string,
+): Promise<void> {
+  await db.execute(
+    `DELETE FROM sync_conflict_events
+      WHERE conflict_id = $1
+        AND id NOT IN (
+          SELECT id
+            FROM sync_conflict_events
+           WHERE conflict_id = $1
+           ORDER BY created_at DESC, id DESC
+           LIMIT $2
+        )`,
+    [conflictId, SYNC_CONFLICT_EVENT_MAX_PER_CONFLICT],
+  );
+
+  const retentionAnchorDate = new Date(retentionAnchorIso);
+  const effectiveRetentionAnchor = Number.isNaN(retentionAnchorDate.getTime())
+    ? new Date()
+    : retentionAnchorDate;
+  const cutoffDate = new Date(effectiveRetentionAnchor.getTime());
+  cutoffDate.setUTCDate(
+    cutoffDate.getUTCDate() - SYNC_CONFLICT_EVENT_RETENTION_DAYS,
+  );
+  const cutoffIso = cutoffDate.toISOString();
+
+  await db.execute(
+    `DELETE FROM sync_conflict_events
+      WHERE created_at < $1`,
+    [cutoffIso],
+  );
+}
+
+async function enqueueConflictResolutionOutboxChange(
+  db: Database,
+  input: {
+    conflict_id: string;
+    strategy: SyncConflictResolutionStrategy;
+    resolved_by_device: string;
+    resolution_payload: Record<string, unknown> | null;
+    created_at: string;
+  },
+): Promise<string> {
+  const resolutionSettingKey = `${LOCAL_ONLY_SETTING_PREFIX}sync.conflict_resolution.${input.conflict_id}`;
+  const resolutionSettingValue = JSON.stringify({
+    conflict_id: input.conflict_id,
+    strategy: input.strategy,
+    resolved_by_device: input.resolved_by_device,
+    resolved_at: input.created_at,
+    resolution_payload: input.resolution_payload ?? null,
+  });
+  const idempotencyKey = createSyncIdempotencyKey(
+    input.resolved_by_device,
+    `conflict-resolution:${input.conflict_id}:${input.strategy}`,
+  );
+  const outboxPayload = JSON.stringify({
+    key: resolutionSettingKey,
+    value: resolutionSettingValue,
+  });
+
+  await db.execute(
+    `INSERT INTO settings (key, value)
+         VALUES ($1, $2)
+    ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+    [resolutionSettingKey, resolutionSettingValue],
+  );
+
+  await db.execute(
+    `INSERT INTO sync_outbox (
+        id,
+        entity_type,
+        entity_id,
+        operation,
+        payload_json,
+        idempotency_key,
+        attempts,
+        last_error,
+        created_at,
+        updated_at
+      )
+       VALUES ($1, 'SETTING', $2, 'UPSERT', $3, $4, 0, NULL, $5, $5)
+    ON CONFLICT(idempotency_key) DO UPDATE SET
+      payload_json = excluded.payload_json,
+      updated_at = excluded.updated_at,
+      last_error = NULL`,
+    [
+      uuidv4(),
+      resolutionSettingKey,
+      outboxPayload,
+      idempotencyKey,
+      input.created_at,
+    ],
+  );
+
+  return idempotencyKey;
 }
 
 async function getSyncEntityPayloadSnapshot(
@@ -1843,6 +1951,7 @@ export async function resolveSyncConflict(
   input: ResolveSyncConflictInput,
 ): Promise<SyncConflictRecord> {
   const db = await getDb();
+  await ensureSyncTablesReady(db);
   const conflictId = input.conflict_id.trim();
   if (!conflictId) {
     throw new Error("conflict_id is required.");
@@ -1868,9 +1977,21 @@ export async function resolveSyncConflict(
   const nowIso = new Date().toISOString();
   const resolvedByDevice =
     input.resolved_by_device?.trim() || (await getOrCreateDeviceId());
+  const normalizedResolutionPayload =
+    input.resolution_payload && isPlainObject(input.resolution_payload)
+      ? input.resolution_payload
+      : null;
   const nextStatus: SyncConflictStatus =
     strategy === "retry" ? "open" : "resolved";
   const nextResolvedAt = nextStatus === "resolved" ? nowIso : null;
+  const resolutionOutboxIdempotencyKey =
+    await enqueueConflictResolutionOutboxChange(db, {
+      conflict_id: conflictId,
+      strategy,
+      resolved_by_device: resolvedByDevice,
+      resolution_payload: normalizedResolutionPayload,
+      created_at: nowIso,
+    });
 
   await db.execute(
     `UPDATE sync_conflicts
@@ -1884,7 +2005,7 @@ export async function resolveSyncConflict(
     [
       nextStatus,
       strategy,
-      toJsonString(input.resolution_payload ?? null),
+      toJsonString(normalizedResolutionPayload),
       resolvedByDevice,
       nextResolvedAt,
       nowIso,
@@ -1899,6 +2020,7 @@ export async function resolveSyncConflict(
       strategy,
       resolved_by_device: resolvedByDevice,
       status: nextStatus,
+      idempotency_key: resolutionOutboxIdempotencyKey,
     },
     created_at: nowIso,
   });
@@ -2154,11 +2276,51 @@ export async function applyIncomingSyncChange(
       );
     } else if (change.entity_type === "TASK") {
       const title = asNullableString(payload.title)?.trim() ?? "";
-      if (!title) {
+      if (isMissingTaskTitleConflict(title)) {
         return persistAndReturnConflict(db, change, {
           conflict_type: "field_conflict",
           reason_code: "MISSING_TASK_TITLE",
           message: "Task title is required in incoming payload.",
+          remote_payload: remotePayload,
+        });
+      }
+
+      const existingTaskRows = await db.select<
+        Array<{
+          updated_at: string;
+          updated_by_device: string | null;
+          notes_markdown: string | null;
+        }>
+      >(
+        "SELECT updated_at, updated_by_device, notes_markdown FROM tasks WHERE id = $1 LIMIT 1",
+        [entityId],
+      );
+      const existingTask = existingTaskRows[0];
+      const incomingNotesMarkdown = normalizeTaskNotesMarkdown(
+        asNullableString(payload.notes_markdown),
+      );
+      const incomingTouchesNotesMarkdown = Object.prototype.hasOwnProperty.call(
+        payload,
+        "notes_markdown",
+      );
+      if (
+        existingTask &&
+        isTaskNotesCollision({
+          existing_updated_at: existingTask.updated_at,
+          existing_updated_by_device: existingTask.updated_by_device,
+          existing_notes_markdown: normalizeTaskNotesMarkdown(
+            existingTask.notes_markdown,
+          ),
+          incoming_updated_at: change.updated_at,
+          incoming_updated_by_device: change.updated_by_device,
+          incoming_notes_markdown: incomingNotesMarkdown,
+          incoming_touches_notes_markdown: incomingTouchesNotesMarkdown,
+        })
+      ) {
+        return persistAndReturnConflict(db, change, {
+          conflict_type: "notes_collision",
+          reason_code: "TASK_NOTES_COLLISION",
+          message: "Incoming task notes collide with locally edited notes.",
           remote_payload: remotePayload,
         });
       }
@@ -2170,7 +2332,12 @@ export async function applyIncomingSyncChange(
           "SELECT id FROM projects WHERE id = $1 LIMIT 1",
           [incomingProjectId],
         );
-        if (projectRows.length === 0) {
+        if (
+          isTaskProjectNotFoundConflict({
+            incoming_project_id: incomingProjectId,
+            project_exists: projectRows.length > 0,
+          })
+        ) {
           return persistAndReturnConflict(db, change, {
             conflict_type: "delete_vs_update",
             reason_code: "TASK_PROJECT_NOT_FOUND",
@@ -2221,7 +2388,7 @@ export async function applyIncomingSyncChange(
           entityId,
           title,
           normalizeOptionalText(payload.description),
-          normalizeTaskNotesMarkdown(asNullableString(payload.notes_markdown)),
+          incomingNotesMarkdown,
           projectId,
           asTaskStatus(payload.status),
           asTaskPriority(payload.priority),
