@@ -171,6 +171,16 @@ interface EnqueueUndoActionInput {
   onExecuteError?: (error: unknown) => void;
 }
 
+interface DeleteProjectRequest {
+  projectId: string;
+  projectName: string;
+}
+
+interface DeleteProjectQueueResult {
+  queued: boolean;
+  undoWindowMs: number;
+}
+
 const DEFAULT_UNDO_WINDOW_MS = 5_000;
 
 function createUndoQueueItemId(): string {
@@ -570,13 +580,16 @@ function AppContent() {
       ),
     [undoQueue],
   );
-  const hasPendingProjectDeleteUndo = useMemo(
-    () =>
-      undoQueue.some((action) =>
-        action.dedupeKey?.startsWith("project-delete:"),
-      ),
-    [undoQueue],
-  );
+  const pendingProjectDeleteUndoIds = useMemo(() => {
+    const projectIds = new Set<string>();
+    for (const action of undoQueue) {
+      if (!action.dedupeKey?.startsWith("project-delete:")) continue;
+      const projectId = action.dedupeKey.slice("project-delete:".length).trim();
+      if (!projectId) continue;
+      projectIds.add(projectId);
+    }
+    return Array.from(projectIds);
+  }, [undoQueue]);
   const hasPendingBackupRestoreUndo = useMemo(
     () =>
       undoQueue.some((action) =>
@@ -1377,7 +1390,7 @@ function AppContent() {
     }
   };
   const handleDeleteProject = useCallback(
-    (input: { projectId: string; projectName: string }) => {
+    (input: DeleteProjectRequest): DeleteProjectQueueResult => {
       setActionError(null);
 
       const queued = enqueueUndoAction({
@@ -1395,6 +1408,7 @@ function AppContent() {
       if (!queued) {
         setActionError("This project already has a pending undo action.");
       }
+      return { queued, undoWindowMs: DEFAULT_UNDO_WINDOW_MS };
     },
     [
       deleteProject,
@@ -1575,9 +1589,8 @@ function AppContent() {
       onDelete={handleDelete}
       onCreateClick={openCreateModal}
       onDeleteProject={handleDeleteProject}
-      isDeleteProjectPending={
-        deleteProject.isPending || hasPendingProjectDeleteUndo
-      }
+      isDeleteProjectPending={deleteProject.isPending}
+      pendingDeleteProjectIds={pendingProjectDeleteUndoIds}
     />
   ) : activeView === "calendar" ? (
     isLoadingAllTasks ? (

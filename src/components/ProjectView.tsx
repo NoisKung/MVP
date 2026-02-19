@@ -28,8 +28,12 @@ interface ProjectViewProps {
   onStatusChange: (taskId: string, newStatus: TaskStatus) => void;
   onDelete: (taskId: string) => void;
   onCreateClick: (projectId: string | null) => void;
-  onDeleteProject: (input: { projectId: string; projectName: string }) => void;
+  onDeleteProject: (input: { projectId: string; projectName: string }) => {
+    queued: boolean;
+    undoWindowMs: number;
+  };
   isDeleteProjectPending: boolean;
+  pendingDeleteProjectIds: string[];
 }
 
 interface ProjectMetrics {
@@ -134,6 +138,7 @@ export function ProjectView({
   onCreateClick,
   onDeleteProject,
   isDeleteProjectPending,
+  pendingDeleteProjectIds,
 }: ProjectViewProps) {
   const {
     data: projects = [],
@@ -147,6 +152,10 @@ export function ProjectView({
     null,
   );
   const [actionError, setActionError] = useState<string | null>(null);
+  const [actionNotice, setActionNotice] = useState<string | null>(null);
+  const [deleteConfirmProjectId, setDeleteConfirmProjectId] = useState<
+    string | null
+  >(null);
   const [projectSearch, setProjectSearch] = useState("");
   const [projectStatusFilter, setProjectStatusFilter] =
     useState<ProjectStatusFilter>("ALL");
@@ -230,6 +239,8 @@ export function ProjectView({
   useEffect(() => {
     if (!selectedProject) {
       setIsEditingDetails(false);
+      setDeleteConfirmProjectId(null);
+      setActionNotice(null);
       return;
     }
 
@@ -238,6 +249,8 @@ export function ProjectView({
     setEditColor(selectedProject.color ?? DEFAULT_PROJECT_COLOR);
     setTaskSectionFilter("ALL");
     setIsEditingDetails(false);
+    setDeleteConfirmProjectId(null);
+    setActionNotice(null);
   }, [selectedProject]);
 
   useEffect(() => {
@@ -310,6 +323,14 @@ export function ProjectView({
     : getProjectMetrics([]);
   const isProjectFilterActive =
     projectStatusFilter !== "ALL" || normalizedProjectSearch.length > 0;
+  const isSelectedProjectDeleteQueued = Boolean(
+    selectedProject && pendingDeleteProjectIds.includes(selectedProject.id),
+  );
+  const isDeleteConfirmArmed = Boolean(
+    selectedProject && deleteConfirmProjectId === selectedProject.id,
+  );
+  const isDeleteProjectActionPending =
+    isDeleteProjectPending || isSelectedProjectDeleteQueued;
 
   const handleCreateProject = async () => {
     const normalizedName = createName.trim();
@@ -321,6 +342,8 @@ export function ProjectView({
     const normalizedColor = normalizeProjectColor(createColor);
 
     setActionError(null);
+    setActionNotice(null);
+    setDeleteConfirmProjectId(null);
     try {
       const project = await createProject.mutateAsync({
         name: normalizedName,
@@ -346,6 +369,8 @@ export function ProjectView({
     setEditColor(selectedProject.color ?? DEFAULT_PROJECT_COLOR);
     setIsEditingDetails(true);
     setActionError(null);
+    setActionNotice(null);
+    setDeleteConfirmProjectId(null);
   };
 
   const handleCancelEditingSelectedProject = () => {
@@ -356,6 +381,8 @@ export function ProjectView({
     }
     setIsEditingDetails(false);
     setActionError(null);
+    setActionNotice(null);
+    setDeleteConfirmProjectId(null);
   };
 
   const handleSaveSelectedProjectDetails = async () => {
@@ -369,6 +396,8 @@ export function ProjectView({
     const normalizedColor = normalizeProjectColor(editColor);
 
     setActionError(null);
+    setActionNotice(null);
+    setDeleteConfirmProjectId(null);
     try {
       await updateProject.mutateAsync({
         id: selectedProject.id,
@@ -388,6 +417,8 @@ export function ProjectView({
       selectedProject.status === "COMPLETED" ? "ACTIVE" : "COMPLETED";
 
     setActionError(null);
+    setActionNotice(null);
+    setDeleteConfirmProjectId(null);
     try {
       await updateProject.mutateAsync({
         id: selectedProject.id,
@@ -398,25 +429,42 @@ export function ProjectView({
     }
   };
 
-  const handleDeleteSelectedProject = async () => {
+  const handleDeleteSelectedProject = () => {
     if (!selectedProject) return;
-    if (
-      !window.confirm(
-        `Delete project "${selectedProject.name}"? Tasks will be unassigned.`,
-      )
-    ) {
+    if (!isDeleteConfirmArmed) {
+      setDeleteConfirmProjectId(selectedProject.id);
+      setActionError(null);
+      setActionNotice(
+        `Click "Confirm Delete" to queue deleting "${selectedProject.name}". You can undo from the Undo bar for a few seconds.`,
+      );
       return;
     }
 
     setActionError(null);
+    setActionNotice(null);
+    setDeleteConfirmProjectId(null);
     try {
-      onDeleteProject({
+      const result = onDeleteProject({
         projectId: selectedProject.id,
         projectName: selectedProject.name,
       });
+      if (result.queued) {
+        const undoSeconds = Math.max(1, Math.round(result.undoWindowMs / 1000));
+        setActionNotice(
+          `Delete queued. This project will be removed in ${undoSeconds}s unless you click Undo.`,
+        );
+      } else {
+        setDeleteConfirmProjectId(selectedProject.id);
+        setActionError("This project already has a pending undo action.");
+      }
     } catch (error) {
       setActionError(getErrorMessage(error));
     }
+  };
+
+  const handleCancelDeleteSelectedProject = () => {
+    setDeleteConfirmProjectId(null);
+    setActionNotice(null);
   };
 
   if (isLoadingProjects) {
@@ -642,6 +690,8 @@ export function ProjectView({
                 setProjectSearch("");
                 setProjectStatusFilter("ALL");
                 setActionError(null);
+                setActionNotice(null);
+                setDeleteConfirmProjectId(null);
               }}
               disabled={createProject.isPending || updateProject.isPending}
             >
@@ -662,6 +712,8 @@ export function ProjectView({
                 return nextState;
               });
               setActionError(null);
+              setActionNotice(null);
+              setDeleteConfirmProjectId(null);
             }}
             disabled={createProject.isPending || updateProject.isPending}
           >
@@ -672,6 +724,9 @@ export function ProjectView({
       </div>
 
       {actionError && <p className="project-action-error">{actionError}</p>}
+      {!actionError && actionNotice && (
+        <p className="project-action-notice">{actionNotice}</p>
+      )}
 
       {isCreateFormOpen && (
         <div className="project-editor-card">
@@ -721,6 +776,8 @@ export function ProjectView({
               onClick={() => {
                 setIsCreateFormOpen(false);
                 setActionError(null);
+                setActionNotice(null);
+                setDeleteConfirmProjectId(null);
               }}
               disabled={createProject.isPending}
             >
@@ -984,14 +1041,32 @@ export function ProjectView({
                       ? "Mark Active"
                       : "Mark Completed"}
                   </button>
+                  {isDeleteConfirmArmed &&
+                  !isDeleteProjectActionPending &&
+                  !isEditingDetails ? (
+                    <button
+                      type="button"
+                      className="project-ghost-btn"
+                      onClick={handleCancelDeleteSelectedProject}
+                    >
+                      <X size={12} />
+                      Cancel
+                    </button>
+                  ) : null}
                   <button
                     type="button"
-                    className="project-ghost-btn danger"
-                    onClick={() => void handleDeleteSelectedProject()}
-                    disabled={isDeleteProjectPending || isEditingDetails}
+                    className={`project-ghost-btn danger${isDeleteConfirmArmed ? " danger-confirm" : ""}`}
+                    onClick={handleDeleteSelectedProject}
+                    disabled={isDeleteProjectActionPending || isEditingDetails}
                   >
                     <Trash2 size={12} />
-                    Delete
+                    {isDeleteProjectPending
+                      ? "Deleting..."
+                      : isSelectedProjectDeleteQueued
+                        ? "Queued..."
+                        : isDeleteConfirmArmed
+                          ? "Confirm Delete"
+                          : "Delete"}
                   </button>
                   <button
                     className="project-primary-btn"
@@ -1176,6 +1251,14 @@ export function ProjectView({
           background: var(--danger-subtle);
           border-radius: var(--radius-sm);
           color: var(--danger);
+          font-size: 12px;
+          padding: 8px 10px;
+        }
+        .project-action-notice {
+          border: 1px solid var(--accent);
+          background: var(--accent-subtle);
+          border-radius: var(--radius-sm);
+          color: var(--accent);
           font-size: 12px;
           padding: 8px 10px;
         }
@@ -1583,6 +1666,15 @@ export function ProjectView({
           background: var(--bg-hover);
         }
         .project-ghost-btn.danger:hover:not(:disabled) {
+          border-color: var(--danger);
+          color: var(--danger);
+          background: var(--danger-subtle);
+        }
+        .project-ghost-btn.danger {
+          color: var(--danger);
+          border-color: rgba(248, 113, 113, 0.45);
+        }
+        .project-ghost-btn.danger.danger-confirm {
           border-color: var(--danger);
           color: var(--danger);
           background: var(--danger-subtle);
