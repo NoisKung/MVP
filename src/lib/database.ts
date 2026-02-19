@@ -20,11 +20,15 @@ import type {
   SyncConflictStatus,
   SyncConflictType,
   SyncEndpointSettings,
+  SyncProvider,
+  SyncProviderSettings,
   SyncEntityType,
   SyncOperation,
   SyncOutboxRecord,
   SyncPushChange,
   SyncRuntimeProfilePreset,
+  SyncRuntimeProfileSetting,
+  SyncRuntimeProfileSettings,
   SyncRuntimeSettings,
   TaskStatus,
   TaskPriority,
@@ -42,6 +46,7 @@ import type {
   CreateTaskSubtaskInput,
   CreateTaskInput,
   UpdateProjectInput,
+  UpdateSyncProviderSettingsInput,
   UpdateTaskSubtaskInput,
   UpdateSyncEndpointSettingsInput,
   UpdateSyncRuntimeSettingsInput,
@@ -139,9 +144,24 @@ const SYNC_CONFLICT_EVENT_TYPES: SyncConflictEventType[] = [
   "retried",
   "exported",
 ];
+const SYNC_PROVIDERS: SyncProvider[] = [
+  "provider_neutral",
+  "google_appdata",
+  "onedrive_approot",
+  "icloud_cloudkit",
+  "solostack_cloud_aws",
+];
+const SYNC_RUNTIME_PROFILE_SETTINGS: SyncRuntimeProfileSetting[] = [
+  "desktop",
+  "mobile_beta",
+  "custom",
+];
 const SYNC_SETTINGS_DEVICE_ID_KEY = "sync.device_id";
 const SYNC_SETTINGS_PUSH_URL_KEY = "local.sync.push_url";
 const SYNC_SETTINGS_PULL_URL_KEY = "local.sync.pull_url";
+const SYNC_SETTINGS_PROVIDER_KEY = "local.sync.provider";
+const SYNC_SETTINGS_PROVIDER_CONFIG_KEY = "local.sync.provider_config";
+const SYNC_SETTINGS_RUNTIME_PROFILE_KEY = "local.sync.runtime_profile";
 const SYNC_SETTINGS_AUTO_INTERVAL_SECONDS_KEY =
   "local.sync.auto_interval_seconds";
 const SYNC_SETTINGS_BACKGROUND_INTERVAL_SECONDS_KEY =
@@ -149,6 +169,13 @@ const SYNC_SETTINGS_BACKGROUND_INTERVAL_SECONDS_KEY =
 const SYNC_SETTINGS_PUSH_LIMIT_KEY = "local.sync.push_limit";
 const SYNC_SETTINGS_PULL_LIMIT_KEY = "local.sync.pull_limit";
 const SYNC_SETTINGS_MAX_PULL_PAGES_KEY = "local.sync.max_pull_pages";
+const SYNC_RUNTIME_SETTINGS_KEYS = [
+  SYNC_SETTINGS_AUTO_INTERVAL_SECONDS_KEY,
+  SYNC_SETTINGS_BACKGROUND_INTERVAL_SECONDS_KEY,
+  SYNC_SETTINGS_PUSH_LIMIT_KEY,
+  SYNC_SETTINGS_PULL_LIMIT_KEY,
+  SYNC_SETTINGS_MAX_PULL_PAGES_KEY,
+] as const;
 const LOCAL_BACKUP_LATEST_PAYLOAD_KEY = "local.backup.latest_payload_v1";
 const LOCAL_BACKUP_LATEST_EXPORTED_AT_KEY = "local.backup.latest_exported_at";
 const DEFAULT_SYNC_AUTO_INTERVAL_SECONDS = 60;
@@ -161,6 +188,7 @@ const MOBILE_SYNC_BACKGROUND_INTERVAL_SECONDS = 600;
 const MOBILE_SYNC_PUSH_LIMIT = 120;
 const MOBILE_SYNC_PULL_LIMIT = 120;
 const MOBILE_SYNC_MAX_PULL_PAGES = 3;
+const DEFAULT_SYNC_PROVIDER: SyncProvider = "provider_neutral";
 const LOCAL_ONLY_SETTING_PREFIX = "local.";
 const SYNC_CONFLICT_EVENT_MAX_PER_CONFLICT = 200;
 const SYNC_CONFLICT_EVENT_RETENTION_DAYS = 90;
@@ -828,6 +856,50 @@ function asSyncConflictEventType(value: unknown): SyncConflictEventType {
   throw new Error("Unsupported sync conflict event type.");
 }
 
+function asSyncProvider(
+  value: unknown,
+  fallback: SyncProvider = DEFAULT_SYNC_PROVIDER,
+): SyncProvider {
+  if (
+    typeof value === "string" &&
+    SYNC_PROVIDERS.includes(value as SyncProvider)
+  ) {
+    return value as SyncProvider;
+  }
+  return fallback;
+}
+
+function asSyncRuntimeProfileSetting(
+  value: unknown,
+  fallback: SyncRuntimeProfileSetting,
+): SyncRuntimeProfileSetting {
+  if (
+    typeof value === "string" &&
+    SYNC_RUNTIME_PROFILE_SETTINGS.includes(value as SyncRuntimeProfileSetting)
+  ) {
+    return value as SyncRuntimeProfileSetting;
+  }
+  return fallback;
+}
+
+function normalizeSyncProviderConfigObject(
+  value: unknown,
+): Record<string, unknown> | null {
+  if (!isPlainObject(value)) return null;
+  return value;
+}
+
+function parseSyncProviderConfigValue(
+  value: unknown,
+): Record<string, unknown> | null {
+  if (typeof value !== "string" || !value.trim()) return null;
+  try {
+    return normalizeSyncProviderConfigObject(JSON.parse(value));
+  } catch {
+    return null;
+  }
+}
+
 async function assertProjectExists(
   db: Database,
   projectId: string | null | undefined,
@@ -983,6 +1055,74 @@ export async function updateSyncEndpointSettings(
   };
 }
 
+export async function getSyncProviderSettings(): Promise<SyncProviderSettings> {
+  const db = await getDb();
+  const rows = await db.select<AppSettingRecord[]>(
+    "SELECT key, value FROM settings WHERE key IN ($1, $2)",
+    [SYNC_SETTINGS_PROVIDER_KEY, SYNC_SETTINGS_PROVIDER_CONFIG_KEY],
+  );
+
+  let provider: SyncProvider = DEFAULT_SYNC_PROVIDER;
+  let providerConfig: Record<string, unknown> | null = null;
+
+  for (const row of rows) {
+    if (row.key === SYNC_SETTINGS_PROVIDER_KEY) {
+      provider = asSyncProvider(row.value, DEFAULT_SYNC_PROVIDER);
+    } else if (row.key === SYNC_SETTINGS_PROVIDER_CONFIG_KEY) {
+      providerConfig = parseSyncProviderConfigValue(row.value);
+    }
+  }
+
+  return {
+    provider,
+    provider_config: providerConfig,
+  };
+}
+
+export async function updateSyncProviderSettings(
+  input: UpdateSyncProviderSettingsInput,
+): Promise<SyncProviderSettings> {
+  const db = await getDb();
+  const provider = asSyncProvider(input.provider, DEFAULT_SYNC_PROVIDER);
+  const providerConfig = normalizeSyncProviderConfigObject(
+    input.provider_config ?? null,
+  );
+  const providerConfigJson = providerConfig
+    ? JSON.stringify(providerConfig)
+    : null;
+
+  await db.execute("BEGIN IMMEDIATE");
+  try {
+    await db.execute(
+      `INSERT INTO settings (key, value)
+           VALUES ($1, $2)
+      ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+      [SYNC_SETTINGS_PROVIDER_KEY, provider],
+    );
+    if (providerConfigJson) {
+      await db.execute(
+        `INSERT INTO settings (key, value)
+             VALUES ($1, $2)
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+        [SYNC_SETTINGS_PROVIDER_CONFIG_KEY, providerConfigJson],
+      );
+    } else {
+      await db.execute("DELETE FROM settings WHERE key = $1", [
+        SYNC_SETTINGS_PROVIDER_CONFIG_KEY,
+      ]);
+    }
+    await db.execute("COMMIT");
+  } catch (error) {
+    await db.execute("ROLLBACK");
+    throw error;
+  }
+
+  return {
+    provider,
+    provider_config: providerConfig,
+  };
+}
+
 function getSyncRuntimeDefaultsByPreset(
   preset: SyncRuntimeProfilePreset,
 ): SyncRuntimeSettings {
@@ -1005,6 +1145,12 @@ function getSyncRuntimeDefaultsByPreset(
   };
 }
 
+function getSyncRuntimeProfileDefaultByPreset(
+  preset: SyncRuntimeProfilePreset,
+): SyncRuntimeProfileSetting {
+  return preset === "mobile" ? "mobile_beta" : "desktop";
+}
+
 function toSyncRuntimeSettingsEntries(
   settings: SyncRuntimeSettings,
 ): Array<[string, string]> {
@@ -1023,34 +1169,82 @@ function toSyncRuntimeSettingsEntries(
   ];
 }
 
+export async function getSyncRuntimeProfileSettings(
+  preset: SyncRuntimeProfilePreset = "desktop",
+): Promise<SyncRuntimeProfileSettings> {
+  const db = await getDb();
+  const rows = await db.select<AppSettingRecord[]>(
+    "SELECT key, value FROM settings WHERE key = $1 LIMIT 1",
+    [SYNC_SETTINGS_RUNTIME_PROFILE_KEY],
+  );
+
+  return {
+    runtime_profile: asSyncRuntimeProfileSetting(
+      rows[0]?.value,
+      getSyncRuntimeProfileDefaultByPreset(preset),
+    ),
+  };
+}
+
 export async function ensureSyncRuntimeSettingsSeeded(
   preset: SyncRuntimeProfilePreset = "desktop",
 ): Promise<SyncRuntimeSettings> {
   const db = await getDb();
   const existingRows = await db.select<Array<{ key: string }>>(
-    "SELECT key FROM settings WHERE key IN ($1, $2, $3, $4, $5) LIMIT 1",
+    "SELECT key FROM settings WHERE key IN ($1, $2, $3, $4, $5, $6, $7) LIMIT 32",
     [
       SYNC_SETTINGS_AUTO_INTERVAL_SECONDS_KEY,
       SYNC_SETTINGS_BACKGROUND_INTERVAL_SECONDS_KEY,
       SYNC_SETTINGS_PUSH_LIMIT_KEY,
       SYNC_SETTINGS_PULL_LIMIT_KEY,
       SYNC_SETTINGS_MAX_PULL_PAGES_KEY,
+      SYNC_SETTINGS_PROVIDER_KEY,
+      SYNC_SETTINGS_RUNTIME_PROFILE_KEY,
     ],
   );
-  if (existingRows.length > 0) {
+
+  const existingKeys = new Set(existingRows.map((row) => row.key));
+  const hasAllRuntimeSettingKeys = SYNC_RUNTIME_SETTINGS_KEYS.every((key) =>
+    existingKeys.has(key),
+  );
+  const requiresSeed =
+    !hasAllRuntimeSettingKeys ||
+    !existingKeys.has(SYNC_SETTINGS_PROVIDER_KEY) ||
+    !existingKeys.has(SYNC_SETTINGS_RUNTIME_PROFILE_KEY);
+  if (!requiresSeed) {
     return getSyncRuntimeSettings();
   }
 
   const seededSettings = getSyncRuntimeDefaultsByPreset(preset);
+  const runtimeProfileDefault = getSyncRuntimeProfileDefaultByPreset(preset);
 
   await db.execute("BEGIN IMMEDIATE");
   try {
     for (const [key, value] of toSyncRuntimeSettingsEntries(seededSettings)) {
+      if (existingKeys.has(key)) continue;
       await db.execute(
         `INSERT INTO settings (key, value)
              VALUES ($1, $2)
         ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
         [key, value],
+      );
+    }
+
+    if (!existingKeys.has(SYNC_SETTINGS_PROVIDER_KEY)) {
+      await db.execute(
+        `INSERT INTO settings (key, value)
+             VALUES ($1, $2)
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+        [SYNC_SETTINGS_PROVIDER_KEY, DEFAULT_SYNC_PROVIDER],
+      );
+    }
+
+    if (!existingKeys.has(SYNC_SETTINGS_RUNTIME_PROFILE_KEY)) {
+      await db.execute(
+        `INSERT INTO settings (key, value)
+             VALUES ($1, $2)
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+        [SYNC_SETTINGS_RUNTIME_PROFILE_KEY, runtimeProfileDefault],
       );
     }
     await db.execute("COMMIT");
@@ -1059,7 +1253,7 @@ export async function ensureSyncRuntimeSettingsSeeded(
     throw error;
   }
 
-  return seededSettings;
+  return getSyncRuntimeSettings();
 }
 
 export async function getSyncRuntimeSettings(): Promise<SyncRuntimeSettings> {
@@ -1131,6 +1325,10 @@ export async function updateSyncRuntimeSettings(
   input: UpdateSyncRuntimeSettingsInput,
 ): Promise<SyncRuntimeSettings> {
   const db = await getDb();
+  const runtimeProfile = asSyncRuntimeProfileSetting(
+    input.runtime_profile,
+    "custom",
+  );
   const autoSyncIntervalSeconds = normalizeSyncRuntimeNumber(
     input.auto_sync_interval_seconds,
     {
@@ -1179,6 +1377,12 @@ export async function updateSyncRuntimeSettings(
         [key, value],
       );
     }
+    await db.execute(
+      `INSERT INTO settings (key, value)
+           VALUES ($1, $2)
+      ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+      [SYNC_SETTINGS_RUNTIME_PROFILE_KEY, runtimeProfile],
+    );
 
     await db.execute("COMMIT");
   } catch (error) {

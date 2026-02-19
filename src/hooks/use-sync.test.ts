@@ -1,9 +1,11 @@
 import {
+  applySyncConfigurationDiagnostics,
   appendSyncSessionDiagnostics,
   calculateSyncBackoffMs,
   createInitialSyncSessionDiagnostics,
   getAutoSyncIntervalMsForVisibility,
   normalizeSyncRuntimeProfile,
+  normalizeSyncRuntimeProfileWithValidation,
 } from "@/hooks/use-sync";
 
 describe("use-sync helpers", () => {
@@ -94,6 +96,12 @@ describe("sync session diagnostics", () => {
       average_cycle_duration_ms: null,
       last_attempt_at: null,
       last_success_at: null,
+      selected_provider: null,
+      runtime_profile: null,
+      provider_selected_events: 0,
+      runtime_profile_changed_events: 0,
+      validation_rejected_events: 0,
+      last_warning: null,
     });
   });
 
@@ -117,6 +125,12 @@ describe("sync session diagnostics", () => {
       average_cycle_duration_ms: 420,
       last_attempt_at: "2026-02-17T12:00:00.000Z",
       last_success_at: "2026-02-17T12:00:00.000Z",
+      selected_provider: null,
+      runtime_profile: null,
+      provider_selected_events: 0,
+      runtime_profile_changed_events: 0,
+      validation_rejected_events: 0,
+      last_warning: null,
     });
   });
 
@@ -158,6 +172,81 @@ describe("sync session diagnostics", () => {
       average_cycle_duration_ms: 400,
       last_attempt_at: "2026-02-17T12:01:00.000Z",
       last_success_at: "2026-02-17T12:00:00.000Z",
+      selected_provider: null,
+      runtime_profile: null,
+      provider_selected_events: 0,
+      runtime_profile_changed_events: 0,
+      validation_rejected_events: 0,
+      last_warning: null,
+    });
+  });
+
+  it("tracks provider/runtime selection and validation rejected events", () => {
+    const seeded = applySyncConfigurationDiagnostics(
+      createInitialSyncSessionDiagnostics(),
+      {
+        provider: "provider_neutral",
+        runtimeProfile: "desktop",
+        warning: null,
+        providerChanged: true,
+        runtimeProfileChanged: true,
+        validationRejected: false,
+      },
+    );
+
+    const updated = applySyncConfigurationDiagnostics(seeded, {
+      provider: "google_appdata",
+      runtimeProfile: "mobile_beta",
+      warning: "Push and Pull URLs must both be set.",
+      providerChanged: true,
+      runtimeProfileChanged: true,
+      validationRejected: true,
+    });
+
+    expect(updated.selected_provider).toBe("google_appdata");
+    expect(updated.runtime_profile).toBe("mobile_beta");
+    expect(updated.provider_selected_events).toBe(2);
+    expect(updated.runtime_profile_changed_events).toBe(2);
+    expect(updated.validation_rejected_events).toBe(1);
+    expect(updated.last_warning).toContain("Push and Pull URLs");
+  });
+});
+
+describe("sync runtime profile validation helpers", () => {
+  it("flags runtime validation when values are clamped", () => {
+    const resolved = normalizeSyncRuntimeProfileWithValidation({
+      autoSyncIntervalMs: 5_000,
+      backgroundSyncIntervalMs: 7_000,
+      pushLimit: 10,
+      pullLimit: 900,
+      maxPullPages: 0,
+    });
+
+    expect(resolved.validationRejected).toBe(true);
+    expect(resolved.profile).toEqual({
+      autoSyncIntervalMs: 15_000,
+      backgroundSyncIntervalMs: 30_000,
+      pushLimit: 20,
+      pullLimit: 500,
+      maxPullPages: 1,
+    });
+  });
+
+  it("keeps old normalizeSyncRuntimeProfile contract stable", () => {
+    expect(
+      normalizeSyncRuntimeProfile({
+        autoSyncIntervalMs: 45_000,
+        backgroundSyncIntervalMs: 90_000,
+        pushLimit: 150,
+        pullLimit: 160,
+        maxPullPages: 6,
+      }),
+    ).toEqual({
+      autoSyncIntervalMs: 45_000,
+      backgroundSyncIntervalMs: 90_000,
+      pushLimit: 150,
+      pullLimit: 160,
+      maxPullPages: 6,
     });
   });
 });

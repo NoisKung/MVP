@@ -142,7 +142,7 @@
   - compute (`Lambda`/container)
   - data store (`DynamoDB` หรือ `RDS`)
   - auth (`Cognito`) และ observability baseline (`CloudWatch`)
-- ข้อเสนอเลือก provider ลำดับแรกพร้อมเกณฑ์ตัดสิน
+- ข้อเสนอ UX สำหรับ user-selected provider พร้อม default recommendation และ guardrails
 
 ### Comparative Spike Snapshot (2026-02-18)
 
@@ -161,12 +161,13 @@ Google Drive (`appDataFolder`) vs OneDrive (`approot`) ในมุม SoloStack
 - OneDrive: แข็งแรงมากในองค์กรที่ใช้ Microsoft 365 เป็นหลัก (โอกาสเจอ policy governance สูงกว่า)
 
 4. Operational risk (desktop beta)
-- Google-first ช่วยลด unknowns ในรอบ pilot แรก
-- OneDrive ควรเป็น wave ถัดไปพร้อม test matrix สำหรับ tenant policy / throttling / token refresh edge cases
+- ตั้ง Google เป็นค่าแนะนำเริ่มต้นช่วยลด unknowns ในรอบ pilot แรก
+- ผู้ใช้ยังต้องสลับไป provider อื่นได้เองจาก UI พร้อมแสดงข้อจำกัด/ความเสี่ยงแต่ละ provider
+- OneDrive ควรมี test matrix เพิ่มสำหรับ tenant policy / throttling / token refresh edge cases
 
 ### Recommendation (for P3-5 Pilot)
 
-เลือก `Google appDataFolder` เป็น connector ลำดับแรกใน pilot และคง provider-neutral contract เดิม เพื่อให้ต่อ `OneDrive approot` ได้โดยไม่เปลี่ยน sync core.
+ใช้ `Google appDataFolder` เป็น default recommendation ใน pilot แต่เปิดให้ผู้ใช้เลือก provider เองจาก UI ภายใต้ provider-neutral contract เดิม เพื่อให้ต่อ `OneDrive approot`/`iCloud`/`AWS-backed mode` ได้โดยไม่เปลี่ยน sync core.
 
 ### Exit Conditions Before Connector Build
 
@@ -426,9 +427,13 @@ Google Drive (`appDataFolder`) vs OneDrive (`approot`) ในมุม SoloStack
 
 ## 10) Open Decisions
 
+Resolved in current cycle:
+- UX decision: ผู้ใช้เลือก provider connector เองได้จาก UI (แทน fixed provider strategy)
+- UX decision: ผู้ใช้ปรับ sync runtime profile เองได้จาก UI ภายใต้ guardrails เดียวกันทุก platform
+
+Remaining open:
 - เลือก backend stack สำหรับ sync service
 - Auth/session model สำหรับ multi-device
-- เกณฑ์เลือก provider connector (Google-first vs Microsoft-first)
 - ขอบเขต telemetry ขั้นต่ำที่ต้องมีใน desktop beta
 - AWS stack decision: Lambda-first หรือ service-first และการเลือก data store หลัก
 - MCP deployment mode: local sidecar vs hosted service
@@ -532,3 +537,112 @@ Definition of Done:
 - MCP AWS hosted profile: `docs/mcp-aws-hosted-profile-v0.1.md`
 - MCP hardening report: `docs/mcp-hardening-report-v0.1.md`
 - MCP load matrix: `docs/mcp-load-matrix-v0.1.md`
+
+## 14) Implementation Kickoff: User-Configurable Sync (UI-first)
+
+ช่วงเป้าหมาย: 2026-02-19 ถึง 2026-03-07
+
+Objective:
+- ทำให้ user ปรับ provider และ runtime profile ได้เองจาก UI โดยไม่ทำให้ sync core แตก contract
+
+### 14A) Data / Contract
+
+- เพิ่ม settings model สำหรับ `sync.provider` และ `sync.provider_config`
+- เพิ่ม settings model สำหรับ `sync.runtime_profile` พร้อม bounds ที่ enforce ได้ทั้ง desktop/mobile
+- ทำ migration ที่ backward-compatible สำหรับผู้ใช้เดิม
+- lock default values:
+  - `provider`: `provider-neutral`
+  - `runtime_profile`: `desktop` หรือ `mobile_beta` ตาม platform seed logic ปัจจุบัน
+
+Definition of Done:
+- อ่าน/เขียนค่าผ่าน settings API เดิมได้ครบ
+- ไม่มี migration regression ใน DB tests
+
+### 14B) Settings UI / UX
+
+- เพิ่ม `Provider` selector ใน `Settings > Sync`
+- แสดง capability card ต่อ provider:
+  - auth requirement
+  - endpoint mode (managed/custom)
+  - known limits/warnings
+- เพิ่ม runtime controls ที่ user แก้ได้เอง:
+  - foreground interval
+  - background interval
+  - push/pull/max-pages limits
+- เพิ่ม UX guardrails:
+  - validation inline
+  - battery/network impact hint
+  - reset-to-recommended button
+
+Definition of Done:
+- flow เปลี่ยน provider/runtime ทำได้ครบจาก UI
+- state ใน UI sync ตรงกับ settings ที่ persist จริง
+
+### 14C) Sync Engine Integration
+
+- สร้าง provider resolver จาก `sync.provider` -> transport config
+- enforce runtime bounds ในชั้นเดียวก่อนเริ่ม loop
+- fallback behavior:
+  - config invalid -> ใช้ last-known-good + แจ้ง warning
+  - provider unavailable -> switch เป็น offline-safe mode
+- เก็บ event ที่จำเป็นใน diagnostics:
+  - provider selected
+  - runtime profile changed
+  - validation rejected
+
+Definition of Done:
+- sync loop ยัง deterministic หลังสลับ provider/runtime
+- ไม่มี crash path เมื่อ config ไม่สมบูรณ์
+
+### 14D) QA / Release
+
+- Unit tests:
+  - provider settings normalization
+  - runtime bounds normalization
+  - fallback/invalid config behavior
+- Integration tests:
+  - settings persist -> restart -> sync loop ใช้ค่าที่ตั้งไว้
+  - provider switch ไม่ทำ outbox/cursor เสีย
+- Playwright:
+  - เปลี่ยน provider จาก UI แล้วเห็นผลใน diagnostics
+  - เปลี่ยน runtime profile + reset/reject invalid values
+
+Quality Gates:
+1. `npm run test`
+2. `npm run test:e2e`
+3. `npm run build`
+
+### 14E) Execution Order (Start now)
+
+1. Freeze schema ของ `sync.provider`/`sync.provider_config`/`sync.runtime_profile` (1 วัน)
+2. Implement settings persistence + normalization (1 วัน)
+3. Implement Settings UI provider selector + capability card (1-2 วัน)
+4. Implement runtime controls + guardrails + reset (1-2 วัน)
+5. Wire sync engine resolver/fallback + diagnostics events (1-2 วัน)
+6. เพิ่ม unit/integration/e2e coverage และปิด quality gates (1-2 วัน)
+
+Acceptance Targets:
+- ผู้ใช้เปลี่ยน provider/runtime จาก UI แล้วมีผลทันทีโดยไม่ restart แอป
+- ค่า invalid ไม่ทำให้ sync พัง และมี feedback ชัดเจน
+- ไม่มี data-loss regression ใน offline/online transition matrix
+
+### 14 Status Update (2026-02-19)
+
+Completed:
+- 14A Data/Contract
+  - เพิ่ม `sync.provider`, `sync.provider_config`, `sync.runtime_profile`
+  - seed/backfill แบบ backward-compatible และ lock default ตาม platform preset
+- 14B Settings UI/UX
+  - เพิ่ม Provider selector + capability card + guardrails ใน `Settings > Sync`
+  - เพิ่ม runtime profile selector + reset recommended + inline validation/impact hint
+- 14C Sync Engine Integration
+  - เพิ่ม provider resolver และ transport status (`ready`, `invalid_config`, `provider_unavailable`, `disabled`)
+  - เพิ่ม fallback `last-known-good` และ offline-safe mode
+  - เพิ่ม diagnostics events: provider selected / runtime profile changed / validation rejected
+- 14D QA/Release verification
+  - เพิ่ม unit/integration/e2e coverage ตาม DoD
+
+Validation Evidence:
+1. `npm run test -- src/lib/database.migration.test.ts src/lib/sync-transport.test.ts src/hooks/use-sync.test.ts` passed (28 tests)
+2. `npm run test:e2e -- e2e/sync-runtime-profile.spec.ts` passed (2 tests)
+3. `npm run build` passed

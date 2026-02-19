@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type ChangeEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type ChangeEvent } from "react";
 import {
   Bell,
   ShieldCheck,
@@ -39,10 +39,13 @@ import type {
   SyncConflictEventRecord,
   SyncConflictRecord,
   SyncConflictResolutionStrategy,
+  SyncProvider,
   SyncRuntimeProfilePreset,
+  SyncRuntimeProfileSetting,
   SyncSessionDiagnostics,
   SyncStatus,
   UpdateSyncEndpointSettingsInput,
+  UpdateSyncProviderSettingsInput,
   UpdateSyncRuntimeSettingsInput,
 } from "@/lib/types";
 import { ManualMergeEditor } from "./ManualMergeEditor";
@@ -58,6 +61,13 @@ interface ReminderSettingsProps {
   syncHasTransport: boolean;
   onSyncNow: () => Promise<void>;
   onRetryLastFailedSync: () => Promise<boolean>;
+  syncProvider: SyncProvider;
+  syncProviderConfig: Record<string, unknown> | null;
+  syncProviderLoading: boolean;
+  syncProviderSaving: boolean;
+  onSaveSyncProviderSettings: (
+    input: UpdateSyncProviderSettingsInput,
+  ) => Promise<void>;
   syncPushUrl: string | null;
   syncPullUrl: string | null;
   syncConfigSaving: boolean;
@@ -68,6 +78,8 @@ interface ReminderSettingsProps {
   syncPullLimit: number;
   syncMaxPullPages: number;
   syncRuntimePreset: SyncRuntimeProfilePreset;
+  syncRuntimeProfileSetting: SyncRuntimeProfileSetting;
+  syncRuntimeProfileLoading: boolean;
   syncDiagnostics: SyncSessionDiagnostics;
   syncRuntimeSaving: boolean;
   onSaveSyncRuntimeSettings: (
@@ -85,6 +97,110 @@ interface ReminderSettingsProps {
     force: boolean;
     sourceName?: string;
   }) => Promise<void>;
+}
+
+interface SyncProviderCapability {
+  label: string;
+  summary: string;
+  authRequirement: string;
+  endpointMode: "custom" | "managed";
+  warnings: string[];
+}
+
+const DESKTOP_RUNTIME_DEFAULTS = {
+  auto_sync_interval_seconds: 60,
+  background_sync_interval_seconds: 300,
+  push_limit: 200,
+  pull_limit: 200,
+  max_pull_pages: 5,
+} as const;
+
+const MOBILE_RUNTIME_DEFAULTS = {
+  auto_sync_interval_seconds: 120,
+  background_sync_interval_seconds: 600,
+  push_limit: 120,
+  pull_limit: 120,
+  max_pull_pages: 3,
+} as const;
+
+const SYNC_RUNTIME_PROFILE_OPTIONS: Array<{
+  value: SyncRuntimeProfileSetting;
+  label: string;
+}> = [
+  { value: "desktop", label: "Desktop" },
+  { value: "mobile_beta", label: "Mobile Beta" },
+  { value: "custom", label: "Custom" },
+];
+
+const SYNC_PROVIDER_CAPABILITIES: Record<SyncProvider, SyncProviderCapability> =
+  {
+    provider_neutral: {
+      label: "Provider Neutral",
+      summary: "Use custom push/pull endpoints you control.",
+      authRequirement: "No provider account required",
+      endpointMode: "custom",
+      warnings: [
+        "You must set both Push URL and Pull URL.",
+        "Best fit for self-hosted sync gateways.",
+      ],
+    },
+    google_appdata: {
+      label: "Google AppData",
+      summary: "Managed Google Drive appDataFolder connector.",
+      authRequirement: "Google OAuth required",
+      endpointMode: "managed",
+      warnings: [
+        "Managed connector rollout is in progress; custom URLs are still used now.",
+        "Subject to Google API quota/rate limits.",
+      ],
+    },
+    onedrive_approot: {
+      label: "Microsoft OneDrive AppRoot",
+      summary: "Managed OneDrive AppRoot connector.",
+      authRequirement: "Microsoft OAuth required",
+      endpointMode: "managed",
+      warnings: [
+        "Managed connector rollout is in progress; custom URLs are still used now.",
+        "Graph API throttling may delay sync retries.",
+      ],
+    },
+    icloud_cloudkit: {
+      label: "Apple iCloud CloudKit",
+      summary: "Managed CloudKit-backed connector.",
+      authRequirement: "Apple ID + iCloud permission required",
+      endpointMode: "managed",
+      warnings: [
+        "Managed connector rollout is in progress; custom URLs are still used now.",
+        "Platform/account constraints may apply outside Apple ecosystem.",
+      ],
+    },
+    solostack_cloud_aws: {
+      label: "SoloStack Cloud (AWS)",
+      summary: "Managed SoloStack-hosted cloud endpoints.",
+      authRequirement: "SoloStack Cloud account required",
+      endpointMode: "managed",
+      warnings: [
+        "Availability may vary by region during rollout.",
+        "Network outages fall back to local-only retries.",
+      ],
+    },
+  };
+
+function getRuntimeDefaultsByProfile(
+  profile: SyncRuntimeProfileSetting,
+  detectedPreset: SyncRuntimeProfilePreset,
+) {
+  if (profile === "desktop") return DESKTOP_RUNTIME_DEFAULTS;
+  if (profile === "mobile_beta") return MOBILE_RUNTIME_DEFAULTS;
+  return detectedPreset === "mobile"
+    ? MOBILE_RUNTIME_DEFAULTS
+    : DESKTOP_RUNTIME_DEFAULTS;
+}
+
+function getRuntimeProfileLabel(profile: SyncRuntimeProfileSetting): string {
+  if (profile === "mobile_beta") return "Mobile Beta";
+  if (profile === "custom") return "Custom";
+  return "Desktop";
 }
 
 function getErrorMessage(error: unknown): string {
@@ -243,6 +359,11 @@ export function ReminderSettings({
   syncHasTransport,
   onSyncNow,
   onRetryLastFailedSync,
+  syncProvider,
+  syncProviderConfig,
+  syncProviderLoading,
+  syncProviderSaving,
+  onSaveSyncProviderSettings,
   syncPushUrl,
   syncPullUrl,
   syncConfigSaving,
@@ -253,6 +374,8 @@ export function ReminderSettings({
   syncPullLimit,
   syncMaxPullPages,
   syncRuntimePreset,
+  syncRuntimeProfileSetting,
+  syncRuntimeProfileLoading,
   syncDiagnostics,
   syncRuntimeSaving,
   onSaveSyncRuntimeSettings,
@@ -273,8 +396,12 @@ export function ReminderSettings({
   );
   const [backupFeedback, setBackupFeedback] = useState<string | null>(null);
   const [backupError, setBackupError] = useState<string | null>(null);
+  const [syncProviderDraft, setSyncProviderDraft] =
+    useState<SyncProvider>("provider_neutral");
   const [syncPushUrlDraft, setSyncPushUrlDraft] = useState<string>("");
   const [syncPullUrlDraft, setSyncPullUrlDraft] = useState<string>("");
+  const [syncRuntimeProfileDraft, setSyncRuntimeProfileDraft] =
+    useState<SyncRuntimeProfileSetting>("desktop");
   const [syncAutoIntervalDraft, setSyncAutoIntervalDraft] =
     useState<string>("");
   const [syncBackgroundIntervalDraft, setSyncBackgroundIntervalDraft] =
@@ -287,6 +414,12 @@ export function ReminderSettings({
     null,
   );
   const [syncConfigError, setSyncConfigError] = useState<string | null>(null);
+  const [syncProviderFeedback, setSyncProviderFeedback] = useState<
+    string | null
+  >(null);
+  const [syncProviderError, setSyncProviderError] = useState<string | null>(
+    null,
+  );
   const [syncRuntimeFeedback, setSyncRuntimeFeedback] = useState<string | null>(
     null,
   );
@@ -319,10 +452,98 @@ export function ReminderSettings({
   const syncConflictObservability = useSyncConflictObservability();
   const conflictObservability = syncConflictObservability.data;
   const backupPreflight = backupRestorePreflight.data;
+  const selectedProviderCapability = useMemo(
+    () =>
+      SYNC_PROVIDER_CAPABILITIES[syncProviderDraft] ??
+      SYNC_PROVIDER_CAPABILITIES.provider_neutral,
+    [syncProviderDraft],
+  );
+  const runtimeDraftNumbers = useMemo(
+    () => ({
+      autoSyncIntervalSeconds: parseIntegerDraft(syncAutoIntervalDraft),
+      backgroundSyncIntervalSeconds: parseIntegerDraft(
+        syncBackgroundIntervalDraft,
+      ),
+      pushLimit: parseIntegerDraft(syncPushLimitDraft),
+      pullLimit: parseIntegerDraft(syncPullLimitDraft),
+      maxPullPages: parseIntegerDraft(syncMaxPullPagesDraft),
+    }),
+    [
+      syncAutoIntervalDraft,
+      syncBackgroundIntervalDraft,
+      syncPushLimitDraft,
+      syncPullLimitDraft,
+      syncMaxPullPagesDraft,
+    ],
+  );
+  const runtimeInlineError = useMemo(() => {
+    const autoSyncIntervalSeconds = runtimeDraftNumbers.autoSyncIntervalSeconds;
+    const backgroundSyncIntervalSeconds =
+      runtimeDraftNumbers.backgroundSyncIntervalSeconds;
+    const pushLimit = runtimeDraftNumbers.pushLimit;
+    const pullLimit = runtimeDraftNumbers.pullLimit;
+    const maxPullPages = runtimeDraftNumbers.maxPullPages;
+
+    if (
+      autoSyncIntervalSeconds === null ||
+      backgroundSyncIntervalSeconds === null ||
+      pushLimit === null ||
+      pullLimit === null ||
+      maxPullPages === null
+    ) {
+      return "All runtime fields must be valid integers.";
+    }
+    if (autoSyncIntervalSeconds < 15 || autoSyncIntervalSeconds > 3600) {
+      return "Foreground interval must be between 15 and 3600 seconds.";
+    }
+    if (
+      backgroundSyncIntervalSeconds < 30 ||
+      backgroundSyncIntervalSeconds > 7200
+    ) {
+      return "Background interval must be between 30 and 7200 seconds.";
+    }
+    if (backgroundSyncIntervalSeconds < autoSyncIntervalSeconds) {
+      return "Background interval must be >= foreground interval.";
+    }
+    if (pushLimit < 20 || pushLimit > 500) {
+      return "Push limit must be between 20 and 500.";
+    }
+    if (pullLimit < 20 || pullLimit > 500) {
+      return "Pull limit must be between 20 and 500.";
+    }
+    if (maxPullPages < 1 || maxPullPages > 20) {
+      return "Max pull pages must be between 1 and 20.";
+    }
+
+    return null;
+  }, [runtimeDraftNumbers]);
+  const runtimeImpactHint = useMemo(() => {
+    const foreground = runtimeDraftNumbers.autoSyncIntervalSeconds ?? 60;
+    const background = runtimeDraftNumbers.backgroundSyncIntervalSeconds ?? 300;
+    const loadPerCycle =
+      (runtimeDraftNumbers.pushLimit ?? 200) +
+      (runtimeDraftNumbers.pullLimit ?? 200) *
+        Math.max(1, runtimeDraftNumbers.maxPullPages ?? 5);
+
+    if (foreground <= 30 || background <= 120) {
+      return "High battery/network impact: short intervals can drain battery faster.";
+    }
+    if (loadPerCycle >= 1200) {
+      return "High data load: large push/pull limits can increase transfer cost.";
+    }
+    if (foreground <= 60 || background <= 300) {
+      return "Balanced profile: good responsiveness with moderate resource usage.";
+    }
+    return "Low impact profile: fewer sync cycles with slower propagation.";
+  }, [runtimeDraftNumbers]);
 
   useEffect(() => {
     void refreshPermissionState(setPermissionState);
   }, []);
+
+  useEffect(() => {
+    setSyncProviderDraft(syncProvider);
+  }, [syncProvider]);
 
   useEffect(() => {
     setSyncPushUrlDraft(syncPushUrl ?? "");
@@ -331,6 +552,10 @@ export function ReminderSettings({
   useEffect(() => {
     setSyncPullUrlDraft(syncPullUrl ?? "");
   }, [syncPullUrl]);
+
+  useEffect(() => {
+    setSyncRuntimeProfileDraft(syncRuntimeProfileSetting);
+  }, [syncRuntimeProfileSetting]);
 
   useEffect(() => {
     setSyncAutoIntervalDraft(String(syncAutoIntervalSeconds));
@@ -562,37 +787,78 @@ export function ReminderSettings({
     }
   };
 
-  const handleApplyDesktopSyncPreset = () => {
+  const applyRuntimeDefaults = (profile: SyncRuntimeProfileSetting) => {
+    const defaults = getRuntimeDefaultsByProfile(profile, syncRuntimePreset);
+    setSyncRuntimeProfileDraft(profile);
     setSyncRuntimeFeedback(null);
     setSyncRuntimeError(null);
-    setSyncAutoIntervalDraft("60");
-    setSyncBackgroundIntervalDraft("300");
-    setSyncPushLimitDraft("200");
-    setSyncPullLimitDraft("200");
-    setSyncMaxPullPagesDraft("5");
+    setSyncAutoIntervalDraft(String(defaults.auto_sync_interval_seconds));
+    setSyncBackgroundIntervalDraft(
+      String(defaults.background_sync_interval_seconds),
+    );
+    setSyncPushLimitDraft(String(defaults.push_limit));
+    setSyncPullLimitDraft(String(defaults.pull_limit));
+    setSyncMaxPullPagesDraft(String(defaults.max_pull_pages));
+  };
+
+  const handleSaveSyncProvider = async () => {
+    setSyncProviderFeedback(null);
+    setSyncProviderError(null);
+
+    const providerCapability =
+      SYNC_PROVIDER_CAPABILITIES[syncProviderDraft] ??
+      SYNC_PROVIDER_CAPABILITIES.provider_neutral;
+    const nextProviderConfig: Record<string, unknown> = {
+      ...(syncProviderConfig ?? {}),
+      endpoint_mode: providerCapability.endpointMode,
+      auth_requirement: providerCapability.authRequirement,
+    };
+
+    try {
+      await onSaveSyncProviderSettings({
+        provider: syncProviderDraft,
+        provider_config: nextProviderConfig,
+      });
+      setSyncProviderFeedback("Sync provider was saved.");
+    } catch (error) {
+      setSyncProviderError(getErrorMessage(error));
+    }
+  };
+
+  const handleApplyDesktopSyncPreset = () => {
+    applyRuntimeDefaults("desktop");
   };
 
   const handleApplyMobileSyncPreset = () => {
-    setSyncRuntimeFeedback(null);
-    setSyncRuntimeError(null);
-    setSyncAutoIntervalDraft("120");
-    setSyncBackgroundIntervalDraft("600");
-    setSyncPushLimitDraft("120");
-    setSyncPullLimitDraft("120");
-    setSyncMaxPullPagesDraft("3");
+    applyRuntimeDefaults("mobile_beta");
+  };
+
+  const handleResetRecommendedRuntime = () => {
+    const recommendedProfile =
+      syncRuntimePreset === "mobile" ? "mobile_beta" : "desktop";
+    applyRuntimeDefaults(recommendedProfile);
+    setSyncRuntimeFeedback(
+      `Runtime reset to recommended ${getRuntimeProfileLabel(
+        recommendedProfile,
+      )} profile.`,
+    );
   };
 
   const handleSaveSyncRuntimeProfile = async () => {
     setSyncRuntimeFeedback(null);
     setSyncRuntimeError(null);
 
-    const autoSyncIntervalSeconds = parseIntegerDraft(syncAutoIntervalDraft);
-    const backgroundSyncIntervalSeconds = parseIntegerDraft(
-      syncBackgroundIntervalDraft,
-    );
-    const pushLimit = parseIntegerDraft(syncPushLimitDraft);
-    const pullLimit = parseIntegerDraft(syncPullLimitDraft);
-    const maxPullPages = parseIntegerDraft(syncMaxPullPagesDraft);
+    if (runtimeInlineError) {
+      setSyncRuntimeError(runtimeInlineError);
+      return;
+    }
+
+    const autoSyncIntervalSeconds = runtimeDraftNumbers.autoSyncIntervalSeconds;
+    const backgroundSyncIntervalSeconds =
+      runtimeDraftNumbers.backgroundSyncIntervalSeconds;
+    const pushLimit = runtimeDraftNumbers.pushLimit;
+    const pullLimit = runtimeDraftNumbers.pullLimit;
+    const maxPullPages = runtimeDraftNumbers.maxPullPages;
 
     if (
       autoSyncIntervalSeconds === null ||
@@ -601,41 +867,7 @@ export function ReminderSettings({
       pullLimit === null ||
       maxPullPages === null
     ) {
-      setSyncRuntimeError("All runtime fields must be valid integers.");
-      return;
-    }
-
-    if (autoSyncIntervalSeconds < 15 || autoSyncIntervalSeconds > 3600) {
-      setSyncRuntimeError(
-        "Foreground interval must be between 15 and 3600 seconds.",
-      );
-      return;
-    }
-    if (
-      backgroundSyncIntervalSeconds < 30 ||
-      backgroundSyncIntervalSeconds > 7200
-    ) {
-      setSyncRuntimeError(
-        "Background interval must be between 30 and 7200 seconds.",
-      );
-      return;
-    }
-    if (backgroundSyncIntervalSeconds < autoSyncIntervalSeconds) {
-      setSyncRuntimeError(
-        "Background interval must be >= foreground interval.",
-      );
-      return;
-    }
-    if (pushLimit < 20 || pushLimit > 500) {
-      setSyncRuntimeError("Push limit must be between 20 and 500.");
-      return;
-    }
-    if (pullLimit < 20 || pullLimit > 500) {
-      setSyncRuntimeError("Pull limit must be between 20 and 500.");
-      return;
-    }
-    if (maxPullPages < 1 || maxPullPages > 20) {
-      setSyncRuntimeError("Max pull pages must be between 1 and 20.");
+      setSyncRuntimeError("Runtime values are incomplete.");
       return;
     }
 
@@ -646,8 +878,13 @@ export function ReminderSettings({
         push_limit: pushLimit,
         pull_limit: pullLimit,
         max_pull_pages: maxPullPages,
+        runtime_profile: syncRuntimeProfileDraft,
       });
-      setSyncRuntimeFeedback("Sync runtime profile was saved.");
+      setSyncRuntimeFeedback(
+        `Sync runtime profile (${getRuntimeProfileLabel(
+          syncRuntimeProfileDraft,
+        )}) was saved.`,
+      );
     } catch (error) {
       setSyncRuntimeError(getErrorMessage(error));
     }
@@ -1061,6 +1298,89 @@ export function ReminderSettings({
           )}
         </div>
 
+        <div className="sync-provider-card">
+          <div className="sync-provider-head">
+            <p className="settings-row-title">Sync Provider</p>
+            <p className="settings-row-subtitle">
+              Select provider from UI. Core sync contract remains
+              provider-neutral.
+            </p>
+          </div>
+
+          <div className="sync-provider-grid">
+            <label className="settings-field">
+              <span className="settings-field-label">Provider</span>
+              <select
+                className="settings-input settings-select"
+                value={syncProviderDraft}
+                onChange={(event) => {
+                  setSyncProviderFeedback(null);
+                  setSyncProviderError(null);
+                  setSyncProviderDraft(event.target.value as SyncProvider);
+                }}
+                disabled={syncProviderSaving || syncProviderLoading}
+              >
+                {Object.entries(SYNC_PROVIDER_CAPABILITIES).map(
+                  ([providerKey, capability]) => (
+                    <option value={providerKey} key={providerKey}>
+                      {capability.label}
+                    </option>
+                  ),
+                )}
+              </select>
+            </label>
+          </div>
+
+          <div className="sync-provider-capability-card">
+            <p className="settings-row-subtitle">
+              {selectedProviderCapability.summary}
+            </p>
+            <p className="settings-row-subtitle">
+              Auth requirement: {selectedProviderCapability.authRequirement}
+            </p>
+            <p className="settings-row-subtitle">
+              Endpoint mode:{" "}
+              {selectedProviderCapability.endpointMode === "managed"
+                ? "Managed"
+                : "Custom"}
+            </p>
+            <div className="sync-provider-warning-list">
+              {selectedProviderCapability.warnings.map((warning) => (
+                <p className="settings-row-subtitle" key={warning}>
+                  - {warning}
+                </p>
+              ))}
+            </div>
+          </div>
+
+          <div className="settings-actions">
+            <button
+              type="button"
+              className="settings-btn settings-btn-primary"
+              onClick={() => void handleSaveSyncProvider()}
+              disabled={syncProviderSaving || syncProviderLoading}
+            >
+              {syncProviderSaving ? "Saving..." : "Save Provider"}
+            </button>
+          </div>
+
+          {syncProviderFeedback && (
+            <p className="settings-feedback">{syncProviderFeedback}</p>
+          )}
+          {syncProviderError && (
+            <p className="settings-feedback settings-feedback-error">
+              {syncProviderError}
+            </p>
+          )}
+        </div>
+
+        <p className="settings-row-subtitle">
+          Endpoint mode:{" "}
+          {selectedProviderCapability.endpointMode === "managed"
+            ? "Managed provider selected (custom URLs are still used in current build)."
+            : "Custom endpoints required."}
+        </p>
+
         <div className="sync-endpoint-grid">
           <label className="settings-field">
             <span className="settings-field-label">Push URL</span>
@@ -1073,7 +1393,7 @@ export function ReminderSettings({
               placeholder="https://sync.example.com/v1/sync/push"
               value={syncPushUrlDraft}
               onChange={(event) => setSyncPushUrlDraft(event.target.value)}
-              disabled={syncConfigSaving}
+              disabled={syncConfigSaving || syncProviderLoading}
             />
           </label>
           <label className="settings-field">
@@ -1087,7 +1407,7 @@ export function ReminderSettings({
               placeholder="https://sync.example.com/v1/sync/pull"
               value={syncPullUrlDraft}
               onChange={(event) => setSyncPullUrlDraft(event.target.value)}
-              disabled={syncConfigSaving}
+              disabled={syncConfigSaving || syncProviderLoading}
             />
           </label>
         </div>
@@ -1101,6 +1421,27 @@ export function ReminderSettings({
           </div>
           <div className="sync-runtime-grid">
             <label className="settings-field">
+              <span className="settings-field-label">Profile</span>
+              <select
+                className="settings-input settings-select"
+                value={syncRuntimeProfileDraft}
+                onChange={(event) => {
+                  setSyncRuntimeFeedback(null);
+                  setSyncRuntimeError(null);
+                  setSyncRuntimeProfileDraft(
+                    event.target.value as SyncRuntimeProfileSetting,
+                  );
+                }}
+                disabled={syncRuntimeSaving || syncRuntimeProfileLoading}
+              >
+                {SYNC_RUNTIME_PROFILE_OPTIONS.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="settings-field">
               <span className="settings-field-label">
                 Foreground Interval (s)
               </span>
@@ -1111,9 +1452,12 @@ export function ReminderSettings({
                 max={3600}
                 step={1}
                 value={syncAutoIntervalDraft}
-                onChange={(event) =>
-                  setSyncAutoIntervalDraft(event.target.value)
-                }
+                onChange={(event) => {
+                  setSyncRuntimeFeedback(null);
+                  setSyncRuntimeError(null);
+                  setSyncAutoIntervalDraft(event.target.value);
+                  setSyncRuntimeProfileDraft("custom");
+                }}
                 disabled={syncRuntimeSaving}
               />
             </label>
@@ -1128,9 +1472,12 @@ export function ReminderSettings({
                 max={7200}
                 step={1}
                 value={syncBackgroundIntervalDraft}
-                onChange={(event) =>
-                  setSyncBackgroundIntervalDraft(event.target.value)
-                }
+                onChange={(event) => {
+                  setSyncRuntimeFeedback(null);
+                  setSyncRuntimeError(null);
+                  setSyncBackgroundIntervalDraft(event.target.value);
+                  setSyncRuntimeProfileDraft("custom");
+                }}
                 disabled={syncRuntimeSaving}
               />
             </label>
@@ -1143,7 +1490,12 @@ export function ReminderSettings({
                 max={500}
                 step={1}
                 value={syncPushLimitDraft}
-                onChange={(event) => setSyncPushLimitDraft(event.target.value)}
+                onChange={(event) => {
+                  setSyncRuntimeFeedback(null);
+                  setSyncRuntimeError(null);
+                  setSyncPushLimitDraft(event.target.value);
+                  setSyncRuntimeProfileDraft("custom");
+                }}
                 disabled={syncRuntimeSaving}
               />
             </label>
@@ -1156,7 +1508,12 @@ export function ReminderSettings({
                 max={500}
                 step={1}
                 value={syncPullLimitDraft}
-                onChange={(event) => setSyncPullLimitDraft(event.target.value)}
+                onChange={(event) => {
+                  setSyncRuntimeFeedback(null);
+                  setSyncRuntimeError(null);
+                  setSyncPullLimitDraft(event.target.value);
+                  setSyncRuntimeProfileDraft("custom");
+                }}
                 disabled={syncRuntimeSaving}
               />
             </label>
@@ -1169,13 +1526,22 @@ export function ReminderSettings({
                 max={20}
                 step={1}
                 value={syncMaxPullPagesDraft}
-                onChange={(event) =>
-                  setSyncMaxPullPagesDraft(event.target.value)
-                }
+                onChange={(event) => {
+                  setSyncRuntimeFeedback(null);
+                  setSyncRuntimeError(null);
+                  setSyncMaxPullPagesDraft(event.target.value);
+                  setSyncRuntimeProfileDraft("custom");
+                }}
                 disabled={syncRuntimeSaving}
               />
             </label>
           </div>
+          <p className="settings-row-subtitle">{runtimeImpactHint}</p>
+          {runtimeInlineError && (
+            <p className="settings-feedback settings-feedback-error">
+              {runtimeInlineError}
+            </p>
+          )}
           <div className="settings-actions">
             <button
               type="button"
@@ -1192,6 +1558,14 @@ export function ReminderSettings({
               disabled={syncRuntimeSaving}
             >
               Mobile Beta Preset
+            </button>
+            <button
+              type="button"
+              className="settings-btn"
+              onClick={handleResetRecommendedRuntime}
+              disabled={syncRuntimeSaving}
+            >
+              Reset Recommended
             </button>
             <button
               type="button"
@@ -1219,6 +1593,16 @@ export function ReminderSettings({
                 : "Desktop (detected)"}
             </p>
             <p className="settings-row-subtitle">
+              Runtime profile: {getRuntimeProfileLabel(syncRuntimeProfileDraft)}
+            </p>
+            <p className="settings-row-subtitle">
+              Provider (sync loop):{" "}
+              {syncDiagnostics.selected_provider
+                ? (SYNC_PROVIDER_CAPABILITIES[syncDiagnostics.selected_provider]
+                    ?.label ?? syncDiagnostics.selected_provider)
+                : "Not selected yet"}
+            </p>
+            <p className="settings-row-subtitle">
               Success rate: {syncDiagnostics.success_rate_percent.toFixed(1)}% (
               {syncDiagnostics.successful_cycles}/{syncDiagnostics.total_cycles}
               )
@@ -1238,6 +1622,23 @@ export function ReminderSettings({
             <p className="settings-row-subtitle">
               Conflict cycles: {syncDiagnostics.conflict_cycles}
             </p>
+            <p className="settings-row-subtitle">
+              Provider selected events:{" "}
+              {syncDiagnostics.provider_selected_events}
+            </p>
+            <p className="settings-row-subtitle">
+              Runtime profile change events:{" "}
+              {syncDiagnostics.runtime_profile_changed_events}
+            </p>
+            <p className="settings-row-subtitle">
+              Validation rejected events:{" "}
+              {syncDiagnostics.validation_rejected_events}
+            </p>
+            {syncDiagnostics.last_warning && (
+              <p className="settings-row-subtitle">
+                Last warning: {syncDiagnostics.last_warning}
+              </p>
+            )}
           </div>
           <div className="sync-observability-card">
             <p className="settings-row-title">Conflict Observability</p>
@@ -1769,6 +2170,34 @@ export function ReminderSettings({
           padding: 10px;
           margin-bottom: 10px;
         }
+        .sync-provider-card {
+          border: 1px solid var(--border-default);
+          border-radius: var(--radius-md);
+          background: var(--bg-surface);
+          padding: 10px;
+          margin-bottom: 10px;
+        }
+        .sync-provider-head {
+          margin-bottom: 8px;
+        }
+        .sync-provider-grid {
+          display: grid;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 8px;
+          margin-bottom: 8px;
+        }
+        .sync-provider-capability-card {
+          border: 1px solid var(--border-default);
+          border-radius: var(--radius-md);
+          background: var(--bg-elevated);
+          padding: 8px;
+          margin-bottom: 10px;
+        }
+        .sync-provider-warning-list {
+          display: grid;
+          gap: 2px;
+          margin-top: 4px;
+        }
         .sync-observability-card {
           border-top: 1px solid var(--border-default);
           margin-top: 10px;
@@ -1811,6 +2240,9 @@ export function ReminderSettings({
           padding: 0 10px;
           font-family: inherit;
         }
+        .settings-select {
+          appearance: none;
+        }
         .settings-input:focus {
           outline: none;
           border-color: var(--accent);
@@ -1847,6 +2279,9 @@ export function ReminderSettings({
             grid-template-columns: 1fr;
           }
           .sync-runtime-grid {
+            grid-template-columns: 1fr;
+          }
+          .sync-provider-grid {
             grid-template-columns: 1fr;
           }
           .sync-endpoint-grid {

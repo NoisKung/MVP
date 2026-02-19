@@ -30,9 +30,12 @@ import {
   listSyncConflictEvents,
   restoreLatestBackupPayload,
   getSyncEndpointSettings,
+  getSyncProviderSettings,
+  getSyncRuntimeProfileSettings,
   ensureSyncRuntimeSettingsSeeded,
   resolveSyncConflict,
   updateSyncEndpointSettings,
+  updateSyncProviderSettings,
   updateSyncRuntimeSettings,
 } from "@/lib/database";
 import type {
@@ -47,11 +50,13 @@ import type {
   SyncConflictReportPayload,
   SyncConflictStatus,
   UpdateSyncEndpointSettingsInput,
+  UpdateSyncProviderSettingsInput,
   SyncRuntimeProfilePreset,
   UpdateSyncRuntimeSettingsInput,
   UpdateTaskSubtaskInput,
   UpdateTaskInput,
   SyncEndpointSettings,
+  SyncProviderSettings,
   SyncRuntimeSettings,
   UpsertTaskTemplateInput,
 } from "@/lib/types";
@@ -67,7 +72,11 @@ const TASK_SUBTASK_STATS_KEY = ["task-subtask-stats"] as const;
 const TASK_TEMPLATES_KEY = ["task-templates"] as const;
 const PROJECTS_KEY = ["projects"] as const;
 const SYNC_SETTINGS_KEY = ["sync-settings"] as const;
+const SYNC_PROVIDER_SETTINGS_KEY = ["sync-provider-settings"] as const;
 const SYNC_RUNTIME_SETTINGS_KEY = ["sync-runtime-settings"] as const;
+const SYNC_RUNTIME_PROFILE_SETTINGS_KEY = [
+  "sync-runtime-profile-settings",
+] as const;
 const SYNC_CONFLICTS_KEY = ["sync-conflicts"] as const;
 const SYNC_CONFLICT_EVENTS_KEY = ["sync-conflict-events"] as const;
 const SYNC_CONFLICT_OBSERVABILITY_KEY = [
@@ -354,6 +363,37 @@ export function useUpdateSyncSettings() {
   });
 }
 
+/** Read sync provider settings stored in local SQLite */
+export function useSyncProviderSettings() {
+  return useQuery({
+    queryKey: SYNC_PROVIDER_SETTINGS_KEY,
+    queryFn: getSyncProviderSettings,
+  });
+}
+
+/** Update sync provider settings in local SQLite */
+export function useUpdateSyncProviderSettings() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (input: UpdateSyncProviderSettingsInput) =>
+      updateSyncProviderSettings(input),
+    onSuccess: (_result: SyncProviderSettings) => {
+      queryClient.invalidateQueries({ queryKey: SYNC_PROVIDER_SETTINGS_KEY });
+    },
+  });
+}
+
+/** Read selected sync runtime profile setting */
+export function useSyncRuntimeProfileSettings(
+  preset: SyncRuntimeProfilePreset = "desktop",
+) {
+  return useQuery({
+    queryKey: [...SYNC_RUNTIME_PROFILE_SETTINGS_KEY, preset],
+    queryFn: () => getSyncRuntimeProfileSettings(preset),
+  });
+}
+
 /** Read sync runtime settings (intervals + limits) */
 export function useSyncRuntimeSettings(
   preset: SyncRuntimeProfilePreset = "desktop",
@@ -373,6 +413,9 @@ export function useUpdateSyncRuntimeSettings() {
       updateSyncRuntimeSettings(input),
     onSuccess: (_result: SyncRuntimeSettings) => {
       queryClient.invalidateQueries({ queryKey: SYNC_RUNTIME_SETTINGS_KEY });
+      queryClient.invalidateQueries({
+        queryKey: SYNC_RUNTIME_PROFILE_SETTINGS_KEY,
+      });
     },
   });
 }

@@ -282,6 +282,12 @@ export interface SyncSessionDiagnostics {
   average_cycle_duration_ms: number | null;
   last_attempt_at: string | null;
   last_success_at: string | null;
+  selected_provider: SyncProvider | null;
+  runtime_profile: SyncRuntimeProfileSetting | null;
+  provider_selected_events: number;
+  runtime_profile_changed_events: number;
+  validation_rejected_events: number;
+  last_warning: string | null;
 }
 
 export interface SyncCheckpoint {
@@ -301,7 +307,29 @@ export interface UpdateSyncEndpointSettingsInput {
   pull_url: string | null;
 }
 
+export type SyncProvider =
+  | "provider_neutral"
+  | "google_appdata"
+  | "onedrive_approot"
+  | "icloud_cloudkit"
+  | "solostack_cloud_aws";
+
+export interface SyncProviderSettings {
+  provider: SyncProvider;
+  provider_config: Record<string, unknown> | null;
+}
+
+export interface UpdateSyncProviderSettingsInput {
+  provider: SyncProvider;
+  provider_config?: Record<string, unknown> | null;
+}
+
 export type SyncRuntimeProfilePreset = "desktop" | "mobile";
+export type SyncRuntimeProfileSetting = "desktop" | "mobile_beta" | "custom";
+
+export interface SyncRuntimeProfileSettings {
+  runtime_profile: SyncRuntimeProfileSetting;
+}
 
 export interface SyncRuntimeSettings {
   auto_sync_interval_seconds: number;
@@ -317,6 +345,7 @@ export interface UpdateSyncRuntimeSettingsInput {
   push_limit: number;
   pull_limit: number;
   max_pull_pages: number;
+  runtime_profile?: SyncRuntimeProfileSetting;
 }
 
 export interface SyncOutboxRecord {

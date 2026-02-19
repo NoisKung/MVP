@@ -28,8 +28,11 @@ import {
   useResolveSyncConflict,
   useRestoreLatestBackup,
   useSyncConflicts,
+  useSyncProviderSettings,
+  useSyncRuntimeProfileSettings,
   useSyncRuntimeSettings,
   useSyncSettings,
+  useUpdateSyncProviderSettings,
   useUpdateSyncRuntimeSettings,
   useUpdateSyncSettings,
 } from "./hooks/use-tasks";
@@ -46,8 +49,11 @@ import type {
   SyncConflictRecord,
   ResolveSyncConflictInput,
   SyncPushChange,
+  SyncProvider,
+  SyncRuntimeProfileSetting,
   SyncStatus,
   UpdateSyncEndpointSettingsInput,
+  UpdateSyncProviderSettingsInput,
   UpdateSyncRuntimeSettingsInput,
 } from "./lib/types";
 import {
@@ -422,6 +428,15 @@ function AppContent() {
   const { data: syncConflicts = [], isLoading: isSyncConflictsLoading } =
     useSyncConflicts("open", 50);
   const resolveSyncConflict = useResolveSyncConflict();
+  const {
+    data: syncProviderSettings,
+    isLoading: isSyncProviderSettingsLoading,
+  } = useSyncProviderSettings();
+  const updateSyncProviderSettings = useUpdateSyncProviderSettings();
+  const {
+    data: syncRuntimeProfileSettings,
+    isLoading: isSyncRuntimeProfileSettingsLoading,
+  } = useSyncRuntimeProfileSettings(syncRuntimePreset);
   const { data: syncRuntimeSettings, isLoading: isSyncRuntimeSettingsLoading } =
     useSyncRuntimeSettings(syncRuntimePreset);
   const updateSyncRuntimeSettings = useUpdateSyncRuntimeSettings();
@@ -474,6 +489,23 @@ function AppContent() {
   const [e2eTransportPullUrl, setE2ETransportPullUrl] = useState<string | null>(
     null,
   );
+  const [e2eSyncProvider, setE2ESyncProvider] =
+    useState<SyncProvider>("provider_neutral");
+  const [e2eSyncProviderConfig, setE2ESyncProviderConfig] = useState<Record<
+    string,
+    unknown
+  > | null>(null);
+  const [e2eSyncRuntimeProfile, setE2ESyncRuntimeProfile] =
+    useState<SyncRuntimeProfileSetting>(() =>
+      syncRuntimePreset === "mobile" ? "mobile_beta" : "desktop",
+    );
+  const [e2eSyncRuntimeSettings, setE2ESyncRuntimeSettings] = useState({
+    auto_sync_interval_seconds: 60,
+    background_sync_interval_seconds: 300,
+    push_limit: 200,
+    pull_limit: 200,
+    max_pull_pages: 5,
+  });
   const e2eTransportCursorRef = useRef<string | null>(null);
   const e2eTransportOutboxRef = useRef<SyncPushChange[]>([]);
   const e2eResolvedIncomingKeysRef = useRef<Set<string>>(new Set());
@@ -489,17 +521,57 @@ function AppContent() {
   const [isE2ESyncRunning, setIsE2ESyncRunning] = useState(false);
   const undoQueueRef = useRef<UndoQueueItem[]>([]);
   const undoTimerRef = useRef<number | null>(null);
+  const effectiveSyncProvider =
+    e2eBridgeEnabled && e2eTransportModeEnabled
+      ? e2eSyncProvider
+      : (syncProviderSettings?.provider ?? "provider_neutral");
+  const effectiveSyncProviderConfig =
+    e2eBridgeEnabled && e2eTransportModeEnabled
+      ? e2eSyncProviderConfig
+      : (syncProviderSettings?.provider_config ?? null);
+  const effectiveSyncRuntimeProfile =
+    e2eBridgeEnabled && e2eTransportModeEnabled
+      ? e2eSyncRuntimeProfile
+      : (syncRuntimeProfileSettings?.runtime_profile ??
+        (syncRuntimePreset === "mobile" ? "mobile_beta" : "desktop"));
+  const effectiveSyncRuntimeSettings =
+    e2eBridgeEnabled && e2eTransportModeEnabled
+      ? e2eSyncRuntimeSettings
+      : {
+          auto_sync_interval_seconds:
+            syncRuntimeSettings?.auto_sync_interval_seconds ?? 60,
+          background_sync_interval_seconds:
+            syncRuntimeSettings?.background_sync_interval_seconds ?? 300,
+          push_limit: syncRuntimeSettings?.push_limit ?? 200,
+          pull_limit: syncRuntimeSettings?.pull_limit ?? 200,
+          max_pull_pages: syncRuntimeSettings?.max_pull_pages ?? 5,
+        };
   const sync = useSync({
-    pushUrl: syncSettings?.push_url ?? null,
-    pullUrl: syncSettings?.pull_url ?? null,
-    configReady: !isSyncSettingsLoading && !isSyncRuntimeSettingsLoading,
+    pushUrl:
+      e2eBridgeEnabled && e2eTransportModeEnabled
+        ? e2eTransportPushUrl
+        : (syncSettings?.push_url ?? null),
+    pullUrl:
+      e2eBridgeEnabled && e2eTransportModeEnabled
+        ? e2eTransportPullUrl
+        : (syncSettings?.pull_url ?? null),
+    provider: effectiveSyncProvider,
+    providerConfig: effectiveSyncProviderConfig,
+    runtimeProfile: effectiveSyncRuntimeProfile,
+    configReady:
+      e2eBridgeEnabled && e2eTransportModeEnabled
+        ? true
+        : !isSyncSettingsLoading &&
+          !isSyncRuntimeSettingsLoading &&
+          !isSyncProviderSettingsLoading &&
+          !isSyncRuntimeProfileSettingsLoading,
     autoSyncIntervalMs:
-      (syncRuntimeSettings?.auto_sync_interval_seconds ?? 60) * 1000,
+      effectiveSyncRuntimeSettings.auto_sync_interval_seconds * 1000,
     backgroundSyncIntervalMs:
-      (syncRuntimeSettings?.background_sync_interval_seconds ?? 300) * 1000,
-    pushLimit: syncRuntimeSettings?.push_limit ?? 200,
-    pullLimit: syncRuntimeSettings?.pull_limit ?? 200,
-    maxPullPages: syncRuntimeSettings?.max_pull_pages ?? 5,
+      effectiveSyncRuntimeSettings.background_sync_interval_seconds * 1000,
+    pushLimit: effectiveSyncRuntimeSettings.push_limit,
+    pullLimit: effectiveSyncRuntimeSettings.pull_limit,
+    maxPullPages: effectiveSyncRuntimeSettings.max_pull_pages,
   });
   const visibleSyncStatus = e2eBridgeEnabled ? e2eSyncStatus : sync.status;
   const visibleSyncLastSyncedAt = e2eBridgeEnabled
@@ -612,6 +684,7 @@ function AppContent() {
     (e2eBridgeEnabled
       ? isE2EConflictResolving
       : resolveSyncConflict.isPending) ||
+    updateSyncProviderSettings.isPending ||
     updateSyncSettings.isPending ||
     updateSyncRuntimeSettings.isPending;
   const autosaveIndicator = useMemo(
@@ -1070,6 +1143,19 @@ function AppContent() {
   );
   const handleSaveSyncRuntimeSettings = useCallback(
     async (input: UpdateSyncRuntimeSettingsInput): Promise<void> => {
+      if (e2eBridgeEnabled && e2eTransportModeEnabled) {
+        setE2ESyncRuntimeSettings({
+          auto_sync_interval_seconds: input.auto_sync_interval_seconds,
+          background_sync_interval_seconds:
+            input.background_sync_interval_seconds,
+          push_limit: input.push_limit,
+          pull_limit: input.pull_limit,
+          max_pull_pages: input.max_pull_pages,
+        });
+        setE2ESyncRuntimeProfile(input.runtime_profile ?? "custom");
+        markAutosaveSuccess();
+        return;
+      }
       try {
         await updateSyncRuntimeSettings.mutateAsync(input);
         markAutosaveSuccess();
@@ -1078,7 +1164,37 @@ function AppContent() {
         throw error;
       }
     },
-    [markAutosaveFailure, markAutosaveSuccess, updateSyncRuntimeSettings],
+    [
+      e2eBridgeEnabled,
+      e2eTransportModeEnabled,
+      markAutosaveFailure,
+      markAutosaveSuccess,
+      updateSyncRuntimeSettings,
+    ],
+  );
+  const handleSaveSyncProviderSettings = useCallback(
+    async (input: UpdateSyncProviderSettingsInput): Promise<void> => {
+      if (e2eBridgeEnabled && e2eTransportModeEnabled) {
+        setE2ESyncProvider(input.provider);
+        setE2ESyncProviderConfig(input.provider_config ?? null);
+        markAutosaveSuccess();
+        return;
+      }
+      try {
+        await updateSyncProviderSettings.mutateAsync(input);
+        markAutosaveSuccess();
+      } catch (error) {
+        markAutosaveFailure(error);
+        throw error;
+      }
+    },
+    [
+      e2eBridgeEnabled,
+      e2eTransportModeEnabled,
+      markAutosaveFailure,
+      markAutosaveSuccess,
+      updateSyncProviderSettings,
+    ],
   );
 
   const closeQuickCapture = useCallback(() => {
@@ -1129,6 +1245,18 @@ function AppContent() {
     setE2eOpenConflicts([]);
     setE2ETransportPushUrl(null);
     setE2ETransportPullUrl(null);
+    setE2ESyncProvider("provider_neutral");
+    setE2ESyncProviderConfig(null);
+    setE2ESyncRuntimeProfile(
+      syncRuntimePreset === "mobile" ? "mobile_beta" : "desktop",
+    );
+    setE2ESyncRuntimeSettings({
+      auto_sync_interval_seconds: 60,
+      background_sync_interval_seconds: 300,
+      push_limit: 200,
+      pull_limit: 200,
+      max_pull_pages: 5,
+    });
     e2eTransportCursorRef.current = null;
     e2eTransportOutboxRef.current = [];
     e2eResolvedIncomingKeysRef.current = new Set();
@@ -1137,7 +1265,7 @@ function AppContent() {
     setE2ESyncLastSyncedAt(null);
     setE2ESyncLastError(null);
     setIsE2ESyncRunning(false);
-  }, [e2eTransportModeEnabled]);
+  }, [e2eTransportModeEnabled, syncRuntimePreset]);
 
   const handleE2ESeedTaskFieldConflict = useCallback(() => {
     const fixture = createE2EConflictFixture();
@@ -1696,6 +1824,19 @@ function AppContent() {
       onRetryLastFailedSync={visibleRetryLastFailedSync}
       syncPushUrl={visibleSyncPushUrl}
       syncPullUrl={visibleSyncPullUrl}
+      syncProvider={effectiveSyncProvider}
+      syncProviderConfig={effectiveSyncProviderConfig}
+      syncProviderLoading={
+        e2eBridgeEnabled && e2eTransportModeEnabled
+          ? false
+          : isSyncProviderSettingsLoading
+      }
+      syncProviderSaving={
+        e2eBridgeEnabled && e2eTransportModeEnabled
+          ? false
+          : updateSyncProviderSettings.isPending
+      }
+      onSaveSyncProviderSettings={handleSaveSyncProviderSettings}
       syncConfigSaving={
         e2eBridgeEnabled && e2eTransportModeEnabled
           ? false
@@ -1703,17 +1844,27 @@ function AppContent() {
       }
       onSaveSyncSettings={handleSaveSyncSettings}
       syncAutoIntervalSeconds={
-        syncRuntimeSettings?.auto_sync_interval_seconds ?? 60
+        effectiveSyncRuntimeSettings.auto_sync_interval_seconds
       }
       syncBackgroundIntervalSeconds={
-        syncRuntimeSettings?.background_sync_interval_seconds ?? 300
+        effectiveSyncRuntimeSettings.background_sync_interval_seconds
       }
-      syncPushLimit={syncRuntimeSettings?.push_limit ?? 200}
-      syncPullLimit={syncRuntimeSettings?.pull_limit ?? 200}
-      syncMaxPullPages={syncRuntimeSettings?.max_pull_pages ?? 5}
+      syncPushLimit={effectiveSyncRuntimeSettings.push_limit}
+      syncPullLimit={effectiveSyncRuntimeSettings.pull_limit}
+      syncMaxPullPages={effectiveSyncRuntimeSettings.max_pull_pages}
       syncRuntimePreset={syncRuntimePreset}
+      syncRuntimeProfileSetting={effectiveSyncRuntimeProfile}
+      syncRuntimeProfileLoading={
+        e2eBridgeEnabled && e2eTransportModeEnabled
+          ? false
+          : isSyncRuntimeProfileSettingsLoading
+      }
       syncDiagnostics={sync.diagnostics}
-      syncRuntimeSaving={updateSyncRuntimeSettings.isPending}
+      syncRuntimeSaving={
+        e2eBridgeEnabled && e2eTransportModeEnabled
+          ? false
+          : updateSyncRuntimeSettings.isPending
+      }
       onSaveSyncRuntimeSettings={handleSaveSyncRuntimeSettings}
       syncConflicts={visibleSyncConflicts}
       syncConflictsLoading={visibleSyncConflictsLoading}
