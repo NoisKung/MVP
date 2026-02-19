@@ -13,6 +13,8 @@ import { WeeklyReviewView } from "./components/WeeklyReviewView";
 import { ReminderSettings } from "./components/ReminderSettings";
 import { TaskFiltersBar } from "./components/TaskFiltersBar";
 import { CommandPalette } from "./components/CommandPalette";
+import { GlobalUndoBar } from "./components/GlobalUndoBar";
+import { ShortcutHelpModal } from "./components/ShortcutHelpModal";
 import {
   useTasks,
   useProjects,
@@ -21,7 +23,10 @@ import {
   useCreateTask,
   useUpdateTask,
   useDeleteTask,
+  useDeleteProject,
+  useImportBackup,
   useResolveSyncConflict,
+  useRestoreLatestBackup,
   useSyncConflicts,
   useSyncRuntimeSettings,
   useSyncSettings,
@@ -88,6 +93,13 @@ function getErrorMessage(error: unknown): string {
   return "An unexpected error occurred. Please try again.";
 }
 
+function isEditableEventTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  if (target.isContentEditable) return true;
+  const tagName = target.tagName.toUpperCase();
+  return tagName === "INPUT" || tagName === "TEXTAREA" || tagName === "SELECT";
+}
+
 function formatRelativeSyncTime(value: string | null): string | null {
   if (!value) return null;
   const parsedDate = new Date(value);
@@ -132,6 +144,84 @@ function getSyncStatusLabel(input: {
     return "Sync paused";
   }
   return "Needs attention";
+}
+
+type AutosaveStatus = "ready" | "saving" | "saved" | "error";
+
+interface AutosaveIndicator {
+  status: AutosaveStatus;
+  label: string;
+  detail: string | null;
+}
+
+interface UndoQueueItem {
+  id: string;
+  label: string;
+  timeoutMs: number;
+  dedupeKey: string | null;
+  execute: () => Promise<void>;
+  onExecuteError?: (error: unknown) => void;
+}
+
+interface EnqueueUndoActionInput {
+  label: string;
+  timeoutMs?: number;
+  dedupeKey?: string;
+  execute: () => Promise<void>;
+  onExecuteError?: (error: unknown) => void;
+}
+
+interface DeleteProjectRequest {
+  projectId: string;
+  projectName: string;
+}
+
+interface DeleteProjectQueueResult {
+  queued: boolean;
+  undoWindowMs: number;
+}
+
+const DEFAULT_UNDO_WINDOW_MS = 5_000;
+
+function createUndoQueueItemId(): string {
+  return `undo-${Date.now()}-${Math.floor(Math.random() * 100000)}`;
+}
+
+function getAutosaveIndicator(input: {
+  isSaving: boolean;
+  lastSavedAt: string | null;
+  lastError: string | null;
+}): AutosaveIndicator {
+  if (input.isSaving) {
+    return {
+      status: "saving",
+      label: "Autosaving...",
+      detail: "Saving local changes.",
+    };
+  }
+
+  if (input.lastError) {
+    return {
+      status: "error",
+      label: "Autosave failed",
+      detail: input.lastError,
+    };
+  }
+
+  if (input.lastSavedAt) {
+    const relativeTime = formatRelativeSyncTime(input.lastSavedAt);
+    return {
+      status: "saved",
+      label: relativeTime ? `Saved ${relativeTime}` : "Saved",
+      detail: `Last autosave at ${new Date(input.lastSavedAt).toLocaleString()}.`,
+    };
+  }
+
+  return {
+    status: "ready",
+    label: "Autosave ready",
+    detail: "Waiting for local changes.",
+  };
 }
 
 function isE2EBridgeEnabled(): boolean {
@@ -326,6 +416,9 @@ function AppContent() {
   const createTask = useCreateTask();
   const updateTask = useUpdateTask();
   const deleteTask = useDeleteTask();
+  const deleteProject = useDeleteProject();
+  const importBackup = useImportBackup();
+  const restoreLatestBackup = useRestoreLatestBackup();
   const { data: syncConflicts = [], isLoading: isSyncConflictsLoading } =
     useSyncConflicts("open", 50);
   const resolveSyncConflict = useResolveSyncConflict();
@@ -357,7 +450,14 @@ function AppContent() {
   const [quickCaptureError, setQuickCaptureError] = useState<string | null>(
     null,
   );
+  const [lastAutosavedAt, setLastAutosavedAt] = useState<string | null>(null);
+  const [lastAutosaveError, setLastAutosaveError] = useState<string | null>(
+    null,
+  );
+  const [autosaveClock, setAutosaveClock] = useState(0);
+  const [undoQueue, setUndoQueue] = useState<UndoQueueItem[]>([]);
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
+  const [isShortcutHelpOpen, setIsShortcutHelpOpen] = useState(false);
   const [createModalProjectId, setCreateModalProjectId] = useState<
     string | null
   >(null);
@@ -387,6 +487,8 @@ function AppContent() {
   );
   const [e2eSyncLastError, setE2ESyncLastError] = useState<string | null>(null);
   const [isE2ESyncRunning, setIsE2ESyncRunning] = useState(false);
+  const undoQueueRef = useRef<UndoQueueItem[]>([]);
+  const undoTimerRef = useRef<number | null>(null);
   const sync = useSync({
     pushUrl: syncSettings?.push_url ?? null,
     pullUrl: syncSettings?.pull_url ?? null,
@@ -433,6 +535,135 @@ function AppContent() {
       }),
     [visibleSyncIsOnline, visibleSyncLastSyncedAt, visibleSyncStatus],
   );
+  const markAutosaveSuccess = useCallback(() => {
+    setLastAutosaveError(null);
+    setLastAutosavedAt(new Date().toISOString());
+    setAutosaveClock((previous) => previous + 1);
+  }, []);
+  const markAutosaveFailure = useCallback((error: unknown) => {
+    setLastAutosaveError(getErrorMessage(error));
+    setAutosaveClock((previous) => previous + 1);
+  }, []);
+  const enqueueUndoAction = useCallback((input: EnqueueUndoActionInput) => {
+    const dedupeKey = input.dedupeKey ?? null;
+    if (
+      dedupeKey &&
+      undoQueueRef.current.some((action) => action.dedupeKey === dedupeKey)
+    ) {
+      return false;
+    }
+
+    const action: UndoQueueItem = {
+      id: createUndoQueueItemId(),
+      label: input.label,
+      timeoutMs: input.timeoutMs ?? DEFAULT_UNDO_WINDOW_MS,
+      dedupeKey,
+      execute: input.execute,
+      onExecuteError: input.onExecuteError,
+    };
+    const nextQueue = [...undoQueueRef.current, action];
+    undoQueueRef.current = nextQueue;
+    setUndoQueue(nextQueue);
+    return true;
+  }, []);
+  const undoNextQueuedAction = useCallback(() => {
+    const currentQueue = undoQueueRef.current;
+    if (currentQueue.length === 0) return;
+    const nextQueue = currentQueue.slice(1);
+    undoQueueRef.current = nextQueue;
+    setUndoQueue(nextQueue);
+  }, []);
+  const hasPendingConflictUndo = useMemo(
+    () =>
+      undoQueue.some((action) =>
+        action.dedupeKey?.startsWith("conflict-resolution:"),
+      ),
+    [undoQueue],
+  );
+  const pendingProjectDeleteUndoIds = useMemo(() => {
+    const projectIds = new Set<string>();
+    for (const action of undoQueue) {
+      if (!action.dedupeKey?.startsWith("project-delete:")) continue;
+      const projectId = action.dedupeKey.slice("project-delete:".length).trim();
+      if (!projectId) continue;
+      projectIds.add(projectId);
+    }
+    return Array.from(projectIds);
+  }, [undoQueue]);
+  const hasPendingBackupRestoreUndo = useMemo(
+    () =>
+      undoQueue.some((action) =>
+        action.dedupeKey?.startsWith("backup-restore-latest"),
+      ),
+    [undoQueue],
+  );
+  const hasPendingBackupImportUndo = useMemo(
+    () =>
+      undoQueue.some((action) => action.dedupeKey?.startsWith("backup-import")),
+    [undoQueue],
+  );
+  const isAutosaveSaving =
+    createTask.isPending ||
+    updateTask.isPending ||
+    deleteTask.isPending ||
+    deleteProject.isPending ||
+    importBackup.isPending ||
+    restoreLatestBackup.isPending ||
+    (e2eBridgeEnabled
+      ? isE2EConflictResolving
+      : resolveSyncConflict.isPending) ||
+    updateSyncSettings.isPending ||
+    updateSyncRuntimeSettings.isPending;
+  const autosaveIndicator = useMemo(
+    () =>
+      getAutosaveIndicator({
+        isSaving: isAutosaveSaving,
+        lastSavedAt: lastAutosavedAt,
+        lastError: lastAutosaveError,
+      }),
+    [autosaveClock, isAutosaveSaving, lastAutosaveError, lastAutosavedAt],
+  );
+  useEffect(() => {
+    if (!lastAutosavedAt || lastAutosaveError || isAutosaveSaving) return;
+    const timer = window.setInterval(() => {
+      setAutosaveClock((previous) => previous + 1);
+    }, 30_000);
+    return () => window.clearInterval(timer);
+  }, [isAutosaveSaving, lastAutosaveError, lastAutosavedAt]);
+  useEffect(() => {
+    if (undoTimerRef.current !== null) {
+      window.clearTimeout(undoTimerRef.current);
+      undoTimerRef.current = null;
+    }
+
+    const nextAction = undoQueue[0];
+    if (!nextAction) return;
+
+    undoTimerRef.current = window.setTimeout(() => {
+      void (async () => {
+        try {
+          await nextAction.execute();
+        } catch (error) {
+          nextAction.onExecuteError?.(error);
+        } finally {
+          const currentQueue = undoQueueRef.current;
+          const nextQueue =
+            currentQueue[0]?.id === nextAction.id
+              ? currentQueue.slice(1)
+              : currentQueue.filter((action) => action.id !== nextAction.id);
+          undoQueueRef.current = nextQueue;
+          setUndoQueue(nextQueue);
+        }
+      })();
+    }, nextAction.timeoutMs);
+
+    return () => {
+      if (undoTimerRef.current !== null) {
+        window.clearTimeout(undoTimerRef.current);
+        undoTimerRef.current = null;
+      }
+    };
+  }, [undoQueue]);
   const handleSaveSyncSettings = useCallback(
     async (input: UpdateSyncEndpointSettingsInput): Promise<void> => {
       if (e2eBridgeEnabled && e2eTransportModeEnabled) {
@@ -445,6 +676,7 @@ function AppContent() {
         if (!nextPushUrl || !nextPullUrl) {
           setE2ESyncStatus("LOCAL_ONLY");
           setE2ESyncLastError(null);
+          markAutosaveSuccess();
           return;
         }
 
@@ -452,19 +684,29 @@ function AppContent() {
         if (openConflictCount > 0) {
           setE2ESyncStatus("CONFLICT");
           setE2ESyncLastError(buildE2EConflictMessage(openConflictCount));
+          markAutosaveSuccess();
           return;
         }
 
         setE2ESyncStatus("SYNCED");
         setE2ESyncLastError(null);
+        markAutosaveSuccess();
         return;
       }
 
-      await updateSyncSettings.mutateAsync(input);
+      try {
+        await updateSyncSettings.mutateAsync(input);
+        markAutosaveSuccess();
+      } catch (error) {
+        markAutosaveFailure(error);
+        throw error;
+      }
     },
     [
       e2eBridgeEnabled,
       e2eTransportModeEnabled,
+      markAutosaveFailure,
+      markAutosaveSuccess,
       setE2ETransportPullUrl,
       setE2ETransportPushUrl,
       updateSyncSettings,
@@ -637,6 +879,81 @@ function AppContent() {
   const visibleRetryLastFailedSync = e2eBridgeEnabled
     ? handleE2ERetryLastFailedSync
     : sync.retryLastFailedSync;
+  const handleQueueRestoreLatestBackup = useCallback(
+    async (input: { force: boolean }) => {
+      const queued = enqueueUndoAction({
+        label: "Restore latest backup",
+        dedupeKey: "backup-restore-latest",
+        execute: async () => {
+          await restoreLatestBackup.mutateAsync({
+            force: input.force,
+          });
+          if (visibleSyncHasTransport) {
+            await visibleSyncNow();
+          }
+          markAutosaveSuccess();
+        },
+        onExecuteError: (error) => {
+          setActionError(getErrorMessage(error));
+          markAutosaveFailure(error);
+        },
+      });
+      if (!queued) {
+        throw new Error("A backup restore already has a pending undo action.");
+      }
+    },
+    [
+      enqueueUndoAction,
+      markAutosaveFailure,
+      markAutosaveSuccess,
+      restoreLatestBackup,
+      setActionError,
+      visibleSyncHasTransport,
+      visibleSyncNow,
+    ],
+  );
+  const handleQueueImportBackup = useCallback(
+    async (input: {
+      payload: unknown;
+      force: boolean;
+      sourceName?: string;
+    }) => {
+      const label = input.sourceName?.trim()
+        ? `Import backup "${input.sourceName.trim()}"`
+        : "Import backup file";
+
+      const queued = enqueueUndoAction({
+        label,
+        dedupeKey: "backup-import",
+        execute: async () => {
+          await importBackup.mutateAsync({
+            payload: input.payload,
+            force: input.force,
+          });
+          if (visibleSyncHasTransport) {
+            await visibleSyncNow();
+          }
+          markAutosaveSuccess();
+        },
+        onExecuteError: (error) => {
+          setActionError(getErrorMessage(error));
+          markAutosaveFailure(error);
+        },
+      });
+      if (!queued) {
+        throw new Error("A backup import already has a pending undo action.");
+      }
+    },
+    [
+      enqueueUndoAction,
+      importBackup,
+      markAutosaveFailure,
+      markAutosaveSuccess,
+      setActionError,
+      visibleSyncHasTransport,
+      visibleSyncNow,
+    ],
+  );
 
   const handleResolveSyncConflict = useCallback(
     async (input: ResolveSyncConflictInput): Promise<void> => {
@@ -684,6 +1001,7 @@ function AppContent() {
             });
             setE2ESyncStatus("CONFLICT");
             setE2ESyncLastError(buildE2EConflictMessage(nextConflictCount));
+            markAutosaveSuccess();
             return;
           }
 
@@ -712,22 +1030,55 @@ function AppContent() {
               ? buildE2EConflictMessage(nextConflictCount)
               : "Conflicts resolved locally. Run Sync now to confirm.",
           );
+          markAutosaveSuccess();
           return;
         } finally {
           setIsE2EConflictResolving(false);
         }
       }
 
-      await resolveSyncConflict.mutateAsync(input);
-      await sync.syncNow();
+      const queued = enqueueUndoAction({
+        label:
+          input.strategy === "retry"
+            ? `Retry conflict ${input.conflict_id.slice(0, 8)}`
+            : `Resolve conflict ${input.conflict_id.slice(0, 8)}`,
+        dedupeKey: `conflict-resolution:${input.conflict_id}`,
+        execute: async () => {
+          await resolveSyncConflict.mutateAsync(input);
+          await sync.syncNow();
+          markAutosaveSuccess();
+        },
+        onExecuteError: (error) => {
+          setActionError(getErrorMessage(error));
+          markAutosaveFailure(error);
+        },
+      });
+      if (!queued) {
+        throw new Error("This conflict already has a pending undo action.");
+      }
     },
-    [e2eBridgeEnabled, e2eTransportModeEnabled, resolveSyncConflict, sync],
+    [
+      enqueueUndoAction,
+      e2eBridgeEnabled,
+      e2eTransportModeEnabled,
+      markAutosaveFailure,
+      markAutosaveSuccess,
+      resolveSyncConflict,
+      setActionError,
+      sync,
+    ],
   );
   const handleSaveSyncRuntimeSettings = useCallback(
     async (input: UpdateSyncRuntimeSettingsInput): Promise<void> => {
-      await updateSyncRuntimeSettings.mutateAsync(input);
+      try {
+        await updateSyncRuntimeSettings.mutateAsync(input);
+        markAutosaveSuccess();
+      } catch (error) {
+        markAutosaveFailure(error);
+        throw error;
+      }
     },
-    [updateSyncRuntimeSettings],
+    [markAutosaveFailure, markAutosaveSuccess, updateSyncRuntimeSettings],
   );
 
   const closeQuickCapture = useCallback(() => {
@@ -737,6 +1088,12 @@ function AppContent() {
 
   const closeCommandPalette = useCallback(() => {
     setIsCommandPaletteOpen(false);
+  }, []);
+  const closeShortcutHelp = useCallback(() => {
+    setIsShortcutHelpOpen(false);
+  }, []);
+  const openShortcutHelp = useCallback(() => {
+    setIsShortcutHelpOpen(true);
   }, []);
 
   const openQuickCapture = useCallback(() => {
@@ -897,20 +1254,90 @@ function AppContent() {
   }, [editingTask, isCreateOpen, isQuickCaptureOpen]);
 
   useEffect(() => {
+    const handlePowerShortcut = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || event.repeat) return;
+      if (isEditableEventTarget(event.target)) return;
+
+      const isQuestionMarkShortcut =
+        event.key === "?" || (event.key === "/" && event.shiftKey);
+      if (
+        isQuestionMarkShortcut &&
+        !event.metaKey &&
+        !event.ctrlKey &&
+        !event.altKey
+      ) {
+        event.preventDefault();
+        openShortcutHelp();
+        return;
+      }
+
+      if (!(event.metaKey || event.ctrlKey) || event.altKey) return;
+
+      const key = event.key.toLowerCase();
+      if (!event.shiftKey && key === ",") {
+        event.preventDefault();
+        setActiveView("settings");
+        return;
+      }
+
+      if (event.shiftKey && key === "c") {
+        event.preventDefault();
+        setActiveView("conflicts");
+        return;
+      }
+
+      if (event.shiftKey && key === "s") {
+        if (!visibleSyncHasTransport || visibleSyncIsRunning) return;
+        event.preventDefault();
+        void visibleSyncNow();
+      }
+    };
+
+    window.addEventListener("keydown", handlePowerShortcut);
+    return () => window.removeEventListener("keydown", handlePowerShortcut);
+  }, [
+    openShortcutHelp,
+    setActiveView,
+    visibleSyncHasTransport,
+    visibleSyncIsRunning,
+    visibleSyncNow,
+  ]);
+
+  useEffect(() => {
     if (!isCommandPaletteOpen) return;
     if (isCreateOpen || editingTask || isQuickCaptureOpen) {
       setIsCommandPaletteOpen(false);
     }
   }, [editingTask, isCommandPaletteOpen, isCreateOpen, isQuickCaptureOpen]);
 
+  useEffect(() => {
+    if (!isShortcutHelpOpen) return;
+    if (
+      isCreateOpen ||
+      editingTask ||
+      isQuickCaptureOpen ||
+      isCommandPaletteOpen
+    ) {
+      setIsShortcutHelpOpen(false);
+    }
+  }, [
+    editingTask,
+    isCommandPaletteOpen,
+    isCreateOpen,
+    isQuickCaptureOpen,
+    isShortcutHelpOpen,
+  ]);
+
   const handleCreate = async (input: CreateTaskInput | UpdateTaskInput) => {
     setActionError(null);
     try {
       await createTask.mutateAsync(input as CreateTaskInput);
+      markAutosaveSuccess();
       setIsCreateOpen(false);
       setCreateModalProjectId(null);
     } catch (error) {
       setActionError(getErrorMessage(error));
+      markAutosaveFailure(error);
     }
   };
 
@@ -918,9 +1345,11 @@ function AppContent() {
     setActionError(null);
     try {
       await updateTask.mutateAsync(input as UpdateTaskInput);
+      markAutosaveSuccess();
       setEditingTask(null);
     } catch (error) {
       setActionError(getErrorMessage(error));
+      markAutosaveFailure(error);
     }
   };
 
@@ -928,15 +1357,67 @@ function AppContent() {
     setActionError(null);
     void updateTask
       .mutateAsync({ id: taskId, status: newStatus })
-      .catch((error) => setActionError(getErrorMessage(error)));
+      .then(() => {
+        markAutosaveSuccess();
+      })
+      .catch((error) => {
+        setActionError(getErrorMessage(error));
+        markAutosaveFailure(error);
+      });
   };
 
   const handleDelete = (taskId: string) => {
     setActionError(null);
-    void deleteTask
-      .mutateAsync(taskId)
-      .catch((error) => setActionError(getErrorMessage(error)));
+    const matchedTask = allTasks.find((task) => task.id === taskId);
+    const label = matchedTask?.title?.trim()
+      ? `Delete task "${matchedTask.title.trim()}"`
+      : "Delete task";
+
+    const queued = enqueueUndoAction({
+      label,
+      dedupeKey: `task-delete:${taskId}`,
+      execute: async () => {
+        await deleteTask.mutateAsync(taskId);
+        markAutosaveSuccess();
+      },
+      onExecuteError: (error) => {
+        setActionError(getErrorMessage(error));
+        markAutosaveFailure(error);
+      },
+    });
+    if (!queued) {
+      setActionError("This task already has a pending undo action.");
+    }
   };
+  const handleDeleteProject = useCallback(
+    (input: DeleteProjectRequest): DeleteProjectQueueResult => {
+      setActionError(null);
+
+      const queued = enqueueUndoAction({
+        label: `Delete project "${input.projectName}"`,
+        dedupeKey: `project-delete:${input.projectId}`,
+        execute: async () => {
+          await deleteProject.mutateAsync(input.projectId);
+          markAutosaveSuccess();
+        },
+        onExecuteError: (error) => {
+          setActionError(getErrorMessage(error));
+          markAutosaveFailure(error);
+        },
+      });
+      if (!queued) {
+        setActionError("This project already has a pending undo action.");
+      }
+      return { queued, undoWindowMs: DEFAULT_UNDO_WINDOW_MS };
+    },
+    [
+      deleteProject,
+      enqueueUndoAction,
+      markAutosaveFailure,
+      markAutosaveSuccess,
+      setActionError,
+    ],
+  );
 
   const handleQuickCaptureCreate = useCallback(
     async (title: string): Promise<void> => {
@@ -951,12 +1432,14 @@ function AppContent() {
           remind_at: null,
           recurrence: "NONE",
         });
+        markAutosaveSuccess();
         setIsQuickCaptureOpen(false);
       } catch (error) {
         setQuickCaptureError(getErrorMessage(error));
+        markAutosaveFailure(error);
       }
     },
-    [createTask],
+    [createTask, markAutosaveFailure, markAutosaveSuccess],
   );
 
   const taskViewState =
@@ -1008,7 +1491,8 @@ function AppContent() {
     : isSyncConflictsLoading;
   const visibleSyncConflictResolving = e2eBridgeEnabled
     ? isE2EConflictResolving
-    : resolveSyncConflict.isPending;
+    : resolveSyncConflict.isPending || hasPendingConflictUndo;
+  const activeUndoAction = undoQueue[0] ?? null;
 
   const content = taskViewState?.isLoading ? (
     <div
@@ -1104,6 +1588,9 @@ function AppContent() {
       onStatusChange={handleStatusChange}
       onDelete={handleDelete}
       onCreateClick={openCreateModal}
+      onDeleteProject={handleDeleteProject}
+      isDeleteProjectPending={deleteProject.isPending}
+      pendingDeleteProjectIds={pendingProjectDeleteUndoIds}
     />
   ) : activeView === "calendar" ? (
     isLoadingAllTasks ? (
@@ -1232,6 +1719,12 @@ function AppContent() {
       syncConflictsLoading={visibleSyncConflictsLoading}
       syncConflictResolving={visibleSyncConflictResolving}
       onResolveSyncConflict={handleResolveSyncConflict}
+      backupRestoreLatestBusy={
+        restoreLatestBackup.isPending || hasPendingBackupRestoreUndo
+      }
+      backupImportBusy={importBackup.isPending || hasPendingBackupImportUndo}
+      onQueueRestoreLatestBackup={handleQueueRestoreLatestBackup}
+      onQueueImportBackup={handleQueueImportBackup}
     />
   ) : (
     <Dashboard />
@@ -1242,7 +1735,11 @@ function AppContent() {
       onCreateClick={() => openCreateModal(null)}
       syncStatus={visibleSyncStatus}
       syncStatusLabel={syncStatusLabel}
+      autosaveStatus={autosaveIndicator.status}
+      autosaveStatusLabel={autosaveIndicator.label}
+      autosaveStatusDetail={autosaveIndicator.detail}
       onOpenConflictCenter={() => setActiveView("conflicts")}
+      onOpenShortcutHelp={openShortcutHelp}
     >
       {taskViewState && !taskViewState.isLoading && !taskViewState.isError && (
         <TaskFiltersBar
@@ -1282,6 +1779,14 @@ function AppContent() {
         </div>
       )}
       {content}
+      {activeUndoAction && (
+        <GlobalUndoBar
+          actionLabel={activeUndoAction.label}
+          pendingCount={undoQueue.length}
+          undoWindowMs={activeUndoAction.timeoutMs}
+          onUndo={undoNextQueuedAction}
+        />
+      )}
 
       <CommandPalette
         isOpen={isCommandPaletteOpen}
@@ -1293,6 +1798,10 @@ function AppContent() {
         onEditTask={handleEditTask}
         onChangeTaskStatus={handleStatusChange}
         onChangeView={setActiveView}
+      />
+      <ShortcutHelpModal
+        isOpen={isShortcutHelpOpen}
+        onClose={closeShortcutHelp}
       />
 
       {isQuickCaptureOpen && (

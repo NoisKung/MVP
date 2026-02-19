@@ -17,6 +17,32 @@ Validation gate ที่ต้องรันตามลำดับ:
 2. `npm run test:e2e`
 3. `npm run build`
 
+## 1B) Keyboard Shortcuts (QoL)
+
+เปิด shortcut help:
+- กด `?`
+- หรือกดปุ่ม `Shortcuts ?` ใน sidebar footer
+
+Power shortcuts:
+- `Cmd/Ctrl + N`: Create new task
+- `Cmd/Ctrl + K`: Open command palette
+- `Cmd/Ctrl + ,`: เปิด `Settings`
+- `Cmd/Ctrl + Shift + C`: เปิด `Conflict Center`
+- `Cmd/Ctrl + Shift + S`: `Sync now` (เมื่อมี transport)
+- `/`: โฟกัสช่อง Search ใน view ปัจจุบัน (Board/Today/Upcoming/Projects)
+- `Esc` ในช่อง Search: ล้างข้อความ (หรือ blur เมื่อช่องว่าง)
+
+## 1C) Global Undo Bar (QoL)
+
+- เมื่อกด action เสี่ยงบางรายการ ระบบจะยังไม่ commit ทันที แต่เข้า queue เพื่อให้ `Undo` ได้ภายใน 5 วินาที
+- ตอนนี้ครอบคลุม:
+  - `Delete task`
+  - `Delete project`
+  - `Resolve conflict` / `Retry conflict`
+  - `Restore latest backup`
+  - `Restore from file (import backup)`
+- ถ้ามีหลาย action ต่อเนื่อง แถบจะแสดง action แรกและจำนวนคิวที่เหลือ (`+N more`)
+
 ## 2) MVP CLI Quick Usage
 
 ```bash
@@ -180,6 +206,7 @@ console.log(summary);
 
 ตำแหน่งแสดงผล:
 - Sidebar footer: status badge ระดับแอป (เมื่อสถานะเป็น `Conflict` กดเพื่อเปิด `Conflict Center` ได้)
+- Sidebar footer: `Autosave` indicator ระดับ local write (`Autosave ready`, `Autosaving...`, `Saved ...`, `Autosave failed`)
 - Settings > Sync card: ปุ่ม `Sync now`, เวลาซิงก์ล่าสุด, error ล่าสุด
 - Settings > Sync > `Conflict Center`: ดูรายการ conflict ที่เปิดอยู่และกด resolve
 - Sidebar > `Conflicts`: dedicated view สำหรับจัดการ conflict แบบเต็มหน้า
@@ -206,7 +233,7 @@ console.log(summary);
 
 Recovery (Backup & Restore):
 - ก่อน restore ระบบจะทำ preflight (`pending outbox`, `open conflicts`, `latest backup`)
-- ถ้า outbox ยังไม่ว่าง ระบบจะบังคับเป็น force restore flow พร้อม confirmation ชัดเจน
+- ถ้ามี `pending outbox` หรือ `open conflicts` ระบบจะบังคับเป็น force restore flow พร้อม confirmation ชัดเจน
 - มีปุ่ม `Restore Latest Backup` (snapshot ล่าสุดที่ export ภายในเครื่อง)
 - หลัง restore ระบบจะ clear stale sync state (`sync_outbox`, `sync_conflicts`, checkpoint) และ trigger sync รอบใหม่อัตโนมัติเมื่อมี transport
 

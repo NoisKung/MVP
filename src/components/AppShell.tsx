@@ -63,7 +63,11 @@ interface AppShellProps {
   onCreateClick: () => void;
   syncStatus: SyncStatus;
   syncStatusLabel: string;
+  autosaveStatus: "ready" | "saving" | "saved" | "error";
+  autosaveStatusLabel: string;
+  autosaveStatusDetail?: string | null;
   onOpenConflictCenter: () => void;
+  onOpenShortcutHelp: () => void;
 }
 
 function renderSyncStatusIcon(status: SyncStatus) {
@@ -87,7 +91,11 @@ export function AppShell({
   onCreateClick,
   syncStatus,
   syncStatusLabel,
+  autosaveStatus,
+  autosaveStatusLabel,
+  autosaveStatusDetail,
   onOpenConflictCenter,
+  onOpenShortcutHelp,
 }: AppShellProps) {
   const { activeView, setActiveView } = useAppStore();
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -184,25 +192,46 @@ export function AppShell({
 
         {/* Footer */}
         <div className="sidebar-footer">
-          {isConflictStatusActionable ? (
+          <div className="footer-row">
+            {isConflictStatusActionable ? (
+              <button
+                type="button"
+                className={`footer-status footer-status-btn footer-status-${syncStatus.toLowerCase()}`}
+                onClick={handleOpenConflictCenter}
+                title="Open Conflict Center"
+              >
+                {renderSyncStatusIcon(syncStatus)}
+                <span>{syncStatusLabel}</span>
+              </button>
+            ) : (
+              <div
+                className={`footer-status footer-status-${syncStatus.toLowerCase()}`}
+              >
+                {renderSyncStatusIcon(syncStatus)}
+                <span>{syncStatusLabel}</span>
+              </div>
+            )}
+            <span className="footer-version">v0.1.0</span>
+          </div>
+          <div className="footer-row">
+            <div
+              className={`footer-autosave footer-autosave-${autosaveStatus}`}
+              role="status"
+              aria-live="polite"
+              title={autosaveStatusDetail ?? autosaveStatusLabel}
+            >
+              <span className="footer-autosave-dot" aria-hidden="true" />
+              <span>{autosaveStatusLabel}</span>
+            </div>
             <button
               type="button"
-              className={`footer-status footer-status-btn footer-status-${syncStatus.toLowerCase()}`}
-              onClick={handleOpenConflictCenter}
-              title="Open Conflict Center"
+              className="footer-shortcuts"
+              onClick={onOpenShortcutHelp}
+              title="Open keyboard shortcut help"
             >
-              {renderSyncStatusIcon(syncStatus)}
-              <span>{syncStatusLabel}</span>
+              Shortcuts ?
             </button>
-          ) : (
-            <div
-              className={`footer-status footer-status-${syncStatus.toLowerCase()}`}
-            >
-              {renderSyncStatusIcon(syncStatus)}
-              <span>{syncStatusLabel}</span>
-            </div>
-          )}
-          <span className="footer-version">v0.1.0</span>
+          </div>
         </div>
       </aside>
 
@@ -423,10 +452,17 @@ export function AppShell({
         /* Footer */
         .sidebar-footer {
           display: flex;
-          align-items: center;
-          justify-content: space-between;
+          flex-direction: column;
+          gap: 8px;
           padding: 12px 8px 4px;
           border-top: 1px solid var(--border-default);
+        }
+        .footer-row {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 10px;
+          width: 100%;
         }
         .footer-status {
           display: flex;
@@ -461,6 +497,57 @@ export function AppShell({
         .footer-status-local_only {
           color: var(--text-muted);
         }
+        .footer-autosave {
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          min-width: 0;
+          font-size: 11px;
+          color: var(--text-muted);
+        }
+        .footer-autosave span:last-child {
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+        .footer-autosave-dot {
+          width: 6px;
+          height: 6px;
+          border-radius: 999px;
+          background: currentColor;
+          flex-shrink: 0;
+        }
+        .footer-autosave-ready {
+          color: var(--text-muted);
+        }
+        .footer-autosave-saving {
+          color: var(--accent);
+        }
+        .footer-autosave-saving .footer-autosave-dot {
+          animation: autosave-pulse 0.9s ease-in-out infinite;
+        }
+        .footer-autosave-saved {
+          color: #22c55e;
+        }
+        .footer-autosave-error {
+          color: var(--danger);
+        }
+        .footer-shortcuts {
+          border: 1px solid var(--border-default);
+          border-radius: 8px;
+          background: var(--bg-elevated);
+          color: var(--text-secondary);
+          font-size: 11px;
+          font-family: inherit;
+          padding: 4px 8px;
+          cursor: pointer;
+          transition: all var(--duration) var(--ease);
+        }
+        .footer-shortcuts:hover {
+          border-color: var(--border-strong);
+          color: var(--text-primary);
+          background: var(--bg-hover);
+        }
         .sync-spin {
           animation: sync-rotate 0.8s linear infinite;
         }
@@ -475,6 +562,14 @@ export function AppShell({
           }
           to {
             transform: rotate(360deg);
+          }
+        }
+        @keyframes autosave-pulse {
+          0%, 100% {
+            opacity: 0.35;
+          }
+          50% {
+            opacity: 1;
           }
         }
 

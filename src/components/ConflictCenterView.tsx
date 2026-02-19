@@ -146,8 +146,8 @@ export function ConflictCenterView({
       });
       setConflictFeedback(
         strategy === "retry"
-          ? "Conflict queued for retry."
-          : "Conflict marked as resolved.",
+          ? "Conflict retry queued. Undo is available for 5 seconds."
+          : "Conflict resolution queued. Undo is available for 5 seconds.",
       );
       return true;
     } catch (error) {

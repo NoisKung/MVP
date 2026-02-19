@@ -354,6 +354,7 @@ Google Drive (`appDataFolder`) vs OneDrive (`approot`) ในมุม SoloStack
 - เพิ่ม recovery tools (`retry`, `restore`, `export report`) (done: มี preflight/force + restore latest backup)
 - เพิ่ม conflict timeline event log + observability counters (done: event log + aggregate counters + median resolve time)
 - hardening + bugfix + ผ่าน quality gates ก่อนประกาศ internal beta
+- done hardening snapshot: force restore ถูกบังคับทั้งเคส `pending outbox` และ `open conflicts` พร้อม unit coverage
 
 ## 6D) P3-3 Implementation Checklist (Dev Team)
 

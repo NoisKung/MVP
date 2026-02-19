@@ -1,8 +1,7 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { Task, TaskStatus } from "@/lib/types";
 import {
   useCreateProject,
-  useDeleteProject,
   useProjects,
   useTaskSubtaskStats,
   useUpdateProject,
@@ -29,6 +28,12 @@ interface ProjectViewProps {
   onStatusChange: (taskId: string, newStatus: TaskStatus) => void;
   onDelete: (taskId: string) => void;
   onCreateClick: (projectId: string | null) => void;
+  onDeleteProject: (input: { projectId: string; projectName: string }) => {
+    queued: boolean;
+    undoWindowMs: number;
+  };
+  isDeleteProjectPending: boolean;
+  pendingDeleteProjectIds: string[];
 }
 
 interface ProjectMetrics {
@@ -114,6 +119,13 @@ function normalizeProjectColor(colorValue: string): string | null {
   return /^#[0-9a-fA-F]{6}$/.test(trimmedColor) ? trimmedColor : null;
 }
 
+function isEditableEventTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  if (target.isContentEditable) return true;
+  const tagName = target.tagName.toUpperCase();
+  return tagName === "INPUT" || tagName === "TEXTAREA" || tagName === "SELECT";
+}
+
 export function ProjectView({
   tasks,
   projectNameById,
@@ -124,6 +136,9 @@ export function ProjectView({
   onStatusChange,
   onDelete,
   onCreateClick,
+  onDeleteProject,
+  isDeleteProjectPending,
+  pendingDeleteProjectIds,
 }: ProjectViewProps) {
   const {
     data: projects = [],
@@ -133,11 +148,14 @@ export function ProjectView({
   } = useProjects();
   const createProject = useCreateProject();
   const updateProject = useUpdateProject();
-  const deleteProject = useDeleteProject();
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(
     null,
   );
   const [actionError, setActionError] = useState<string | null>(null);
+  const [actionNotice, setActionNotice] = useState<string | null>(null);
+  const [deleteConfirmProjectId, setDeleteConfirmProjectId] = useState<
+    string | null
+  >(null);
   const [projectSearch, setProjectSearch] = useState("");
   const [projectStatusFilter, setProjectStatusFilter] =
     useState<ProjectStatusFilter>("ALL");
@@ -151,6 +169,7 @@ export function ProjectView({
   const [editName, setEditName] = useState("");
   const [editDescription, setEditDescription] = useState("");
   const [editColor, setEditColor] = useState(DEFAULT_PROJECT_COLOR);
+  const projectSearchInputRef = useRef<HTMLInputElement | null>(null);
 
   const taskMetricsByProjectId = useMemo(() => {
     const taskMap = new Map<string, Task[]>();
@@ -220,6 +239,8 @@ export function ProjectView({
   useEffect(() => {
     if (!selectedProject) {
       setIsEditingDetails(false);
+      setDeleteConfirmProjectId(null);
+      setActionNotice(null);
       return;
     }
 
@@ -228,7 +249,29 @@ export function ProjectView({
     setEditColor(selectedProject.color ?? DEFAULT_PROJECT_COLOR);
     setTaskSectionFilter("ALL");
     setIsEditingDetails(false);
+    setDeleteConfirmProjectId(null);
+    setActionNotice(null);
   }, [selectedProject]);
+
+  useEffect(() => {
+    const handleGlobalSearchShortcut = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || event.repeat) return;
+      if (event.key !== "/" || event.metaKey || event.ctrlKey || event.altKey) {
+        return;
+      }
+      if (isEditableEventTarget(event.target)) return;
+
+      event.preventDefault();
+      const inputElement = projectSearchInputRef.current;
+      if (!inputElement) return;
+      inputElement.focus();
+      inputElement.select();
+    };
+
+    window.addEventListener("keydown", handleGlobalSearchShortcut);
+    return () =>
+      window.removeEventListener("keydown", handleGlobalSearchShortcut);
+  }, []);
 
   const selectedProjectTasks = useMemo(() => {
     if (!selectedProject) return [] as Task[];
@@ -280,6 +323,14 @@ export function ProjectView({
     : getProjectMetrics([]);
   const isProjectFilterActive =
     projectStatusFilter !== "ALL" || normalizedProjectSearch.length > 0;
+  const isSelectedProjectDeleteQueued = Boolean(
+    selectedProject && pendingDeleteProjectIds.includes(selectedProject.id),
+  );
+  const isDeleteConfirmArmed = Boolean(
+    selectedProject && deleteConfirmProjectId === selectedProject.id,
+  );
+  const isDeleteProjectActionPending =
+    isDeleteProjectPending || isSelectedProjectDeleteQueued;
 
   const handleCreateProject = async () => {
     const normalizedName = createName.trim();
@@ -291,6 +342,8 @@ export function ProjectView({
     const normalizedColor = normalizeProjectColor(createColor);
 
     setActionError(null);
+    setActionNotice(null);
+    setDeleteConfirmProjectId(null);
     try {
       const project = await createProject.mutateAsync({
         name: normalizedName,
@@ -316,6 +369,8 @@ export function ProjectView({
     setEditColor(selectedProject.color ?? DEFAULT_PROJECT_COLOR);
     setIsEditingDetails(true);
     setActionError(null);
+    setActionNotice(null);
+    setDeleteConfirmProjectId(null);
   };
 
   const handleCancelEditingSelectedProject = () => {
@@ -326,6 +381,8 @@ export function ProjectView({
     }
     setIsEditingDetails(false);
     setActionError(null);
+    setActionNotice(null);
+    setDeleteConfirmProjectId(null);
   };
 
   const handleSaveSelectedProjectDetails = async () => {
@@ -339,6 +396,8 @@ export function ProjectView({
     const normalizedColor = normalizeProjectColor(editColor);
 
     setActionError(null);
+    setActionNotice(null);
+    setDeleteConfirmProjectId(null);
     try {
       await updateProject.mutateAsync({
         id: selectedProject.id,
@@ -358,6 +417,8 @@ export function ProjectView({
       selectedProject.status === "COMPLETED" ? "ACTIVE" : "COMPLETED";
 
     setActionError(null);
+    setActionNotice(null);
+    setDeleteConfirmProjectId(null);
     try {
       await updateProject.mutateAsync({
         id: selectedProject.id,
@@ -368,22 +429,42 @@ export function ProjectView({
     }
   };
 
-  const handleDeleteSelectedProject = async () => {
+  const handleDeleteSelectedProject = () => {
     if (!selectedProject) return;
-    if (
-      !window.confirm(
-        `Delete project "${selectedProject.name}"? Tasks will be unassigned.`,
-      )
-    ) {
+    if (!isDeleteConfirmArmed) {
+      setDeleteConfirmProjectId(selectedProject.id);
+      setActionError(null);
+      setActionNotice(
+        `Click "Confirm Delete" to queue deleting "${selectedProject.name}". You can undo from the Undo bar for a few seconds.`,
+      );
       return;
     }
 
     setActionError(null);
+    setActionNotice(null);
+    setDeleteConfirmProjectId(null);
     try {
-      await deleteProject.mutateAsync(selectedProject.id);
+      const result = onDeleteProject({
+        projectId: selectedProject.id,
+        projectName: selectedProject.name,
+      });
+      if (result.queued) {
+        const undoSeconds = Math.max(1, Math.round(result.undoWindowMs / 1000));
+        setActionNotice(
+          `Delete queued. This project will be removed in ${undoSeconds}s unless you click Undo.`,
+        );
+      } else {
+        setDeleteConfirmProjectId(selectedProject.id);
+        setActionError("This project already has a pending undo action.");
+      }
     } catch (error) {
       setActionError(getErrorMessage(error));
     }
+  };
+
+  const handleCancelDeleteSelectedProject = () => {
+    setDeleteConfirmProjectId(null);
+    setActionNotice(null);
   };
 
   if (isLoadingProjects) {
@@ -609,6 +690,8 @@ export function ProjectView({
                 setProjectSearch("");
                 setProjectStatusFilter("ALL");
                 setActionError(null);
+                setActionNotice(null);
+                setDeleteConfirmProjectId(null);
               }}
               disabled={createProject.isPending || updateProject.isPending}
             >
@@ -629,6 +712,8 @@ export function ProjectView({
                 return nextState;
               });
               setActionError(null);
+              setActionNotice(null);
+              setDeleteConfirmProjectId(null);
             }}
             disabled={createProject.isPending || updateProject.isPending}
           >
@@ -639,6 +724,9 @@ export function ProjectView({
       </div>
 
       {actionError && <p className="project-action-error">{actionError}</p>}
+      {!actionError && actionNotice && (
+        <p className="project-action-notice">{actionNotice}</p>
+      )}
 
       {isCreateFormOpen && (
         <div className="project-editor-card">
@@ -688,6 +776,8 @@ export function ProjectView({
               onClick={() => {
                 setIsCreateFormOpen(false);
                 setActionError(null);
+                setActionNotice(null);
+                setDeleteConfirmProjectId(null);
               }}
               disabled={createProject.isPending}
             >
@@ -716,12 +806,38 @@ export function ProjectView({
             >
               <Search size={13} />
               <input
+                ref={projectSearchInputRef}
                 id="project-search-input"
                 className="project-search-input"
                 value={projectSearch}
                 onChange={(event) => setProjectSearch(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key !== "Escape") return;
+                  event.preventDefault();
+                  if (projectSearch.trim()) {
+                    setProjectSearch("");
+                  } else {
+                    projectSearchInputRef.current?.blur();
+                  }
+                }}
                 placeholder="Search project..."
               />
+              {projectSearch ? (
+                <button
+                  type="button"
+                  className="project-search-clear-btn"
+                  onClick={() => {
+                    setProjectSearch("");
+                    projectSearchInputRef.current?.focus();
+                  }}
+                  aria-label="Clear project search"
+                  title="Clear project search"
+                >
+                  <X size={11} />
+                </button>
+              ) : (
+                <kbd className="project-search-shortcut">/</kbd>
+              )}
             </label>
             <div className="project-status-filter-row">
               {PROJECT_STATUS_FILTERS.map((filterOption) => {
@@ -925,14 +1041,32 @@ export function ProjectView({
                       ? "Mark Active"
                       : "Mark Completed"}
                   </button>
+                  {isDeleteConfirmArmed &&
+                  !isDeleteProjectActionPending &&
+                  !isEditingDetails ? (
+                    <button
+                      type="button"
+                      className="project-ghost-btn"
+                      onClick={handleCancelDeleteSelectedProject}
+                    >
+                      <X size={12} />
+                      Cancel
+                    </button>
+                  ) : null}
                   <button
                     type="button"
-                    className="project-ghost-btn danger"
-                    onClick={() => void handleDeleteSelectedProject()}
-                    disabled={deleteProject.isPending || isEditingDetails}
+                    className={`project-ghost-btn danger${isDeleteConfirmArmed ? " danger-confirm" : ""}`}
+                    onClick={handleDeleteSelectedProject}
+                    disabled={isDeleteProjectActionPending || isEditingDetails}
                   >
                     <Trash2 size={12} />
-                    Delete
+                    {isDeleteProjectPending
+                      ? "Deleting..."
+                      : isSelectedProjectDeleteQueued
+                        ? "Queued..."
+                        : isDeleteConfirmArmed
+                          ? "Confirm Delete"
+                          : "Delete"}
                   </button>
                   <button
                     className="project-primary-btn"
@@ -1120,6 +1254,14 @@ export function ProjectView({
           font-size: 12px;
           padding: 8px 10px;
         }
+        .project-action-notice {
+          border: 1px solid var(--accent);
+          background: var(--accent-subtle);
+          border-radius: var(--radius-sm);
+          color: var(--accent);
+          font-size: 12px;
+          padding: 8px 10px;
+        }
         .project-editor-card {
           border: 1px solid var(--border-default);
           border-radius: var(--radius-md);
@@ -1231,11 +1373,17 @@ export function ProjectView({
           align-items: center;
           gap: 8px;
           border: 1px solid var(--border-default);
-          border-radius: var(--radius-sm);
+          border-radius: var(--radius-full);
           padding: 0 10px;
-          height: 32px;
+          height: 34px;
           background: var(--bg-elevated);
           color: var(--text-muted);
+          transition: border-color var(--duration) var(--ease),
+            background var(--duration) var(--ease);
+        }
+        .project-search-box:focus-within {
+          border-color: var(--border-focus);
+          background: var(--bg-hover);
         }
         .project-search-input {
           width: 100%;
@@ -1248,6 +1396,37 @@ export function ProjectView({
         }
         .project-search-input::placeholder {
           color: var(--text-disabled);
+        }
+        .project-search-shortcut {
+          border: 1px solid var(--border-default);
+          border-radius: 6px;
+          background: transparent;
+          color: var(--text-disabled);
+          font-size: 10px;
+          font-family: inherit;
+          font-weight: 600;
+          padding: 1px 5px;
+          line-height: 1.4;
+          user-select: none;
+        }
+        .project-search-clear-btn {
+          width: 18px;
+          height: 18px;
+          border: 1px solid var(--border-default);
+          border-radius: 999px;
+          background: transparent;
+          color: var(--text-muted);
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          flex-shrink: 0;
+          cursor: pointer;
+          transition: all var(--duration) var(--ease);
+        }
+        .project-search-clear-btn:hover {
+          border-color: var(--border-strong);
+          color: var(--text-primary);
+          background: var(--bg-hover);
         }
         .project-status-filter-row {
           display: flex;
@@ -1491,6 +1670,15 @@ export function ProjectView({
           color: var(--danger);
           background: var(--danger-subtle);
         }
+        .project-ghost-btn.danger {
+          color: var(--danger);
+          border-color: rgba(248, 113, 113, 0.45);
+        }
+        .project-ghost-btn.danger.danger-confirm {
+          border-color: var(--danger);
+          color: var(--danger);
+          background: var(--danger-subtle);
+        }
         .project-kpis {
           display: grid;
           grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -1714,6 +1902,9 @@ export function ProjectView({
           }
           .project-kpis {
             grid-template-columns: repeat(2, minmax(0, 1fr));
+          }
+          .project-search-shortcut {
+            display: none;
           }
         }
       `}</style>

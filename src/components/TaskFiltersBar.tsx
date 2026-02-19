@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from "react";
 import type {
   SavedTaskView,
   TaskDueFilter,
@@ -6,7 +7,15 @@ import type {
   TaskSortBy,
   TaskStatus,
 } from "@/lib/types";
-import { BookmarkPlus, FilterX, Search, Star, Trash2 } from "lucide-react";
+import {
+  BookmarkPlus,
+  ChevronDown,
+  FilterX,
+  Search,
+  Star,
+  Trash2,
+  X,
+} from "lucide-react";
 
 const STATUS_OPTIONS: Array<{ value: TaskStatus; label: string }> = [
   { value: "TODO", label: "To Do" },
@@ -57,6 +66,13 @@ interface TaskFiltersBarProps {
   onDeleteSavedView: (savedViewId: string) => void;
 }
 
+function isEditableEventTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  if (target.isContentEditable) return true;
+  const tagName = target.tagName.toUpperCase();
+  return tagName === "INPUT" || tagName === "TEXTAREA" || tagName === "SELECT";
+}
+
 export function TaskFiltersBar({
   filters,
   availableProjects,
@@ -77,6 +93,15 @@ export function TaskFiltersBar({
   onApplySavedView,
   onDeleteSavedView,
 }: TaskFiltersBarProps) {
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
+  const [isFiltersOpen, setIsFiltersOpen] = useState(false);
+
+  useEffect(() => {
+    if (hasActiveFilters) {
+      setIsFiltersOpen(true);
+    }
+  }, [hasActiveFilters]);
+
   const handleSaveViewClick = () => {
     const suggestedName =
       activeSavedViewId &&
@@ -88,18 +113,65 @@ export function TaskFiltersBar({
     if (!inputName) return;
     onSaveCurrentView(inputName);
   };
+  const handleClearSearch = () => {
+    onSearchChange("");
+    searchInputRef.current?.focus();
+  };
+
+  useEffect(() => {
+    const handleGlobalSearchShortcut = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || event.repeat) return;
+      if (event.key !== "/" || event.metaKey || event.ctrlKey || event.altKey) {
+        return;
+      }
+      if (isEditableEventTarget(event.target)) return;
+
+      event.preventDefault();
+      const inputElement = searchInputRef.current;
+      if (!inputElement) return;
+      inputElement.focus();
+      inputElement.select();
+    };
+
+    window.addEventListener("keydown", handleGlobalSearchShortcut);
+    return () =>
+      window.removeEventListener("keydown", handleGlobalSearchShortcut);
+  }, []);
 
   return (
     <div className="filters-wrap">
       <div className="filters-top-row">
-        <div className="search-wrap">
-          <Search size={14} />
+        <div className={`search-wrap${filters.search ? " has-value" : ""}`}>
+          <Search size={14} className="search-icon" />
           <input
+            ref={searchInputRef}
             className="search-input"
             value={filters.search}
             onChange={(event) => onSearchChange(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key !== "Escape") return;
+              event.preventDefault();
+              if (filters.search.trim()) {
+                onSearchChange("");
+              } else {
+                searchInputRef.current?.blur();
+              }
+            }}
             placeholder="Search title or description..."
           />
+          {filters.search ? (
+            <button
+              type="button"
+              className="search-clear-btn"
+              onClick={handleClearSearch}
+              aria-label="Clear search"
+              title="Clear search"
+            >
+              <X size={12} />
+            </button>
+          ) : (
+            <kbd className="search-shortcut">/</kbd>
+          )}
         </div>
 
         <div className="top-actions">
@@ -123,96 +195,16 @@ export function TaskFiltersBar({
         </div>
       </div>
 
-      <div className="filters-row">
-        <span className="filters-label">Project</span>
-        <div className="chip-row">
-          {availableProjects.length === 0 ? (
-            <span className="saved-view-empty">
-              No projects available for filtering.
-            </span>
-          ) : (
-            availableProjects.map((project) => (
-              <button
-                key={project.id}
-                type="button"
-                className={`filter-chip${filters.projectIds.includes(project.id) ? " active" : ""}`}
-                onClick={() => onToggleProject(project.id)}
-              >
-                {project.name}
-              </button>
-            ))
-          )}
-        </div>
-      </div>
-
-      <div className="filters-row">
-        <span className="filters-label">Status</span>
-        <div className="chip-row">
-          {STATUS_OPTIONS.map((option) => (
-            <button
-              key={option.value}
-              type="button"
-              className={`filter-chip${filters.statuses.includes(option.value) ? " active" : ""}`}
-              onClick={() => onToggleStatus(option.value)}
-            >
-              {option.label}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <div className="filters-row">
-        <span className="filters-label">Priority</span>
-        <div className="chip-row">
-          {PRIORITY_OPTIONS.map((option) => (
-            <button
-              key={option.value}
-              type="button"
-              className={`filter-chip${filters.priorities.includes(option.value) ? " active" : ""}`}
-              onClick={() => onTogglePriority(option.value)}
-            >
-              {option.label}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      <div className="filters-row">
-        <span className="filters-label">Due</span>
-        <select
-          className="due-select"
-          value={filters.dueFilter}
-          onChange={(event) =>
-            onSetDueFilter(event.target.value as TaskDueFilter)
-          }
-        >
-          {DUE_FILTER_OPTIONS.map((option) => (
-            <option key={option.value} value={option.value}>
-              {option.label}
-            </option>
-          ))}
-        </select>
-
-        <span className="filters-label inline-label">Sort</span>
-        <select
-          className="due-select"
-          value={filters.sortBy}
-          onChange={(event) => onSetSortBy(event.target.value as TaskSortBy)}
-        >
-          {SORT_OPTIONS.map((option) => (
-            <option key={option.value} value={option.value}>
-              {option.label}
-            </option>
-          ))}
-        </select>
-
+      <div className="filters-summary-row">
         <button
           type="button"
-          className={`filter-chip important-chip${filters.importantOnly ? " active" : ""}`}
-          onClick={() => onSetImportantOnly(!filters.importantOnly)}
+          className={`filters-toggle-btn${isFiltersOpen ? " open" : ""}`}
+          onClick={() => setIsFiltersOpen((open) => !open)}
+          aria-expanded={isFiltersOpen}
+          aria-controls="advanced-filters-panel"
         >
-          <Star size={12} />
-          Important
+          <ChevronDown size={14} />
+          {isFiltersOpen ? "Hide Filters" : "Show Filters"}
         </button>
 
         <span className="result-count">
@@ -220,45 +212,144 @@ export function TaskFiltersBar({
         </span>
       </div>
 
-      <div className="saved-views-row">
-        <span className="filters-label">Saved Views</span>
-        <div className="saved-views-list">
-          {savedViews.length === 0 ? (
-            <span className="saved-view-empty">
-              Save your favorite filter combinations here.
-            </span>
-          ) : (
-            savedViews.map((savedView) => (
-              <button
-                key={savedView.id}
-                type="button"
-                className={`saved-view-chip${activeSavedViewId === savedView.id ? " active" : ""}`}
-                onClick={() => onApplySavedView(savedView.id)}
-                title="Apply saved view"
-              >
-                <span className="saved-view-name">{savedView.name}</span>
-                <span
-                  role="button"
-                  tabIndex={0}
-                  className="saved-view-delete"
-                  onClick={(event) => {
-                    event.stopPropagation();
-                    onDeleteSavedView(savedView.id);
-                  }}
-                  onKeyDown={(event) => {
-                    if (event.key !== "Enter" && event.key !== " ") return;
-                    event.preventDefault();
-                    event.stopPropagation();
-                    onDeleteSavedView(savedView.id);
-                  }}
-                >
-                  <Trash2 size={12} />
+      {isFiltersOpen ? (
+        <div id="advanced-filters-panel" className="filters-advanced">
+          <div className="filters-row">
+            <span className="filters-label">Project</span>
+            <div className="chip-row">
+              {availableProjects.length === 0 ? (
+                <span className="saved-view-empty">
+                  No projects available for filtering.
                 </span>
-              </button>
-            ))
-          )}
+              ) : (
+                availableProjects.map((project) => (
+                  <button
+                    key={project.id}
+                    type="button"
+                    className={`filter-chip${filters.projectIds.includes(project.id) ? " active" : ""}`}
+                    onClick={() => onToggleProject(project.id)}
+                  >
+                    {project.name}
+                  </button>
+                ))
+              )}
+            </div>
+          </div>
+
+          <div className="filters-row">
+            <span className="filters-label">Status</span>
+            <div className="chip-row">
+              {STATUS_OPTIONS.map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  className={`filter-chip${filters.statuses.includes(option.value) ? " active" : ""}`}
+                  onClick={() => onToggleStatus(option.value)}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="filters-row">
+            <span className="filters-label">Priority</span>
+            <div className="chip-row">
+              {PRIORITY_OPTIONS.map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  className={`filter-chip${filters.priorities.includes(option.value) ? " active" : ""}`}
+                  onClick={() => onTogglePriority(option.value)}
+                >
+                  {option.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="filters-row">
+            <span className="filters-label">Due</span>
+            <select
+              className="due-select"
+              value={filters.dueFilter}
+              onChange={(event) =>
+                onSetDueFilter(event.target.value as TaskDueFilter)
+              }
+            >
+              {DUE_FILTER_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+
+            <span className="filters-label inline-label">Sort</span>
+            <select
+              className="due-select"
+              value={filters.sortBy}
+              onChange={(event) =>
+                onSetSortBy(event.target.value as TaskSortBy)
+              }
+            >
+              {SORT_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+
+            <button
+              type="button"
+              className={`filter-chip important-chip${filters.importantOnly ? " active" : ""}`}
+              onClick={() => onSetImportantOnly(!filters.importantOnly)}
+            >
+              <Star size={12} />
+              Important
+            </button>
+          </div>
+
+          <div className="saved-views-row">
+            <span className="filters-label">Saved Views</span>
+            <div className="saved-views-list">
+              {savedViews.length === 0 ? (
+                <span className="saved-view-empty">
+                  Save your favorite filter combinations here.
+                </span>
+              ) : (
+                savedViews.map((savedView) => (
+                  <button
+                    key={savedView.id}
+                    type="button"
+                    className={`saved-view-chip${activeSavedViewId === savedView.id ? " active" : ""}`}
+                    onClick={() => onApplySavedView(savedView.id)}
+                    title="Apply saved view"
+                  >
+                    <span className="saved-view-name">{savedView.name}</span>
+                    <span
+                      role="button"
+                      tabIndex={0}
+                      className="saved-view-delete"
+                      onClick={(event) => {
+                        event.stopPropagation();
+                        onDeleteSavedView(savedView.id);
+                      }}
+                      onKeyDown={(event) => {
+                        if (event.key !== "Enter" && event.key !== " ") return;
+                        event.preventDefault();
+                        event.stopPropagation();
+                        onDeleteSavedView(savedView.id);
+                      }}
+                    >
+                      <Trash2 size={12} />
+                    </span>
+                  </button>
+                ))
+              )}
+            </div>
+          </div>
         </div>
-      </div>
+      ) : null}
 
       <style>{`
         .filters-wrap {
@@ -276,6 +367,11 @@ export function TaskFiltersBar({
           align-items: center;
           gap: 10px;
         }
+        .filters-summary-row {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+        }
         .search-wrap {
           flex: 1;
           min-width: 0;
@@ -283,11 +379,24 @@ export function TaskFiltersBar({
           align-items: center;
           gap: 8px;
           border: 1px solid var(--border-default);
-          border-radius: var(--radius-md);
+          border-radius: var(--radius-full);
           background: var(--bg-elevated);
           color: var(--text-muted);
           padding: 0 10px;
-          height: 34px;
+          height: 36px;
+          transition: border-color var(--duration) var(--ease),
+            background var(--duration) var(--ease);
+        }
+        .search-wrap:focus-within {
+          border-color: var(--border-focus);
+          background: var(--bg-hover);
+        }
+        .search-icon {
+          flex-shrink: 0;
+          color: var(--text-disabled);
+        }
+        .search-wrap.has-value .search-icon {
+          color: var(--text-muted);
         }
         .search-input {
           flex: 1;
@@ -301,6 +410,37 @@ export function TaskFiltersBar({
         }
         .search-input::placeholder {
           color: var(--text-disabled);
+        }
+        .search-shortcut {
+          border: 1px solid var(--border-default);
+          border-radius: 6px;
+          background: transparent;
+          color: var(--text-disabled);
+          font-size: 10px;
+          font-family: inherit;
+          font-weight: 600;
+          padding: 1px 5px;
+          line-height: 1.4;
+          user-select: none;
+        }
+        .search-clear-btn {
+          width: 20px;
+          height: 20px;
+          border: 1px solid var(--border-default);
+          border-radius: 999px;
+          background: transparent;
+          color: var(--text-muted);
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          cursor: pointer;
+          transition: all var(--duration) var(--ease);
+          flex-shrink: 0;
+        }
+        .search-clear-btn:hover {
+          border-color: var(--border-strong);
+          color: var(--text-primary);
+          background: var(--bg-hover);
         }
 
         .top-actions {
@@ -338,6 +478,12 @@ export function TaskFiltersBar({
           align-items: center;
           flex-wrap: wrap;
           gap: 8px;
+        }
+        .filters-advanced {
+          display: flex;
+          flex-direction: column;
+          gap: 10px;
+          padding-top: 2px;
         }
         .filters-label {
           width: 72px;
@@ -392,6 +538,33 @@ export function TaskFiltersBar({
         }
         .important-chip {
           margin-left: 2px;
+        }
+        .filters-toggle-btn {
+          height: 30px;
+          border: 1px solid var(--border-default);
+          border-radius: var(--radius-md);
+          background: var(--bg-elevated);
+          color: var(--text-secondary);
+          font-size: 11px;
+          font-weight: 600;
+          font-family: inherit;
+          padding: 0 10px;
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          cursor: pointer;
+          transition: all var(--duration) var(--ease);
+        }
+        .filters-toggle-btn:hover {
+          color: var(--text-primary);
+          border-color: var(--border-strong);
+          background: var(--bg-hover);
+        }
+        .filters-toggle-btn svg {
+          transition: transform var(--duration) var(--ease);
+        }
+        .filters-toggle-btn.open svg {
+          transform: rotate(180deg);
         }
         .result-count {
           margin-left: auto;
@@ -471,9 +644,15 @@ export function TaskFiltersBar({
           .top-actions {
             display: flex;
           }
+          .filters-summary-row {
+            align-items: center;
+          }
           .filters-btn {
             flex: 1;
             justify-content: center;
+          }
+          .search-shortcut {
+            display: none;
           }
           .filters-label {
             width: auto;

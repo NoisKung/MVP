@@ -23,7 +23,10 @@ describe("AppShell", () => {
         onCreateClick={() => undefined}
         syncStatus="CONFLICT"
         syncStatusLabel="Needs attention"
+        autosaveStatus="ready"
+        autosaveStatusLabel="Autosave ready"
         onOpenConflictCenter={onOpenConflictCenter}
+        onOpenShortcutHelp={() => undefined}
       >
         <div>content</div>
       </AppShell>,
@@ -39,7 +42,10 @@ describe("AppShell", () => {
         onCreateClick={() => undefined}
         syncStatus="SYNCED"
         syncStatusLabel="Synced"
+        autosaveStatus="ready"
+        autosaveStatusLabel="Autosave ready"
         onOpenConflictCenter={() => undefined}
+        onOpenShortcutHelp={() => undefined}
       >
         <div>content</div>
       </AppShell>,
@@ -48,5 +54,51 @@ describe("AppShell", () => {
     const conflictsButton = screen.getByRole("button", { name: "Conflicts" });
     fireEvent.click(conflictsButton);
     expect(conflictsButton).toHaveClass("active");
+  });
+
+  it("opens shortcut help when the footer button is clicked", () => {
+    const onOpenShortcutHelp = vi.fn();
+
+    render(
+      <AppShell
+        onCreateClick={() => undefined}
+        syncStatus="SYNCED"
+        syncStatusLabel="Synced"
+        autosaveStatus="ready"
+        autosaveStatusLabel="Autosave ready"
+        onOpenConflictCenter={() => undefined}
+        onOpenShortcutHelp={onOpenShortcutHelp}
+      >
+        <div>content</div>
+      </AppShell>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "Shortcuts ?" }));
+    expect(onOpenShortcutHelp).toHaveBeenCalledTimes(1);
+  });
+
+  it("renders autosave status label with detail tooltip", () => {
+    render(
+      <AppShell
+        onCreateClick={() => undefined}
+        syncStatus="SYNCED"
+        syncStatusLabel="Synced"
+        autosaveStatus="error"
+        autosaveStatusLabel="Autosave failed"
+        autosaveStatusDetail="Disk write failed."
+        onOpenConflictCenter={() => undefined}
+        onOpenShortcutHelp={() => undefined}
+      >
+        <div>content</div>
+      </AppShell>,
+    );
+
+    const autosaveLabel = screen.getByText("Autosave failed");
+    expect(autosaveLabel).toBeInTheDocument();
+    expect(autosaveLabel.closest(".footer-autosave-error")).not.toBeNull();
+    expect(autosaveLabel.closest("[role='status']")).toHaveAttribute(
+      "title",
+      "Disk write failed.",
+    );
   });
 });
