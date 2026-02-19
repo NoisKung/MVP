@@ -1353,14 +1353,16 @@ export function ReminderSettings({
             </div>
           </div>
 
-          <div className="settings-actions">
+          <div className="settings-actions settings-actions-single">
             <button
               type="button"
-              className="settings-btn settings-btn-primary"
+              className="settings-btn settings-btn-primary settings-btn-provider"
               onClick={() => void handleSaveSyncProvider()}
               disabled={syncProviderSaving || syncProviderLoading}
             >
-              {syncProviderSaving ? "Saving..." : "Save Provider"}
+              <span className="settings-btn-label">
+                {syncProviderSaving ? "Saving..." : "Save Provider"}
+              </span>
             </button>
           </div>
 
@@ -1957,6 +1959,9 @@ export function ReminderSettings({
           flex-wrap: wrap;
           gap: 8px;
         }
+        .settings-actions-single {
+          flex-wrap: nowrap;
+        }
         .settings-btn {
           border: 1px solid var(--border-default);
           border-radius: var(--radius-md);
@@ -1969,9 +1974,25 @@ export function ReminderSettings({
           padding: 0 12px;
           display: inline-flex;
           align-items: center;
+          justify-content: center;
           gap: 6px;
+          white-space: nowrap;
           cursor: pointer;
-          transition: all var(--duration) var(--ease);
+          transition:
+            background-color var(--duration) var(--ease),
+            border-color var(--duration) var(--ease),
+            color var(--duration) var(--ease),
+            opacity var(--duration) var(--ease),
+            box-shadow var(--duration) var(--ease);
+        }
+        .settings-btn-label {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          min-width: 0;
+        }
+        .settings-btn-provider {
+          min-width: 128px;
         }
         .settings-btn:hover:not(:disabled) {
           background: var(--bg-hover);

@@ -1,6 +1,11 @@
 # SoloStack Usage Guide
 
-อัปเดตล่าสุด: 2026-02-18
+อัปเดตล่าสุด: 2026-02-19
+
+## 0) Manuals
+
+- คู่มือภาษาไทย: `docs/MANUAL.th.md`
+- English manual: `docs/MANUAL.en.md`
 
 ## 1) Development Commands
 
