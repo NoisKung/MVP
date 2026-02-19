@@ -565,8 +565,10 @@
     - `Delete task`
     - `Delete project`
     - `Resolve conflict` / `Retry conflict`
+    - `Restore latest backup`
+    - `Restore from file (import backup)`
 - Next:
-  - ขยาย Global Undo Bar ให้รองรับ restore/import flow
+  - เพิ่ม dry-run summary ก่อน queue restore/import
 
 ## Open Decisions (Proposed for Sign-off)
 

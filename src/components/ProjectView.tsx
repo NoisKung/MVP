@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { Task, TaskStatus } from "@/lib/types";
 import {
   useCreateProject,
@@ -115,6 +115,13 @@ function normalizeProjectColor(colorValue: string): string | null {
   return /^#[0-9a-fA-F]{6}$/.test(trimmedColor) ? trimmedColor : null;
 }
 
+function isEditableEventTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  if (target.isContentEditable) return true;
+  const tagName = target.tagName.toUpperCase();
+  return tagName === "INPUT" || tagName === "TEXTAREA" || tagName === "SELECT";
+}
+
 export function ProjectView({
   tasks,
   projectNameById,
@@ -153,6 +160,7 @@ export function ProjectView({
   const [editName, setEditName] = useState("");
   const [editDescription, setEditDescription] = useState("");
   const [editColor, setEditColor] = useState(DEFAULT_PROJECT_COLOR);
+  const projectSearchInputRef = useRef<HTMLInputElement | null>(null);
 
   const taskMetricsByProjectId = useMemo(() => {
     const taskMap = new Map<string, Task[]>();
@@ -231,6 +239,26 @@ export function ProjectView({
     setTaskSectionFilter("ALL");
     setIsEditingDetails(false);
   }, [selectedProject]);
+
+  useEffect(() => {
+    const handleGlobalSearchShortcut = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || event.repeat) return;
+      if (event.key !== "/" || event.metaKey || event.ctrlKey || event.altKey) {
+        return;
+      }
+      if (isEditableEventTarget(event.target)) return;
+
+      event.preventDefault();
+      const inputElement = projectSearchInputRef.current;
+      if (!inputElement) return;
+      inputElement.focus();
+      inputElement.select();
+    };
+
+    window.addEventListener("keydown", handleGlobalSearchShortcut);
+    return () =>
+      window.removeEventListener("keydown", handleGlobalSearchShortcut);
+  }, []);
 
   const selectedProjectTasks = useMemo(() => {
     if (!selectedProject) return [] as Task[];
@@ -721,12 +749,38 @@ export function ProjectView({
             >
               <Search size={13} />
               <input
+                ref={projectSearchInputRef}
                 id="project-search-input"
                 className="project-search-input"
                 value={projectSearch}
                 onChange={(event) => setProjectSearch(event.target.value)}
+                onKeyDown={(event) => {
+                  if (event.key !== "Escape") return;
+                  event.preventDefault();
+                  if (projectSearch.trim()) {
+                    setProjectSearch("");
+                  } else {
+                    projectSearchInputRef.current?.blur();
+                  }
+                }}
                 placeholder="Search project..."
               />
+              {projectSearch ? (
+                <button
+                  type="button"
+                  className="project-search-clear-btn"
+                  onClick={() => {
+                    setProjectSearch("");
+                    projectSearchInputRef.current?.focus();
+                  }}
+                  aria-label="Clear project search"
+                  title="Clear project search"
+                >
+                  <X size={11} />
+                </button>
+              ) : (
+                <kbd className="project-search-shortcut">/</kbd>
+              )}
             </label>
             <div className="project-status-filter-row">
               {PROJECT_STATUS_FILTERS.map((filterOption) => {
@@ -1236,11 +1290,17 @@ export function ProjectView({
           align-items: center;
           gap: 8px;
           border: 1px solid var(--border-default);
-          border-radius: var(--radius-sm);
+          border-radius: var(--radius-full);
           padding: 0 10px;
-          height: 32px;
+          height: 34px;
           background: var(--bg-elevated);
           color: var(--text-muted);
+          transition: border-color var(--duration) var(--ease),
+            background var(--duration) var(--ease);
+        }
+        .project-search-box:focus-within {
+          border-color: var(--border-focus);
+          background: var(--bg-hover);
         }
         .project-search-input {
           width: 100%;
@@ -1253,6 +1313,37 @@ export function ProjectView({
         }
         .project-search-input::placeholder {
           color: var(--text-disabled);
+        }
+        .project-search-shortcut {
+          border: 1px solid var(--border-default);
+          border-radius: 6px;
+          background: transparent;
+          color: var(--text-disabled);
+          font-size: 10px;
+          font-family: inherit;
+          font-weight: 600;
+          padding: 1px 5px;
+          line-height: 1.4;
+          user-select: none;
+        }
+        .project-search-clear-btn {
+          width: 18px;
+          height: 18px;
+          border: 1px solid var(--border-default);
+          border-radius: 999px;
+          background: transparent;
+          color: var(--text-muted);
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          flex-shrink: 0;
+          cursor: pointer;
+          transition: all var(--duration) var(--ease);
+        }
+        .project-search-clear-btn:hover {
+          border-color: var(--border-strong);
+          color: var(--text-primary);
+          background: var(--bg-hover);
         }
         .project-status-filter-row {
           display: flex;
@@ -1719,6 +1810,9 @@ export function ProjectView({
           }
           .project-kpis {
             grid-template-columns: repeat(2, minmax(0, 1fr));
+          }
+          .project-search-shortcut {
+            display: none;
           }
         }
       `}</style>

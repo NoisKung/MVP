@@ -24,7 +24,9 @@ import {
   useUpdateTask,
   useDeleteTask,
   useDeleteProject,
+  useImportBackup,
   useResolveSyncConflict,
+  useRestoreLatestBackup,
   useSyncConflicts,
   useSyncRuntimeSettings,
   useSyncSettings,
@@ -405,6 +407,8 @@ function AppContent() {
   const updateTask = useUpdateTask();
   const deleteTask = useDeleteTask();
   const deleteProject = useDeleteProject();
+  const importBackup = useImportBackup();
+  const restoreLatestBackup = useRestoreLatestBackup();
   const { data: syncConflicts = [], isLoading: isSyncConflictsLoading } =
     useSyncConflicts("open", 50);
   const resolveSyncConflict = useResolveSyncConflict();
@@ -573,11 +577,25 @@ function AppContent() {
       ),
     [undoQueue],
   );
+  const hasPendingBackupRestoreUndo = useMemo(
+    () =>
+      undoQueue.some((action) =>
+        action.dedupeKey?.startsWith("backup-restore-latest"),
+      ),
+    [undoQueue],
+  );
+  const hasPendingBackupImportUndo = useMemo(
+    () =>
+      undoQueue.some((action) => action.dedupeKey?.startsWith("backup-import")),
+    [undoQueue],
+  );
   const isAutosaveSaving =
     createTask.isPending ||
     updateTask.isPending ||
     deleteTask.isPending ||
     deleteProject.isPending ||
+    importBackup.isPending ||
+    restoreLatestBackup.isPending ||
     (e2eBridgeEnabled
       ? isE2EConflictResolving
       : resolveSyncConflict.isPending) ||
@@ -848,6 +866,81 @@ function AppContent() {
   const visibleRetryLastFailedSync = e2eBridgeEnabled
     ? handleE2ERetryLastFailedSync
     : sync.retryLastFailedSync;
+  const handleQueueRestoreLatestBackup = useCallback(
+    async (input: { force: boolean }) => {
+      const queued = enqueueUndoAction({
+        label: "Restore latest backup",
+        dedupeKey: "backup-restore-latest",
+        execute: async () => {
+          await restoreLatestBackup.mutateAsync({
+            force: input.force,
+          });
+          if (visibleSyncHasTransport) {
+            await visibleSyncNow();
+          }
+          markAutosaveSuccess();
+        },
+        onExecuteError: (error) => {
+          setActionError(getErrorMessage(error));
+          markAutosaveFailure(error);
+        },
+      });
+      if (!queued) {
+        throw new Error("A backup restore already has a pending undo action.");
+      }
+    },
+    [
+      enqueueUndoAction,
+      markAutosaveFailure,
+      markAutosaveSuccess,
+      restoreLatestBackup,
+      setActionError,
+      visibleSyncHasTransport,
+      visibleSyncNow,
+    ],
+  );
+  const handleQueueImportBackup = useCallback(
+    async (input: {
+      payload: unknown;
+      force: boolean;
+      sourceName?: string;
+    }) => {
+      const label = input.sourceName?.trim()
+        ? `Import backup "${input.sourceName.trim()}"`
+        : "Import backup file";
+
+      const queued = enqueueUndoAction({
+        label,
+        dedupeKey: "backup-import",
+        execute: async () => {
+          await importBackup.mutateAsync({
+            payload: input.payload,
+            force: input.force,
+          });
+          if (visibleSyncHasTransport) {
+            await visibleSyncNow();
+          }
+          markAutosaveSuccess();
+        },
+        onExecuteError: (error) => {
+          setActionError(getErrorMessage(error));
+          markAutosaveFailure(error);
+        },
+      });
+      if (!queued) {
+        throw new Error("A backup import already has a pending undo action.");
+      }
+    },
+    [
+      enqueueUndoAction,
+      importBackup,
+      markAutosaveFailure,
+      markAutosaveSuccess,
+      setActionError,
+      visibleSyncHasTransport,
+      visibleSyncNow,
+    ],
+  );
 
   const handleResolveSyncConflict = useCallback(
     async (input: ResolveSyncConflictInput): Promise<void> => {
@@ -1613,6 +1706,12 @@ function AppContent() {
       syncConflictsLoading={visibleSyncConflictsLoading}
       syncConflictResolving={visibleSyncConflictResolving}
       onResolveSyncConflict={handleResolveSyncConflict}
+      backupRestoreLatestBusy={
+        restoreLatestBackup.isPending || hasPendingBackupRestoreUndo
+      }
+      backupImportBusy={importBackup.isPending || hasPendingBackupImportUndo}
+      onQueueRestoreLatestBackup={handleQueueRestoreLatestBackup}
+      onQueueImportBackup={handleQueueImportBackup}
     />
   ) : (
     <Dashboard />

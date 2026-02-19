@@ -1,3 +1,4 @@
+import { useEffect, useRef } from "react";
 import type {
   SavedTaskView,
   TaskDueFilter,
@@ -6,7 +7,7 @@ import type {
   TaskSortBy,
   TaskStatus,
 } from "@/lib/types";
-import { BookmarkPlus, FilterX, Search, Star, Trash2 } from "lucide-react";
+import { BookmarkPlus, FilterX, Search, Star, Trash2, X } from "lucide-react";
 
 const STATUS_OPTIONS: Array<{ value: TaskStatus; label: string }> = [
   { value: "TODO", label: "To Do" },
@@ -57,6 +58,13 @@ interface TaskFiltersBarProps {
   onDeleteSavedView: (savedViewId: string) => void;
 }
 
+function isEditableEventTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) return false;
+  if (target.isContentEditable) return true;
+  const tagName = target.tagName.toUpperCase();
+  return tagName === "INPUT" || tagName === "TEXTAREA" || tagName === "SELECT";
+}
+
 export function TaskFiltersBar({
   filters,
   availableProjects,
@@ -77,6 +85,7 @@ export function TaskFiltersBar({
   onApplySavedView,
   onDeleteSavedView,
 }: TaskFiltersBarProps) {
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
   const handleSaveViewClick = () => {
     const suggestedName =
       activeSavedViewId &&
@@ -88,18 +97,65 @@ export function TaskFiltersBar({
     if (!inputName) return;
     onSaveCurrentView(inputName);
   };
+  const handleClearSearch = () => {
+    onSearchChange("");
+    searchInputRef.current?.focus();
+  };
+
+  useEffect(() => {
+    const handleGlobalSearchShortcut = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || event.repeat) return;
+      if (event.key !== "/" || event.metaKey || event.ctrlKey || event.altKey) {
+        return;
+      }
+      if (isEditableEventTarget(event.target)) return;
+
+      event.preventDefault();
+      const inputElement = searchInputRef.current;
+      if (!inputElement) return;
+      inputElement.focus();
+      inputElement.select();
+    };
+
+    window.addEventListener("keydown", handleGlobalSearchShortcut);
+    return () =>
+      window.removeEventListener("keydown", handleGlobalSearchShortcut);
+  }, []);
 
   return (
     <div className="filters-wrap">
       <div className="filters-top-row">
-        <div className="search-wrap">
-          <Search size={14} />
+        <div className={`search-wrap${filters.search ? " has-value" : ""}`}>
+          <Search size={14} className="search-icon" />
           <input
+            ref={searchInputRef}
             className="search-input"
             value={filters.search}
             onChange={(event) => onSearchChange(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key !== "Escape") return;
+              event.preventDefault();
+              if (filters.search.trim()) {
+                onSearchChange("");
+              } else {
+                searchInputRef.current?.blur();
+              }
+            }}
             placeholder="Search title or description..."
           />
+          {filters.search ? (
+            <button
+              type="button"
+              className="search-clear-btn"
+              onClick={handleClearSearch}
+              aria-label="Clear search"
+              title="Clear search"
+            >
+              <X size={12} />
+            </button>
+          ) : (
+            <kbd className="search-shortcut">/</kbd>
+          )}
         </div>
 
         <div className="top-actions">
@@ -283,11 +339,24 @@ export function TaskFiltersBar({
           align-items: center;
           gap: 8px;
           border: 1px solid var(--border-default);
-          border-radius: var(--radius-md);
+          border-radius: var(--radius-full);
           background: var(--bg-elevated);
           color: var(--text-muted);
           padding: 0 10px;
-          height: 34px;
+          height: 36px;
+          transition: border-color var(--duration) var(--ease),
+            background var(--duration) var(--ease);
+        }
+        .search-wrap:focus-within {
+          border-color: var(--border-focus);
+          background: var(--bg-hover);
+        }
+        .search-icon {
+          flex-shrink: 0;
+          color: var(--text-disabled);
+        }
+        .search-wrap.has-value .search-icon {
+          color: var(--text-muted);
         }
         .search-input {
           flex: 1;
@@ -301,6 +370,37 @@ export function TaskFiltersBar({
         }
         .search-input::placeholder {
           color: var(--text-disabled);
+        }
+        .search-shortcut {
+          border: 1px solid var(--border-default);
+          border-radius: 6px;
+          background: transparent;
+          color: var(--text-disabled);
+          font-size: 10px;
+          font-family: inherit;
+          font-weight: 600;
+          padding: 1px 5px;
+          line-height: 1.4;
+          user-select: none;
+        }
+        .search-clear-btn {
+          width: 20px;
+          height: 20px;
+          border: 1px solid var(--border-default);
+          border-radius: 999px;
+          background: transparent;
+          color: var(--text-muted);
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          cursor: pointer;
+          transition: all var(--duration) var(--ease);
+          flex-shrink: 0;
+        }
+        .search-clear-btn:hover {
+          border-color: var(--border-strong);
+          color: var(--text-primary);
+          background: var(--bg-hover);
         }
 
         .top-actions {
@@ -474,6 +574,9 @@ export function TaskFiltersBar({
           .filters-btn {
             flex: 1;
             justify-content: center;
+          }
+          .search-shortcut {
+            display: none;
           }
           .filters-label {
             width: auto;

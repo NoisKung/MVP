@@ -29,6 +29,8 @@ Power shortcuts:
 - `Cmd/Ctrl + ,`: เปิด `Settings`
 - `Cmd/Ctrl + Shift + C`: เปิด `Conflict Center`
 - `Cmd/Ctrl + Shift + S`: `Sync now` (เมื่อมี transport)
+- `/`: โฟกัสช่อง Search ใน view ปัจจุบัน (Board/Today/Upcoming/Projects)
+- `Esc` ในช่อง Search: ล้างข้อความ (หรือ blur เมื่อช่องว่าง)
 
 ## 1C) Global Undo Bar (QoL)
 
@@ -37,6 +39,8 @@ Power shortcuts:
   - `Delete task`
   - `Delete project`
   - `Resolve conflict` / `Retry conflict`
+  - `Restore latest backup`
+  - `Restore from file (import backup)`
 - ถ้ามีหลาย action ต่อเนื่อง แถบจะแสดง action แรกและจำนวนคิวที่เหลือ (`+N more`)
 
 ## 2) MVP CLI Quick Usage

@@ -25,8 +25,6 @@ import {
   useBackupRestorePreflight,
   useExportBackup,
   useExportSyncConflictReport,
-  useImportBackup,
-  useRestoreLatestBackup,
   useSyncConflictEvents,
   useSyncConflictObservability,
 } from "@/hooks/use-tasks";
@@ -79,6 +77,14 @@ interface ReminderSettingsProps {
   syncConflictsLoading: boolean;
   syncConflictResolving: boolean;
   onResolveSyncConflict: (input: ResolveSyncConflictInput) => Promise<void>;
+  backupRestoreLatestBusy: boolean;
+  backupImportBusy: boolean;
+  onQueueRestoreLatestBackup: (input: { force: boolean }) => Promise<void>;
+  onQueueImportBackup: (input: {
+    payload: unknown;
+    force: boolean;
+    sourceName?: string;
+  }) => Promise<void>;
 }
 
 function getErrorMessage(error: unknown): string {
@@ -226,14 +232,6 @@ function buildRestoreForceReasonLabel(
   return `${reasonSegments[0]} and ${reasonSegments[1]}`;
 }
 
-function buildRestoreResultLabel(result: {
-  tasks: number;
-  projects: number;
-  task_templates: number;
-}) {
-  return `Backup restored: ${result.tasks} tasks, ${result.projects} projects, ${result.task_templates} templates.`;
-}
-
 export function ReminderSettings({
   remindersEnabled,
   onRemindersEnabledChange,
@@ -262,6 +260,10 @@ export function ReminderSettings({
   syncConflictsLoading,
   syncConflictResolving,
   onResolveSyncConflict,
+  backupRestoreLatestBusy,
+  backupImportBusy,
+  onQueueRestoreLatestBackup,
+  onQueueImportBackup,
 }: ReminderSettingsProps) {
   const [permissionState, setPermissionState] =
     useState<NotificationPermissionState>("unknown");
@@ -302,12 +304,8 @@ export function ReminderSettings({
   const backupRestorePreflight = useBackupRestorePreflight();
   const exportBackup = useExportBackup();
   const exportSyncConflicts = useExportSyncConflictReport();
-  const importBackup = useImportBackup();
-  const restoreLatestBackup = useRestoreLatestBackup();
   const isBackupBusy =
-    exportBackup.isPending ||
-    importBackup.isPending ||
-    restoreLatestBackup.isPending;
+    exportBackup.isPending || backupImportBusy || backupRestoreLatestBusy;
   const selectedConflict =
     syncConflicts.find((conflict) => conflict.id === selectedConflictId) ??
     null;
@@ -487,15 +485,14 @@ export function ReminderSettings({
 
       const fileContent = await selectedFile.text();
       const parsedPayload = JSON.parse(fileContent) as unknown;
-      const result = await importBackup.mutateAsync({
+      await onQueueImportBackup({
         payload: parsedPayload,
         force: confirmation.force,
+        sourceName: selectedFile.name,
       });
-
-      setBackupFeedback(buildRestoreResultLabel(result));
-      if (syncHasTransport) {
-        await onSyncNow();
-      }
+      setBackupFeedback(
+        "Restore from file queued. Undo is available for 5 seconds.",
+      );
     } catch (error) {
       setBackupError(getErrorMessage(error));
     }
@@ -509,13 +506,12 @@ export function ReminderSettings({
       const confirmation = await confirmRestoreWithPreflight();
       if (!confirmation) return;
 
-      const result = await restoreLatestBackup.mutateAsync({
+      await onQueueRestoreLatestBackup({
         force: confirmation.force,
       });
-      setBackupFeedback(buildRestoreResultLabel(result));
-      if (syncHasTransport) {
-        await onSyncNow();
-      }
+      setBackupFeedback(
+        "Restore latest backup queued. Undo is available for 5 seconds.",
+      );
     } catch (error) {
       setBackupError(getErrorMessage(error));
     }
@@ -1397,8 +1393,8 @@ export function ReminderSettings({
             disabled={isBackupBusy || !backupPreflight?.has_latest_backup}
           >
             <RotateCcw size={14} />
-            {restoreLatestBackup.isPending
-              ? "Restoring Latest..."
+            {backupRestoreLatestBusy
+              ? "Restore Queued..."
               : "Restore Latest Backup"}
           </button>
           <button
@@ -1408,7 +1404,7 @@ export function ReminderSettings({
             disabled={isBackupBusy}
           >
             <Upload size={14} />
-            {importBackup.isPending ? "Restoring..." : "Restore from File"}
+            {backupImportBusy ? "Restore Queued..." : "Restore from File"}
           </button>
           <input
             ref={backupInputRef}
