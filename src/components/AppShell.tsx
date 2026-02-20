@@ -22,6 +22,8 @@ import {
   Menu,
   X,
   Heart,
+  Timer,
+  Square,
 } from "lucide-react";
 import type { SyncStatus } from "@/lib/types";
 
@@ -89,6 +91,9 @@ interface AppShellProps {
   autosaveStatusDetail?: string | null;
   onOpenConflictCenter: () => void;
   onOpenShortcutHelp: () => void;
+  focusSessionTaskTitle?: string | null;
+  focusSessionElapsedLabel?: string | null;
+  onStopFocusSession?: (() => void) | null;
 }
 
 function renderSyncStatusIcon(status: SyncStatus) {
@@ -117,6 +122,9 @@ export function AppShell({
   autosaveStatusDetail,
   onOpenConflictCenter,
   onOpenShortcutHelp,
+  focusSessionTaskTitle = null,
+  focusSessionElapsedLabel = null,
+  onStopFocusSession,
 }: AppShellProps) {
   const { t } = useI18n();
   const { activeView, setActiveView } = useAppStore();
@@ -215,6 +223,31 @@ export function AppShell({
 
         {/* Footer */}
         <div className="sidebar-footer">
+          {focusSessionElapsedLabel && (
+            <div className="footer-row">
+              <button
+                type="button"
+                className="footer-focus"
+                onClick={() => onStopFocusSession?.()}
+                aria-label={t("taskCard.focus.stop")}
+                title={
+                  focusSessionTaskTitle
+                    ? `${focusSessionElapsedLabel} • ${focusSessionTaskTitle}`
+                    : focusSessionElapsedLabel
+                }
+              >
+                <span className="footer-focus-meta">
+                  <Timer size={12} />
+                  <span className="footer-focus-elapsed">
+                    {focusSessionElapsedLabel}
+                  </span>
+                </span>
+                <span className="footer-focus-stop">
+                  <Square size={10} />
+                </span>
+              </button>
+            </div>
+          )}
           <div className="footer-row">
             {isConflictStatusActionable ? (
               <button
@@ -488,6 +521,51 @@ export function AppShell({
           justify-content: space-between;
           gap: 10px;
           width: 100%;
+        }
+        .footer-focus {
+          width: 100%;
+          display: inline-flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 8px;
+          border: 1px solid rgba(96, 165, 250, 0.35);
+          border-radius: 9px;
+          background: rgba(37, 99, 235, 0.12);
+          color: #bfdbfe;
+          font-size: 11px;
+          font-family: inherit;
+          font-weight: 700;
+          padding: 5px 8px;
+          cursor: pointer;
+          transition: all var(--duration) var(--ease);
+        }
+        .footer-focus:hover {
+          border-color: rgba(96, 165, 250, 0.5);
+          background: rgba(37, 99, 235, 0.18);
+          color: #dbeafe;
+        }
+        .footer-focus-meta {
+          display: inline-flex;
+          align-items: center;
+          gap: 6px;
+          min-width: 0;
+        }
+        .footer-focus-elapsed {
+          overflow: hidden;
+          text-overflow: ellipsis;
+          white-space: nowrap;
+        }
+        .footer-focus-stop {
+          display: inline-flex;
+          align-items: center;
+          justify-content: center;
+          width: 16px;
+          height: 16px;
+          border-radius: 4px;
+          border: 1px solid rgba(148, 163, 184, 0.5);
+          background: rgba(15, 23, 42, 0.35);
+          color: #e2e8f0;
+          flex-shrink: 0;
         }
         .footer-status {
           display: flex;

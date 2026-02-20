@@ -54,6 +54,10 @@ const TRANSLATIONS = {
       "Using last known-good transport. {warning}",
     "sync.warning.completedWithLastKnownGood":
       "Sync completed with last known-good transport. {warning}",
+    "sync.migration.writeBlocked":
+      "Sync is temporarily blocked by migration guardrails. Resolve migration issue and restart the app.",
+    "sync.migration.writeBlockedWithError":
+      "Sync is temporarily blocked by migration guardrails: {error}",
     "sync.transport.error.unexpected": "Unexpected transport error.",
     "sync.transport.error.invalidJson":
       "Transport response returned invalid JSON.",
@@ -190,6 +194,9 @@ const TRANSLATIONS = {
       "E2E transport request failed ({status}).",
     "reminder.title": "SoloStack Reminder",
     "reminder.dueAt": "Due {dueAt}",
+    "reminder.action.snooze15m": "Snooze 15m",
+    "reminder.action.snooze1h": "Snooze 1h",
+    "reminder.action.snoozeTomorrow": "Snooze to tomorrow",
     "taskForm.error.invalidDueFormat": "Due date format is invalid.",
     "taskForm.error.invalidReminderFormat": "Reminder format is invalid.",
     "taskForm.error.reminderAfterDue":
@@ -391,6 +398,10 @@ const TRANSLATIONS = {
       "Enter to run • Arrow keys to navigate • Esc to close",
     "commandPalette.action.createTask": "Create new task",
     "commandPalette.action.quickCapture": "Open quick capture",
+    "commandPalette.action.syncNow": "Run Sync now",
+    "commandPalette.action.exportBackup": "Export backup",
+    "commandPalette.action.openSyncDiagnostics": "Open Sync diagnostics",
+    "commandPalette.action.openRestorePreflight": "Open Restore preflight",
     "commandPalette.shortcut.quickCapture": "Cmd/Ctrl + Shift + N",
     "commandPalette.nav.goTo": "Go to {view}",
     "commandPalette.meta.current": "Current",
@@ -407,6 +418,7 @@ const TRANSLATIONS = {
     "conflictCenter.action.keepLocal": "Keep Local",
     "conflictCenter.action.keepRemote": "Keep Remote",
     "conflictCenter.action.manualMerge": "Manual Merge",
+    "conflictCenter.action.applyDefault": "Apply Default",
     "conflictCenter.action.details": "Details",
     "conflictCenter.loading": "Loading conflicts...",
     "conflictCenter.empty.title": "No open conflicts",
@@ -429,6 +441,10 @@ const TRANSLATIONS = {
       "Conflict report exported ({count} conflict record(s)).",
     "conflictCenter.confirm.retry":
       "Retry will re-queue this conflict in the next sync cycle. Continue?",
+    "conflictCenter.defaultStrategy": "Default strategy: {strategy}",
+    "conflictCenter.strategy.keepLocal": "Keep Local",
+    "conflictCenter.strategy.keepRemote": "Keep Remote",
+    "conflictCenter.strategy.manualMerge": "Manual Merge",
     "conflictCenter.type.deleteVsUpdate": "Delete vs Update",
     "conflictCenter.type.notesCollision": "Notes Collision",
     "conflictCenter.type.validationError": "Validation Error",
@@ -512,12 +528,41 @@ const TRANSLATIONS = {
     "taskFilters.label.sort": "Sort",
     "taskFilters.label.important": "Important",
     "taskFilters.label.savedViews": "Saved Views",
+    "taskFilters.bulk.selectShown": "Select shown",
+    "taskFilters.bulk.unselectShown": "Unselect shown",
+    "taskFilters.bulk.clearSelected": "Clear selected",
+    "taskFilters.bulk.selectedCount": "{count} selected",
+    "taskFilters.bulk.title": "Bulk edit",
+    "taskFilters.bulk.statusPlaceholder": "Set status...",
+    "taskFilters.bulk.priorityPlaceholder": "Set priority...",
+    "taskFilters.bulk.projectPlaceholder": "Move to project...",
+    "taskFilters.bulk.projectClear": "No project",
+    "taskFilters.bulk.markImportant": "Mark important",
+    "taskFilters.bulk.unmarkImportant": "Clear important",
+    "taskFilters.bulk.duePlaceholder": "Set due...",
+    "taskFilters.bulk.setDue": "Apply due",
+    "taskFilters.bulk.clearDue": "Clear due",
+    "taskFilters.bulk.reminderPlaceholder": "Set reminder...",
+    "taskFilters.bulk.setReminder": "Apply reminder",
+    "taskFilters.bulk.clearReminder": "Clear reminder",
+    "taskFilters.bulk.recurrencePlaceholder": "Set repeat...",
+    "taskFilters.bulk.confirm.title":
+      "Apply changes to {count} selected task(s)?",
+    "taskFilters.bulk.confirm.question":
+      "This action updates multiple tasks. Continue?",
     "taskFilters.empty.noProjects": "No projects available for filtering.",
     "taskFilters.empty.savedViews":
       "Save your favorite filter combinations here.",
     "taskFilters.savedView.applyTitle": "Apply saved view",
     "taskCard.action.delete": "Delete",
     "taskCard.action.moveTo": "Move to {status}",
+    "taskCard.action.selectTask": "Select task",
+    "taskCard.action.unselectTask": "Unselect task",
+    "taskCard.focus.start": "Start focus session",
+    "taskCard.focus.stop": "Stop and save focus session",
+    "taskCard.focus.runningAnotherTask":
+      "Focus session is running on another task",
+    "taskCard.focus.elapsed": "Focus {duration}",
     "taskCard.due.overdue": "Overdue • {date} {time}",
     "taskCard.due.today": "Due today • {time}",
     "taskCard.due.default": "Due • {date} {time}",
@@ -718,6 +763,14 @@ const TRANSLATIONS = {
       "Runtime reset to recommended {profile} profile.",
     "settings.sync.runtime.feedback.saved":
       "Sync runtime profile ({profile}) was saved.",
+    "settings.sync.conflictDefaults.title": "Conflict Strategy Defaults",
+    "settings.sync.conflictDefaults.desc":
+      "Set one default strategy per conflict type. You can still override per item.",
+    "settings.sync.conflictDefaults.loading":
+      "Loading conflict strategy defaults...",
+    "settings.sync.conflictDefaults.save": "Save Conflict Defaults",
+    "settings.sync.conflictDefaults.feedback.saved":
+      "Conflict strategy defaults were saved.",
     "settings.sync.diagnostics.title": "Sync Diagnostics (Session)",
     "settings.sync.diagnostics.runtimePreset":
       "Runtime preset: {preset} (detected)",
@@ -771,6 +824,8 @@ const TRANSLATIONS = {
       "Restore preflight is unavailable. Please try again.",
     "settings.backup.preflight.latestInternal":
       "Latest internal backup: {time}",
+    "settings.backup.preflight.latestSummary":
+      "Latest backup includes {projects} projects, {tasks} tasks, {templates} templates.",
     "settings.backup.preflight.pendingOutbox":
       "Pending outbox changes: {count}",
     "settings.backup.preflight.openConflicts": "Open conflicts: {count}",
@@ -785,6 +840,18 @@ const TRANSLATIONS = {
     "settings.backup.confirm.forceDiscard":
       "Force restore will discard pending outbox changes and clear open conflicts.",
     "settings.backup.confirm.forceContinue": "Continue with force restore?",
+    "settings.backup.confirm.dryRunTitle": "Restore dry-run summary:",
+    "settings.backup.confirm.dryRunData":
+      "Will restore {projects} projects, {tasks} tasks, {templates} templates.",
+    "settings.backup.confirm.dryRunDataUnknown":
+      "Unable to estimate projects/tasks/templates from this backup.",
+    "settings.backup.confirm.dryRunClears":
+      "Will clear {outbox} pending outbox changes and {conflicts} open conflicts.",
+    "settings.backup.confirm.source.latest":
+      "Source: latest internal backup ({time})",
+    "settings.backup.confirm.source.latestUnknown":
+      "Source: latest internal backup",
+    "settings.backup.confirm.source.file": "Source file: {name}",
     "settings.backup.reason.pendingOutbox": "pending outbox changes",
     "settings.backup.reason.openConflicts": "open conflicts",
     "settings.backup.reason.activeGuardrails": "active restore guardrails",
@@ -847,6 +914,10 @@ const TRANSLATIONS = {
       "กำลังใช้ transport สำรองล่าสุดที่ใช้งานได้ {warning}",
     "sync.warning.completedWithLastKnownGood":
       "ซิงก์เสร็จสิ้นด้วย transport สำรองล่าสุดที่ใช้งานได้ {warning}",
+    "sync.migration.writeBlocked":
+      "ระบบบล็อกการซิงก์ชั่วคราวตามเงื่อนไข migration กรุณาแก้ปัญหา migration และเปิดแอปใหม่",
+    "sync.migration.writeBlockedWithError":
+      "ระบบบล็อกการซิงก์ชั่วคราวตามเงื่อนไข migration: {error}",
     "sync.transport.error.unexpected":
       "เกิดข้อผิดพลาดของ transport ที่ไม่คาดคิด",
     "sync.transport.error.invalidJson":
@@ -983,6 +1054,9 @@ const TRANSLATIONS = {
     "app.e2e.transport.requestFailed": "คำขอ E2E transport ล้มเหลว ({status})",
     "reminder.title": "การแจ้งเตือน SoloStack",
     "reminder.dueAt": "ครบกำหนด {dueAt}",
+    "reminder.action.snooze15m": "เลื่อนเตือน 15 นาที",
+    "reminder.action.snooze1h": "เลื่อนเตือน 1 ชั่วโมง",
+    "reminder.action.snoozeTomorrow": "เลื่อนเตือนไปพรุ่งนี้",
     "taskForm.error.invalidDueFormat": "รูปแบบกำหนดส่งไม่ถูกต้อง",
     "taskForm.error.invalidReminderFormat": "รูปแบบเวลาเตือนไม่ถูกต้อง",
     "taskForm.error.reminderAfterDue": "ต้องตั้งเวลาเตือนก่อนกำหนดส่ง",
@@ -1182,6 +1256,10 @@ const TRANSLATIONS = {
       "กด Enter เพื่อเรียกใช้ • ปุ่มลูกศรเพื่อเลื่อน • Esc เพื่อปิด",
     "commandPalette.action.createTask": "สร้างงานใหม่",
     "commandPalette.action.quickCapture": "เปิดบันทึกด่วน",
+    "commandPalette.action.syncNow": "ซิงก์ตอนนี้",
+    "commandPalette.action.exportBackup": "ส่งออกแบ็กอัป",
+    "commandPalette.action.openSyncDiagnostics": "เปิด Sync diagnostics",
+    "commandPalette.action.openRestorePreflight": "เปิด Restore preflight",
     "commandPalette.shortcut.quickCapture": "Cmd/Ctrl + Shift + N",
     "commandPalette.nav.goTo": "ไปที่ {view}",
     "commandPalette.meta.current": "หน้าปัจจุบัน",
@@ -1198,6 +1276,7 @@ const TRANSLATIONS = {
     "conflictCenter.action.keepLocal": "เก็บฝั่ง Local",
     "conflictCenter.action.keepRemote": "เก็บฝั่ง Remote",
     "conflictCenter.action.manualMerge": "รวมแบบกำหนดเอง",
+    "conflictCenter.action.applyDefault": "ใช้ค่าเริ่มต้น",
     "conflictCenter.action.details": "รายละเอียด",
     "conflictCenter.loading": "กำลังโหลดคอนฟลิกต์...",
     "conflictCenter.empty.title": "ไม่มีคอนฟลิกต์ที่เปิดอยู่",
@@ -1220,6 +1299,10 @@ const TRANSLATIONS = {
       "ส่งออกรายงานคอนฟลิกต์แล้ว ({count} รายการ)",
     "conflictCenter.confirm.retry":
       "ระบบจะจัดคิวคอนฟลิกต์นี้ใหม่ในรอบซิงก์ถัดไป ต้องการดำเนินการต่อหรือไม่?",
+    "conflictCenter.defaultStrategy": "กลยุทธ์ค่าเริ่มต้น: {strategy}",
+    "conflictCenter.strategy.keepLocal": "เก็บฝั่ง Local",
+    "conflictCenter.strategy.keepRemote": "เก็บฝั่ง Remote",
+    "conflictCenter.strategy.manualMerge": "รวมแบบกำหนดเอง",
     "conflictCenter.type.deleteVsUpdate": "ลบชนกับแก้ไข",
     "conflictCenter.type.notesCollision": "โน้ตชนกัน",
     "conflictCenter.type.validationError": "ข้อมูลไม่ผ่านการตรวจสอบ",
@@ -1302,11 +1385,38 @@ const TRANSLATIONS = {
     "taskFilters.label.sort": "เรียง",
     "taskFilters.label.important": "สำคัญ",
     "taskFilters.label.savedViews": "มุมมองที่บันทึกไว้",
+    "taskFilters.bulk.selectShown": "เลือกที่แสดงอยู่",
+    "taskFilters.bulk.unselectShown": "ยกเลิกที่แสดงอยู่",
+    "taskFilters.bulk.clearSelected": "ล้างรายการที่เลือก",
+    "taskFilters.bulk.selectedCount": "เลือกแล้ว {count} รายการ",
+    "taskFilters.bulk.title": "แก้ไขหลายงาน",
+    "taskFilters.bulk.statusPlaceholder": "ตั้งค่าสถานะ...",
+    "taskFilters.bulk.priorityPlaceholder": "ตั้งค่าความสำคัญ...",
+    "taskFilters.bulk.projectPlaceholder": "ย้ายไปโปรเจค...",
+    "taskFilters.bulk.projectClear": "ไม่ผูกโปรเจค",
+    "taskFilters.bulk.markImportant": "ทำเป็นงานสำคัญ",
+    "taskFilters.bulk.unmarkImportant": "ยกเลิกงานสำคัญ",
+    "taskFilters.bulk.duePlaceholder": "ตั้งกำหนดส่ง...",
+    "taskFilters.bulk.setDue": "ยืนยันกำหนดส่ง",
+    "taskFilters.bulk.clearDue": "ล้างกำหนดส่ง",
+    "taskFilters.bulk.reminderPlaceholder": "ตั้งเตือน...",
+    "taskFilters.bulk.setReminder": "ยืนยันเตือน",
+    "taskFilters.bulk.clearReminder": "ล้างเตือน",
+    "taskFilters.bulk.recurrencePlaceholder": "ตั้งการทำซ้ำ...",
+    "taskFilters.bulk.confirm.title": "ยืนยันแก้ไข {count} งานที่เลือก?",
+    "taskFilters.bulk.confirm.question":
+      "การกระทำนี้จะแก้ไขหลายงานพร้อมกัน ต้องการทำต่อหรือไม่?",
     "taskFilters.empty.noProjects": "ยังไม่มีโปรเจคสำหรับใช้กรอง",
     "taskFilters.empty.savedViews": "บันทึกชุดฟิลเตอร์ที่ใช้บ่อยไว้ที่นี่",
     "taskFilters.savedView.applyTitle": "เรียกใช้มุมมองที่บันทึกไว้",
     "taskCard.action.delete": "ลบ",
     "taskCard.action.moveTo": "ย้ายไป {status}",
+    "taskCard.action.selectTask": "เลือกงานนี้",
+    "taskCard.action.unselectTask": "ยกเลิกเลือกงานนี้",
+    "taskCard.focus.start": "เริ่มจับเวลาโฟกัส",
+    "taskCard.focus.stop": "หยุดและบันทึกโฟกัส",
+    "taskCard.focus.runningAnotherTask": "กำลังจับเวลาโฟกัสอยู่ในงานอื่น",
+    "taskCard.focus.elapsed": "โฟกัส {duration}",
     "taskCard.due.overdue": "เลยกำหนด • {date} {time}",
     "taskCard.due.today": "ครบกำหนดวันนี้ • {time}",
     "taskCard.due.default": "ครบกำหนด • {date} {time}",
@@ -1504,6 +1614,14 @@ const TRANSLATIONS = {
       "รีเซ็ต runtime เป็นโปรไฟล์ที่แนะนำ ({profile}) แล้ว",
     "settings.sync.runtime.feedback.saved":
       "บันทึกโปรไฟล์ sync runtime ({profile}) แล้ว",
+    "settings.sync.conflictDefaults.title": "ค่าเริ่มต้นกลยุทธ์คอนฟลิกต์",
+    "settings.sync.conflictDefaults.desc":
+      "ตั้งกลยุทธ์เริ่มต้นแยกตามประเภทคอนฟลิกต์ และยัง override รายการเดี่ยวได้",
+    "settings.sync.conflictDefaults.loading":
+      "กำลังโหลดค่าเริ่มต้นกลยุทธ์คอนฟลิกต์...",
+    "settings.sync.conflictDefaults.save": "บันทึกค่าเริ่มต้นคอนฟลิกต์",
+    "settings.sync.conflictDefaults.feedback.saved":
+      "บันทึกค่าเริ่มต้นกลยุทธ์คอนฟลิกต์แล้ว",
     "settings.sync.diagnostics.title": "Sync Diagnostics (Session)",
     "settings.sync.diagnostics.runtimePreset":
       "Runtime preset: {preset} (detected)",
@@ -1557,6 +1675,8 @@ const TRANSLATIONS = {
     "settings.backup.preflight.unavailable":
       "ไม่พบข้อมูล preflight สำหรับการกู้คืน กรุณาลองใหม่อีกครั้ง",
     "settings.backup.preflight.latestInternal": "แบ็กอัปภายในล่าสุด: {time}",
+    "settings.backup.preflight.latestSummary":
+      "แบ็กอัปล่าสุดมี {projects} โปรเจค, {tasks} งาน, {templates} เทมเพลต",
     "settings.backup.preflight.pendingOutbox":
       "การเปลี่ยนแปลงใน outbox ที่รออยู่: {count}",
     "settings.backup.preflight.openConflicts": "คอนฟลิกต์ที่เปิดอยู่: {count}",
@@ -1572,6 +1692,18 @@ const TRANSLATIONS = {
       "force restore จะทิ้งการเปลี่ยนแปลง outbox ที่รออยู่และล้างคอนฟลิกต์ที่เปิดอยู่",
     "settings.backup.confirm.forceContinue":
       "ต้องการดำเนินการ force restore ต่อหรือไม่?",
+    "settings.backup.confirm.dryRunTitle": "สรุป dry-run ก่อนกู้คืน:",
+    "settings.backup.confirm.dryRunData":
+      "จะกู้คืน {projects} โปรเจค, {tasks} งาน, {templates} เทมเพลต",
+    "settings.backup.confirm.dryRunDataUnknown":
+      "ไม่สามารถประเมินจำนวนโปรเจค/งาน/เทมเพลตจากแบ็กอัปนี้ได้",
+    "settings.backup.confirm.dryRunClears":
+      "จะล้าง outbox ที่รออยู่ {outbox} รายการ และคอนฟลิกต์ที่เปิดอยู่ {conflicts} รายการ",
+    "settings.backup.confirm.source.latest":
+      "แหล่งข้อมูล: แบ็กอัปภายในล่าสุด ({time})",
+    "settings.backup.confirm.source.latestUnknown":
+      "แหล่งข้อมูล: แบ็กอัปภายในล่าสุด",
+    "settings.backup.confirm.source.file": "ไฟล์ต้นทาง: {name}",
     "settings.backup.reason.pendingOutbox": "การเปลี่ยนแปลง outbox ที่รออยู่",
     "settings.backup.reason.openConflicts": "คอนฟลิกต์ที่เปิดอยู่",
     "settings.backup.reason.activeGuardrails":
@@ -1590,6 +1722,8 @@ const TRANSLATIONS = {
       "จัดคิวกู้คืนแบ็กอัปล่าสุดแล้ว สามารถ Undo ได้ภายใน 5 วินาที",
   },
 } as const;
+
+export const I18N_CATALOG = TRANSLATIONS;
 
 export type TranslationKey = keyof (typeof TRANSLATIONS)["en"];
 type TranslationParams = Record<string, string | number>;

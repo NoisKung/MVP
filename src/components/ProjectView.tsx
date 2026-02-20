@@ -1,7 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useI18n } from "@/lib/i18n";
 import { localizeErrorMessage } from "@/lib/error-message";
-import type { Task, TaskStatus } from "@/lib/types";
+import type {
+  ProjectViewContextState,
+  ProjectViewStatusFilter,
+  ProjectViewTaskSectionFilter,
+  Task,
+  TaskStatus,
+} from "@/lib/types";
 import {
   useCreateProject,
   useProjects,
@@ -36,6 +42,13 @@ interface ProjectViewProps {
   };
   isDeleteProjectPending: boolean;
   pendingDeleteProjectIds: string[];
+  projectViewContext?: ProjectViewContextState;
+  onProjectViewContextChange?: (context: ProjectViewContextState) => void;
+  activeFocusTaskId?: string | null;
+  focusElapsedSeconds?: number;
+  focusBusy?: boolean;
+  onStartFocus?: (task: Task) => void;
+  onStopFocus?: (task: Task) => void;
 }
 
 interface ProjectMetrics {
@@ -46,10 +59,10 @@ interface ProjectMetrics {
   progressPercent: number;
 }
 
-type ProjectStatusFilter = "ALL" | "ACTIVE" | "COMPLETED";
-type TaskSectionFilter = "ALL" | TaskStatus;
-
-const STATUS_SECTIONS: TaskStatus[] = ["TODO", "DOING", "DONE"];
+type ProjectStatusFilter = ProjectViewStatusFilter;
+type TaskSectionFilter = ProjectViewTaskSectionFilter;
+type ProjectTaskStatusSection = Exclude<TaskSectionFilter, "ALL">;
+const STATUS_SECTIONS: ProjectTaskStatusSection[] = ["TODO", "DOING", "DONE"];
 const PROJECT_STATUS_FILTERS: ProjectStatusFilter[] = [
   "ALL",
   "ACTIVE",
@@ -128,9 +141,16 @@ export function ProjectView({
   onDeleteProject,
   isDeleteProjectPending,
   pendingDeleteProjectIds,
+  projectViewContext,
+  onProjectViewContextChange,
+  activeFocusTaskId = null,
+  focusElapsedSeconds = 0,
+  focusBusy = false,
+  onStartFocus,
+  onStopFocus,
 }: ProjectViewProps) {
   const { locale, t } = useI18n();
-  const getStatusSectionLabel = (status: TaskStatus): string => {
+  const getStatusSectionLabel = (status: ProjectTaskStatusSection): string => {
     if (status === "TODO") return t("taskForm.status.todo");
     if (status === "DOING") return t("taskForm.status.doing");
     return t("taskForm.status.done");
@@ -149,18 +169,23 @@ export function ProjectView({
   const createProject = useCreateProject();
   const updateProject = useUpdateProject();
   const [selectedProjectId, setSelectedProjectId] = useState<string | null>(
-    null,
+    () => projectViewContext?.selectedProjectId ?? null,
   );
   const [actionError, setActionError] = useState<string | null>(null);
   const [actionNotice, setActionNotice] = useState<string | null>(null);
   const [deleteConfirmProjectId, setDeleteConfirmProjectId] = useState<
     string | null
   >(null);
-  const [projectSearch, setProjectSearch] = useState("");
+  const [projectSearch, setProjectSearch] = useState(
+    () => projectViewContext?.projectSearch ?? "",
+  );
   const [projectStatusFilter, setProjectStatusFilter] =
-    useState<ProjectStatusFilter>("ALL");
-  const [taskSectionFilter, setTaskSectionFilter] =
-    useState<TaskSectionFilter>("ALL");
+    useState<ProjectStatusFilter>(
+      () => projectViewContext?.projectStatusFilter ?? "ALL",
+    );
+  const [taskSectionFilter, setTaskSectionFilter] = useState<TaskSectionFilter>(
+    () => projectViewContext?.taskSectionFilter ?? "ALL",
+  );
   const [isCreateFormOpen, setIsCreateFormOpen] = useState(false);
   const [createName, setCreateName] = useState("");
   const [createDescription, setCreateDescription] = useState("");
@@ -170,6 +195,49 @@ export function ProjectView({
   const [editDescription, setEditDescription] = useState("");
   const [editColor, setEditColor] = useState(DEFAULT_PROJECT_COLOR);
   const projectSearchInputRef = useRef<HTMLInputElement | null>(null);
+
+  useEffect(() => {
+    if (!projectViewContext) return;
+    setSelectedProjectId((previousId) =>
+      previousId === projectViewContext.selectedProjectId
+        ? previousId
+        : projectViewContext.selectedProjectId,
+    );
+    setProjectSearch((previousSearch) =>
+      previousSearch === projectViewContext.projectSearch
+        ? previousSearch
+        : projectViewContext.projectSearch,
+    );
+    setProjectStatusFilter((previousFilter) =>
+      previousFilter === projectViewContext.projectStatusFilter
+        ? previousFilter
+        : projectViewContext.projectStatusFilter,
+    );
+    setTaskSectionFilter((previousFilter) =>
+      previousFilter === projectViewContext.taskSectionFilter
+        ? previousFilter
+        : projectViewContext.taskSectionFilter,
+    );
+  }, [
+    projectViewContext?.selectedProjectId,
+    projectViewContext?.projectSearch,
+    projectViewContext?.projectStatusFilter,
+    projectViewContext?.taskSectionFilter,
+  ]);
+  useEffect(() => {
+    onProjectViewContextChange?.({
+      selectedProjectId,
+      projectSearch,
+      projectStatusFilter,
+      taskSectionFilter,
+    });
+  }, [
+    onProjectViewContextChange,
+    projectSearch,
+    projectStatusFilter,
+    selectedProjectId,
+    taskSectionFilter,
+  ]);
 
   const taskMetricsByProjectId = useMemo(() => {
     const taskMap = new Map<string, Task[]>();
@@ -247,7 +315,6 @@ export function ProjectView({
     setEditName(selectedProject.name);
     setEditDescription(selectedProject.description ?? "");
     setEditColor(selectedProject.color ?? DEFAULT_PROJECT_COLOR);
-    setTaskSectionFilter("ALL");
     setIsEditingDetails(false);
     setDeleteConfirmProjectId(null);
     setActionNotice(null);
@@ -285,10 +352,15 @@ export function ProjectView({
       TODO: 0,
       DOING: 0,
       DONE: 0,
-      ARCHIVED: 0,
     };
     for (const task of selectedProjectTasks) {
-      counts[task.status] += 1;
+      if (
+        task.status === "TODO" ||
+        task.status === "DOING" ||
+        task.status === "DONE"
+      ) {
+        counts[task.status] += 1;
+      }
     }
     return counts;
   }, [selectedProjectTasks]);
@@ -1217,6 +1289,11 @@ export function ProjectView({
                                 subtaskProgress={subtaskProgressByTaskId.get(
                                   task.id,
                                 )}
+                                activeFocusTaskId={activeFocusTaskId}
+                                focusElapsedSeconds={focusElapsedSeconds}
+                                focusBusy={focusBusy}
+                                onStartFocus={onStartFocus}
+                                onStopFocus={onStopFocus}
                               />
                             ))}
                           </div>

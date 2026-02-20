@@ -15,6 +15,11 @@ interface CalendarViewProps {
   onStatusChange: (taskId: string, newStatus: TaskStatus) => void;
   onDelete: (taskId: string) => void;
   onCreateClick: () => void;
+  activeFocusTaskId?: string | null;
+  focusElapsedSeconds?: number;
+  focusBusy?: boolean;
+  onStartFocus?: (task: Task) => void;
+  onStopFocus?: (task: Task) => void;
 }
 
 function atStartOfDay(date: Date): Date {
@@ -129,6 +134,11 @@ export function CalendarView({
   onStatusChange,
   onDelete,
   onCreateClick,
+  activeFocusTaskId = null,
+  focusElapsedSeconds = 0,
+  focusBusy = false,
+  onStartFocus,
+  onStopFocus,
 }: CalendarViewProps) {
   const { locale, t } = useI18n();
   const [mode, setMode] = useState<CalendarMode>("month");
@@ -367,6 +377,11 @@ export function CalendarView({
                   onStatusChange={onStatusChange}
                   onDelete={onDelete}
                   subtaskProgress={subtaskProgressByTaskId.get(task.id)}
+                  activeFocusTaskId={activeFocusTaskId}
+                  focusElapsedSeconds={focusElapsedSeconds}
+                  focusBusy={focusBusy}
+                  onStartFocus={onStartFocus}
+                  onStopFocus={onStopFocus}
                 />
               ))}
             </div>

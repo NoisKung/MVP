@@ -9,6 +9,9 @@ import {
   ChevronLeft,
   Trash2,
   Clock3,
+  Square,
+  Play,
+  Timer,
 } from "lucide-react";
 import { useState } from "react";
 
@@ -50,6 +53,15 @@ interface TaskCardProps {
   onDragStart?: (taskId: string) => void;
   onDragEnd?: () => void;
   isDragging?: boolean;
+  selectable?: boolean;
+  selected?: boolean;
+  selectionBusy?: boolean;
+  onToggleSelect?: (taskId: string, nextSelected: boolean) => void;
+  activeFocusTaskId?: string | null;
+  focusElapsedSeconds?: number;
+  focusBusy?: boolean;
+  onStartFocus?: (task: Task) => void;
+  onStopFocus?: (task: Task) => void;
 }
 
 export function TaskCard({
@@ -62,6 +74,15 @@ export function TaskCard({
   onDragStart,
   onDragEnd,
   isDragging = false,
+  selectable = false,
+  selected = false,
+  selectionBusy = false,
+  onToggleSelect,
+  activeFocusTaskId = null,
+  focusElapsedSeconds = 0,
+  focusBusy = false,
+  onStartFocus,
+  onStopFocus,
 }: TaskCardProps) {
   const { locale, t } = useI18n();
   const [showActions, setShowActions] = useState(false);
@@ -80,6 +101,24 @@ export function TaskCard({
       : task.priority === "LOW"
         ? t("taskForm.priority.low")
         : t("taskForm.priority.normal");
+  const selectToggleTitle = selected
+    ? t("taskCard.action.unselectTask")
+    : t("taskCard.action.selectTask");
+  const isFocusActive = activeFocusTaskId === task.id;
+  const isFocusLockedByOtherTask = Boolean(
+    activeFocusTaskId && activeFocusTaskId !== task.id,
+  );
+  const canShowFocusActions = Boolean(onStartFocus && onStopFocus);
+  const focusButtonDisabled =
+    focusBusy || (!isFocusActive && isFocusLockedByOtherTask);
+  const focusButtonTitle = isFocusActive
+    ? t("taskCard.focus.stop")
+    : isFocusLockedByOtherTask
+      ? t("taskCard.focus.runningAnotherTask")
+      : t("taskCard.focus.start");
+  const focusElapsedLabel = t("taskCard.focus.elapsed", {
+    duration: formatFocusDuration(focusElapsedSeconds),
+  });
 
   const relativeDate = getRelativeDate(task.created_at, locale);
 
@@ -104,13 +143,39 @@ export function TaskCard({
     >
       {/* Card top row */}
       <div className="card-top">
-        <span
-          className="card-priority"
-          style={{ color: priorityConfig.color, background: priorityConfig.bg }}
-        >
-          {priorityConfig.icon}
-          {priorityLabel}
-        </span>
+        <div className="card-top-left">
+          {selectable && (
+            <label
+              className={`card-select-toggle${selected ? " selected" : ""}`}
+              title={selectToggleTitle}
+            >
+              <input
+                type="checkbox"
+                className="card-select-input"
+                checked={selected}
+                disabled={selectionBusy}
+                onChange={(event) => {
+                  event.stopPropagation();
+                  onToggleSelect?.(task.id, event.target.checked);
+                }}
+                onClick={(event) => {
+                  event.stopPropagation();
+                }}
+                aria-label={selectToggleTitle}
+              />
+            </label>
+          )}
+          <span
+            className="card-priority"
+            style={{
+              color: priorityConfig.color,
+              background: priorityConfig.bg,
+            }}
+          >
+            {priorityConfig.icon}
+            {priorityLabel}
+          </span>
+        </div>
         <div className="card-top-right">
           {!!task.is_important && (
             <Star size={13} fill="var(--warning)" color="var(--warning)" />
@@ -165,8 +230,28 @@ export function TaskCard({
 
       {/* Footer */}
       <div className="card-footer">
-        <span className="card-date">{relativeDate}</span>
+        <div className="card-footer-left">
+          <span className="card-date">{relativeDate}</span>
+          {canShowFocusActions && isFocusActive && (
+            <span className="card-focus-chip" title={focusElapsedLabel}>
+              <Timer size={11} />
+              {focusElapsedLabel}
+            </span>
+          )}
+        </div>
         <div className="card-status-actions">
+          {canShowFocusActions && (
+            <button
+              className={`status-btn status-btn-focus${isFocusActive ? " status-btn-focus-active" : ""}`}
+              onClick={() =>
+                isFocusActive ? onStopFocus?.(task) : onStartFocus?.(task)
+              }
+              title={focusButtonTitle}
+              disabled={focusButtonDisabled}
+            >
+              {isFocusActive ? <Square size={13} /> : <Play size={13} />}
+            </button>
+          )}
           {prevStatus && (
             <button
               className="status-btn"
@@ -203,6 +288,21 @@ function getNextStatus(current: TaskStatus): TaskStatus | null {
 function getPrevStatus(current: TaskStatus): TaskStatus | null {
   const flow: Record<string, TaskStatus> = { DOING: "TODO", DONE: "DOING" };
   return flow[current] ?? null;
+}
+
+function formatFocusDuration(totalSeconds: number): string {
+  const normalizedSeconds = Math.max(0, Math.floor(totalSeconds));
+  const hours = Math.floor(normalizedSeconds / 3600);
+  const minutes = Math.floor((normalizedSeconds % 3600) / 60);
+  const seconds = normalizedSeconds % 60;
+
+  const paddedMinutes = String(minutes).padStart(hours > 0 ? 2 : 1, "0");
+  const paddedSeconds = String(seconds).padStart(2, "0");
+
+  if (hours > 0) {
+    return `${hours}:${String(minutes).padStart(2, "0")}:${paddedSeconds}`;
+  }
+  return `${paddedMinutes}:${paddedSeconds}`;
 }
 
 function getRelativeDate(dateStr: string, locale: "en" | "th"): string {

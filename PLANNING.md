@@ -1,6 +1,6 @@
 # SoloStack Execution Planning
 
-อัปเดตล่าสุด: 2026-02-18
+อัปเดตล่าสุด: 2026-02-20
 แหล่งข้อมูลหลัก: `IDEA.md`
 
 ## 1) Planning Intent
@@ -19,7 +19,9 @@
 
 ### โฟกัสปัจจุบัน
 - P3-1: Sync Foundation + Desktop Beta
+- P3-2: Mobile Sync Beta (shared-core readiness)
 - P3-3: Conflict Center + Recovery (baseline implementation started)
+- P3-8: i18n TH/EN foundation
 
 ## 3) Strategic Goals (Q1-Q2 2026)
 
@@ -74,6 +76,7 @@
   - เติม test coverage ของ runtime profile แล้ว (unit + Playwright)
 - คงเหลือ:
   - เตรียม mobile beta client ให้ใช้ contract + runtime profile ชุดเดียวกับ desktop
+  - ยืนยัน desktop<->mobile flow กับ dedicated mobile client builds
 
 ### Exit Criteria
 - data model ไม่ drift ระหว่าง client
@@ -646,3 +649,100 @@ Validation Evidence:
 1. `npm run test -- src/lib/database.migration.test.ts src/lib/sync-transport.test.ts src/hooks/use-sync.test.ts` passed (28 tests)
 2. `npm run test:e2e -- e2e/sync-runtime-profile.spec.ts` passed (2 tests)
 3. `npm run build` passed
+
+## 15) Top-3 Closure Update (2026-02-20)
+
+1) Migration Hardening (Old -> New) [closed]
+- เพิ่ม startup migration orchestration ฝั่ง Tauri:
+  - legacy path detection (`com.antigravity.solostack` -> `com.solutionsstudio.solostack`)
+  - copy-then-verify + marker (`startup-migration-v1.json`)
+  - command รายงานผล `get_startup_migration_report`
+- ผูก diagnostics key ฝั่ง DB/settings:
+  - `migration.last_status`
+  - `migration.last_error`
+  - `migration.legacy_path_detected`
+  - `migration.sync_write_blocked`
+- บังคับ sync write guard ผ่าน `useSync` เมื่อ migration fail
+
+2) i18n Foundation + Key Governance [closed]
+- เพิ่ม catalog governance tests (`src/lib/i18n.catalog.test.ts`)
+- enforce parity ระหว่าง key `en` และ `th`
+- validate locale normalization + non-empty translations สำหรับทุก key
+
+3) P3-2 Shared-Core Readiness [closed in this repo scope]
+- ปิด checklist readiness ฝั่ง shared-core/runtime contract
+- สรุป artifact ที่ `docs/p3-2-mobile-beta-core-readiness-v0.1.md`
+- งานคงเหลือย้ายไป dedicated mobile client execution (นอก shared-core scope)
+
+Validation Evidence:
+1. `cargo check` (src-tauri) passed
+2. `npm run test -- --run src/lib/i18n.catalog.test.ts src/lib/database.migration.test.ts src/hooks/use-sync.test.ts` passed
+3. `npm run build` passed
+
+## 16) Pending Pull-through Update (2026-02-20)
+
+Completed in this pass:
+- ปิดงานค้างจาก QoL snapshot: เพิ่ม `restore dry-run summary` ก่อน queue ทั้ง
+  - `Restore Latest Backup`
+  - `Restore from File`
+- เพิ่ม preflight contract `latest_backup_summary` เพื่อแสดงจำนวนข้อมูลใน latest backup ได้ล่วงหน้า
+- ปรับ confirmation message ให้แสดง:
+  - source ของ restore
+  - summary (`projects/tasks/templates`)
+  - impact (`pending outbox` และ `open conflicts` ที่จะถูกเคลียร์)
+- ดึงงานค้างตัวถัดไป: `Resume Last Context` baseline
+  - persist `activeView` ผ่าน local storage
+  - rehydrate view ล่าสุดเมื่อเปิดแอปใหม่
+- ดึงงานค้างต่อทันที: `Bulk Edit / Multi-select Tasks` baseline
+  - card-level multi-select สำหรับ `Board/Today/Upcoming`
+  - `Select shown` / `Clear selected`
+  - bulk apply: `status`, `priority`, `project`, `important`
+- ปิด `Resume Last Context` extension:
+  - persist `Projects` context (`selected project`, `search`, `status filter`, `task section filter`)
+  - persist active saved-view id แยกต่อ `Board/Today/Upcoming`
+- ปิด `Bulk Edit / Multi-select Tasks` extension:
+  - เพิ่ม bulk fields: `due_at`, `remind_at`, `recurrence`
+  - เพิ่ม confirmation summary ก่อน apply bulk edit (แสดง field ที่จะเปลี่ยน + จำนวนงาน)
+  - เพิ่ม helper/tests สำหรับ bulk patch validation + confirmation message
+- ปิด `Resume Last Context` extension (detail focus state):
+  - persist task form focus (`CREATE`/`EDIT`) พร้อม `taskId/projectId`
+  - rehydrate/reopen form เดิมอัตโนมัติเมื่อเปิดแอปใหม่ (ถ้า task ยังมีอยู่)
+  - clear persisted focus เมื่อปิด/submit form สำเร็จ
+- ปิด `Snooze Reminder from Notification`:
+  - register notification action type (`15m`, `1h`, `Tomorrow`)
+  - parse action payload จาก `onAction` แล้ว map เป็น snooze preset
+  - update `remind_at` อัตโนมัติผ่าน existing `updateTask` mutation
+  - ยังคง behavior เดิม: tap notification -> เปิด task detail
+- ปิด `Personal Conflict Strategy Defaults`:
+  - persist ค่า default strategy ต่อ conflict type ใน `settings` (`local.sync.conflict_strategy_defaults`)
+  - เพิ่ม Settings UI ให้ผู้ใช้ตั้ง/บันทึก default strategy ได้เอง
+  - เพิ่มปุ่ม `Apply Default` ใน conflict list (Conflict Center + Settings)
+  - ถ้า default strategy เป็น `manual_merge` จะเปิด Manual Merge Editor แทน resolve ตรง
+  - ยังมี per-item override เหมือนเดิม (`Keep Local`, `Keep Remote`, `Manual Merge`, `Retry`)
+- ปิด `Command Palette Workflow Actions`:
+  - เพิ่ม actions ใน command palette: `Run Sync now`, `Export backup`, `Open Sync diagnostics`, `Open Restore preflight`
+  - เพิ่ม disabled state สำหรับ action ที่ยังไม่พร้อม (เช่น sync กำลังรัน/ไม่มี transport)
+  - เชื่อม action นำทางให้เปิด Settings และ scroll ไป section เป้าหมาย (`sync diagnostics` / `backup preflight`)
+  - ใช้ callback กลางจาก `App` เพื่อ export backup จาก command palette ได้ทันที
+- ปิด `Lightweight Focus Mode`:
+  - เพิ่ม focus controls บน `TaskCard` ใน view หลัก (`Board/Today/Upcoming/Projects/Calendar`)
+  - รองรับ active focus ได้ทีละหนึ่งงาน และแสดง elapsed timer บนการ์ด
+  - เพิ่ม sidebar focus indicator + stop control สำหรับหยุด session ได้จากทุกหน้า
+  - บันทึก focus session ลง `sessions` เมื่อ stop
+  - ปรับ `deleteTask` ให้ clear `sessions.task_id` เป็น `NULL` ก่อน delete task เพื่อไม่ให้ติด FK constraint
+
+Validation Evidence:
+1. `npm run test -- --run src/lib/task-filters.test.ts src/hooks/use-task-filters.test.tsx src/store/app-store.test.ts src/lib/task-bulk.test.ts` passed
+2. `npm run build` passed
+3. `npm run test -- --run src/lib/task-bulk.test.ts src/lib/i18n.catalog.test.ts src/hooks/use-task-filters.test.tsx src/store/app-store.test.ts` passed
+4. `npm run test -- --run src/hooks/use-reminder-notifications.test.tsx src/lib/i18n.catalog.test.ts src/store/app-store.test.ts` passed
+5. `npm run build` passed
+6. `npm run test -- --run src/lib/database.sync-conflicts.test.ts src/lib/i18n.catalog.test.ts src/hooks/use-reminder-notifications.test.tsx` passed
+7. `npm run build` passed
+8. `npm run test -- --run src/lib/i18n.catalog.test.ts` passed
+9. `npm run build` passed
+10. `npm run test -- --run src/components/AppShell.test.tsx src/lib/database.sessions.test.ts src/lib/i18n.catalog.test.ts` passed
+11. `npm run build` passed
+
+Next pending item to pull:
+- QoL Sprint C closed; pull next from P3-8 i18n expansion / rollout backlog

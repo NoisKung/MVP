@@ -1,6 +1,7 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
   getAppLocaleSetting,
+  getMigrationDiagnosticsSetting,
   getAllTasks,
   getProjects,
   getTodayTasks,
@@ -17,6 +18,7 @@ import {
   updateTaskSubtask,
   deleteTaskSubtask,
   getTaskTemplates,
+  createSession,
   upsertTaskTemplate,
   deleteTaskTemplate,
   getTaskDashboardStats,
@@ -29,6 +31,7 @@ import {
   importBackupPayload,
   listSyncConflicts,
   listSyncConflictEvents,
+  getSyncConflictStrategyDefaults,
   restoreLatestBackupPayload,
   updateAppLocaleSetting,
   getSyncEndpointSettings,
@@ -36,22 +39,27 @@ import {
   getSyncRuntimeProfileSettings,
   ensureSyncRuntimeSettingsSeeded,
   resolveSyncConflict,
+  updateSyncConflictStrategyDefaults,
   updateSyncEndpointSettings,
   updateSyncProviderSettings,
   updateSyncRuntimeSettings,
 } from "@/lib/database";
 import type {
   AppLocaleSetting,
+  MigrationDiagnosticsSetting,
   BackupRestorePreflight,
   BackupPayload,
   CreateProjectInput,
+  CreateSessionInput,
   CreateTaskInput,
   CreateTaskSubtaskInput,
   UpdateProjectInput,
   ResolveSyncConflictInput,
+  SyncConflictStrategyDefaults,
   SyncConflictObservabilityCounters,
   SyncConflictReportPayload,
   SyncConflictStatus,
+  UpdateSyncConflictStrategyDefaultsInput,
   UpdateSyncEndpointSettingsInput,
   UpdateAppLocaleSettingInput,
   UpdateSyncProviderSettingsInput,
@@ -76,8 +84,14 @@ const TASK_SUBTASK_STATS_KEY = ["task-subtask-stats"] as const;
 const TASK_TEMPLATES_KEY = ["task-templates"] as const;
 const PROJECTS_KEY = ["projects"] as const;
 const APP_LOCALE_SETTING_KEY = ["app-locale-setting"] as const;
+const MIGRATION_DIAGNOSTICS_SETTING_KEY = [
+  "migration-diagnostics-setting",
+] as const;
 const SYNC_SETTINGS_KEY = ["sync-settings"] as const;
 const SYNC_PROVIDER_SETTINGS_KEY = ["sync-provider-settings"] as const;
+const SYNC_CONFLICT_STRATEGY_DEFAULTS_KEY = [
+  "sync-conflict-strategy-defaults",
+] as const;
 const SYNC_RUNTIME_SETTINGS_KEY = ["sync-runtime-settings"] as const;
 const SYNC_RUNTIME_PROFILE_SETTINGS_KEY = [
   "sync-runtime-profile-settings",
@@ -266,6 +280,19 @@ export function useDeleteTask() {
   });
 }
 
+/** Persist one completed focus/work session */
+export function useCreateSession() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (input: CreateSessionInput) => createSession(input),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: WEEKLY_REVIEW_KEY });
+      queryClient.invalidateQueries({ queryKey: BACKUP_RESTORE_PREFLIGHT_KEY });
+    },
+  });
+}
+
 /** Create a checklist item */
 export function useCreateTaskSubtask() {
   const queryClient = useQueryClient();
@@ -363,6 +390,15 @@ export function useAppLocaleSetting() {
   });
 }
 
+/** Read startup migration diagnostics persisted in local settings */
+export function useMigrationDiagnosticsSetting() {
+  return useQuery({
+    queryKey: MIGRATION_DIAGNOSTICS_SETTING_KEY,
+    queryFn: (): Promise<MigrationDiagnosticsSetting> =>
+      getMigrationDiagnosticsSetting(),
+  });
+}
+
 /** Update persisted app locale setting */
 export function useUpdateAppLocaleSetting() {
   const queryClient = useQueryClient();
@@ -406,6 +442,29 @@ export function useUpdateSyncProviderSettings() {
       updateSyncProviderSettings(input),
     onSuccess: (_result: SyncProviderSettings) => {
       queryClient.invalidateQueries({ queryKey: SYNC_PROVIDER_SETTINGS_KEY });
+    },
+  });
+}
+
+/** Read user defaults for conflict resolution strategy per conflict type */
+export function useSyncConflictStrategyDefaults() {
+  return useQuery({
+    queryKey: SYNC_CONFLICT_STRATEGY_DEFAULTS_KEY,
+    queryFn: getSyncConflictStrategyDefaults,
+  });
+}
+
+/** Update user defaults for conflict resolution strategy */
+export function useUpdateSyncConflictStrategyDefaults() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (input: UpdateSyncConflictStrategyDefaultsInput) =>
+      updateSyncConflictStrategyDefaults(input),
+    onSuccess: (_result: SyncConflictStrategyDefaults) => {
+      queryClient.invalidateQueries({
+        queryKey: SYNC_CONFLICT_STRATEGY_DEFAULTS_KEY,
+      });
     },
   });
 }

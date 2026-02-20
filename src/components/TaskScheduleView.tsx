@@ -13,6 +13,14 @@ interface TaskScheduleViewProps {
   onStatusChange: (taskId: string, newStatus: TaskStatus) => void;
   onDelete: (taskId: string) => void;
   onCreateClick: () => void;
+  selectedTaskIds?: string[];
+  selectionBusy?: boolean;
+  onToggleTaskSelection?: (taskId: string, nextSelected: boolean) => void;
+  activeFocusTaskId?: string | null;
+  focusElapsedSeconds?: number;
+  focusBusy?: boolean;
+  onStartFocus?: (task: Task) => void;
+  onStopFocus?: (task: Task) => void;
 }
 
 interface TaskSection {
@@ -29,8 +37,20 @@ export function TaskScheduleView({
   onStatusChange,
   onDelete,
   onCreateClick,
+  selectedTaskIds = [],
+  selectionBusy = false,
+  onToggleTaskSelection,
+  activeFocusTaskId = null,
+  focusElapsedSeconds = 0,
+  focusBusy = false,
+  onStartFocus,
+  onStopFocus,
 }: TaskScheduleViewProps) {
   const { locale, t } = useI18n();
+  const selectedTaskIdSet = useMemo(
+    () => new Set(selectedTaskIds),
+    [selectedTaskIds],
+  );
   const visibleTaskIds = useMemo(() => tasks.map((task) => task.id), [tasks]);
   const { data: subtaskStats = [] } = useTaskSubtaskStats(visibleTaskIds);
   const subtaskProgressByTaskId = useMemo(() => {
@@ -115,6 +135,15 @@ export function TaskScheduleView({
                       onStatusChange={onStatusChange}
                       onDelete={onDelete}
                       subtaskProgress={subtaskProgressByTaskId.get(task.id)}
+                      selectable={Boolean(onToggleTaskSelection)}
+                      selected={selectedTaskIdSet.has(task.id)}
+                      selectionBusy={selectionBusy}
+                      onToggleSelect={onToggleTaskSelection}
+                      activeFocusTaskId={activeFocusTaskId}
+                      focusElapsedSeconds={focusElapsedSeconds}
+                      focusBusy={focusBusy}
+                      onStartFocus={onStartFocus}
+                      onStopFocus={onStopFocus}
                     />
                   </div>
                 ))}

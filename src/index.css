@@ -203,6 +203,45 @@ body {
     margin-bottom: 8px;
 }
 
+.card-top-left {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+}
+
+.card-select-toggle {
+    width: 20px;
+    height: 20px;
+    border: 1px solid var(--border-default);
+    border-radius: 6px;
+    background: var(--bg-elevated);
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    transition: all var(--duration) var(--ease);
+    flex-shrink: 0;
+}
+
+.card-select-toggle:hover {
+    border-color: var(--accent);
+    background: var(--accent-subtle);
+}
+
+.card-select-toggle.selected {
+    border-color: var(--accent);
+    background: var(--accent-subtle);
+}
+
+.card-select-input {
+    width: 12px;
+    height: 12px;
+    margin: 0;
+    accent-color: var(--accent);
+    cursor: pointer;
+}
+
 .card-priority {
     display: inline-flex;
     align-items: center;
@@ -348,10 +387,32 @@ body {
     margin-top: 10px;
 }
 
+.card-footer-left {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+}
+
 .card-date {
     font-size: 11px;
     color: var(--text-disabled);
     font-variant-numeric: tabular-nums;
+}
+
+.card-focus-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    border: 1px solid rgba(96, 165, 250, 0.42);
+    border-radius: var(--radius-full);
+    background: rgba(37, 99, 235, 0.16);
+    color: #93c5fd;
+    padding: 2px 7px;
+    font-size: 10px;
+    font-weight: 700;
+    font-variant-numeric: tabular-nums;
+    white-space: nowrap;
 }
 
 .card-status-actions {
@@ -383,6 +444,32 @@ body {
     border-color: var(--accent);
     color: var(--accent);
     background: var(--accent-subtle);
+}
+
+.status-btn-focus {
+    color: #93c5fd;
+}
+
+.status-btn-focus:hover {
+    border-color: rgba(96, 165, 250, 0.45);
+    background: rgba(59, 130, 246, 0.15);
+    color: #bfdbfe;
+}
+
+.status-btn-focus.status-btn-focus-active {
+    border-color: rgba(74, 222, 128, 0.45);
+    background: rgba(22, 163, 74, 0.16);
+    color: #86efac;
+}
+
+.status-btn-focus.status-btn-focus-active:hover {
+    border-color: rgba(134, 239, 172, 0.55);
+    background: rgba(22, 163, 74, 0.22);
+}
+
+.status-btn:disabled {
+    cursor: not-allowed;
+    opacity: 0.45;
 }
 
 /* ===== Responsive Card Adjustments ===== */

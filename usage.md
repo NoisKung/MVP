@@ -1,6 +1,6 @@
 # SoloStack Usage Guide
 
-อัปเดตล่าสุด: 2026-02-19
+อัปเดตล่าสุด: 2026-02-20
 
 ## 0) Manuals
 
@@ -70,6 +70,92 @@ Power shortcuts:
   - Task Card
   - Command Palette
   - Shortcut Help
+
+## 1E) Resume Last Context (QoL)
+
+- แอปจะจำ `active view` ล่าสุดไว้ใน local storage key: `solostack.app.ui-state.v1`
+- เมื่อเปิดแอปใหม่ ระบบจะ restore กลับมาที่ view ล่าสุดอัตโนมัติ (เช่น `Projects`, `Conflicts`, `Settings`)
+- ในหน้า `Projects` ระบบจะจำ context เพิ่ม:
+  - `selected project`
+  - `project search`
+  - `project status filter`
+  - `task section filter`
+- ระบบจำ `active saved view` แยกต่อ `Board/Today/Upcoming` ด้วย
+- ระบบจำ `task/detail focus` ด้วย:
+  - ถ้าปิดแอปตอนกำลัง `Create Task` จะกลับมาเปิด form create เดิม
+  - ถ้าปิดแอปตอนกำลัง `Edit Task` จะกลับมาเปิด task เดิมอีกครั้ง (ถ้ายังมีอยู่ใน DB)
+
+## 1F) Bulk Edit / Multi-select Tasks (QoL)
+
+- ใช้ได้ใน `Board`, `Today`, `Upcoming`
+- เลือกงานจาก checkbox ในการ์ดแต่ละงาน
+- ใช้ปุ่ม `Select shown` เพื่อเลือกงานที่แสดงทั้งหมดจาก filter ปัจจุบัน
+- ใช้ปุ่ม `Clear selected` เพื่อล้างรายการที่เลือก
+- เมื่อมีรายการที่เลือก สามารถ bulk apply ได้จากแถบเดียว:
+  - `Set status`
+  - `Set priority`
+  - `Move to project` (รวม `No project`)
+  - `Mark important` / `Clear important`
+  - `Set due` / `Clear due`
+  - `Set reminder` / `Clear reminder`
+  - `Set recurrence` (`None`, `Daily`, `Weekly`, `Monthly`)
+- ก่อน apply ทุก bulk action จะมี confirmation summary แสดง:
+  - จำนวนงานที่ได้รับผล
+  - field/value ที่จะเปลี่ยน
+
+## 1G) Snooze Reminder from Notification (QoL)
+
+- เมื่อ reminder เด้งจากระบบ notification จะมีตัวเลือก snooze:
+  - `15m`
+  - `1h`
+  - `Tomorrow`
+- ถ้าผู้ใช้เลือก snooze ระบบจะอัปเดต `task.remind_at` อัตโนมัติ
+- ถ้ากด notification แบบปกติ (`tap`) ระบบจะเปิด task เดิมในแอปเหมือนเดิม
+
+## 1H) Personal Conflict Strategy Defaults (QoL)
+
+- ไปที่ `Settings > Sync > Conflict Strategy Defaults`
+- ผู้ใช้สามารถตั้งค่า default strategy แยกตามแต่ละประเภท conflict ได้:
+  - `Field Conflict`
+  - `Delete vs Update`
+  - `Notes Collision`
+  - `Validation Error`
+- strategy ที่เลือกได้:
+  - `Keep Local`
+  - `Keep Remote`
+  - `Manual Merge`
+- กด `Save Conflict Defaults` เพื่อบันทึกค่า
+- ใน Conflict list (ทั้งหน้า `Conflict Center` และส่วน conflict ใน `Settings`) จะมีปุ่ม `Apply Default`:
+  - ถ้า default เป็น `Keep Local`/`Keep Remote` จะ resolve ทันที
+  - ถ้า default เป็น `Manual Merge` จะเปิด Manual Merge Editor
+- ยังสามารถ override ราย conflict ด้วยปุ่มเดิม (`Keep Local`, `Keep Remote`, `Manual Merge`, `Retry`) ได้ตามปกติ
+
+## 1I) Command Palette Workflow Actions (QoL)
+
+- เปิด command palette ด้วย `Cmd/Ctrl + K`
+- มี workflow actions เพิ่ม:
+  - `Run Sync now`
+  - `Export backup`
+  - `Open Sync diagnostics`
+  - `Open Restore preflight`
+- พฤติกรรม:
+  - `Run Sync now` จะถูก disable เมื่อไม่มี transport หรือกำลัง sync อยู่
+  - `Export backup` จะ export เป็นไฟล์ JSON ทันที (format เดียวกับปุ่มใน Settings)
+  - `Open Sync diagnostics` จะเปิด `Settings` และเลื่อนไปยัง section diagnostics
+  - `Open Restore preflight` จะเปิด `Settings` และเลื่อนไปยัง section backup/preflight
+
+## 1J) Lightweight Focus Mode (QoL)
+
+- มีปุ่ม Focus ใน `TaskCard` (หน้า `Board`, `Today`, `Upcoming`, `Projects`, `Calendar`)
+- การใช้งาน:
+  - กดปุ่ม `Start focus session` เพื่อเริ่มจับเวลาใน task ที่เลือก
+  - ระหว่างจับเวลา card จะโชว์ badge `Focus mm:ss`
+  - ที่ sidebar footer จะมี focus indicator พร้อมปุ่ม stop (ใช้หยุดได้จากทุกหน้า)
+  - กดปุ่ม `Stop and save focus session` เพื่อบันทึกเวลาเป็น focus session
+- ข้อกำหนด v1:
+  - รันได้ทีละ 1 task ในเวลาเดียวกัน
+  - เมื่อ save แล้ว จะบันทึกลงตาราง `sessions` พร้อม `duration_minutes` (ปัดอย่างน้อย 1 นาที)
+  - ถ้าลบ task ที่มีประวัติ focus ระบบจะคง session ไว้ และตั้ง `task_id = null` อัตโนมัติ (ไม่ทำให้ลบ task fail)
 
 ## 2) MVP CLI Quick Usage
 
@@ -144,6 +230,16 @@ P3-2 runtime tuning (Settings > Sync > `Sync Runtime Profile`):
 - background interval ต้องมากกว่าหรือเท่ากับ foreground interval
 - มี `Sync Diagnostics (Session)` ในหน้า Settings แสดง success rate, cycle latency, failure streak และ conflict cycles เพื่อช่วย tune mobile beta
 - มี `Conflict Observability` ในหน้าเดียวกัน แสดง total/open/resolved conflicts, resolution rate, median resolve time, และ retried/exported event counters
+
+Migration hardening (old -> new app identifier path):
+- ตอนเปิดแอป Tauri ระบบจะตรวจ legacy path (`com.antigravity.solostack`) และ migrate DB แบบ copy-then-verify ไป path ใหม่ (`com.solutionsstudio.solostack`) อัตโนมัติ
+- จะสร้าง marker `startup-migration-v1.json` เพื่อให้ flow เป็น idempotent
+- diagnostics key ที่ใช้ตรวจสถานะ:
+  - `migration.last_status`
+  - `migration.last_error`
+  - `migration.legacy_path_detected`
+  - `migration.sync_write_blocked`
+- ถ้า migration ล้มเหลว ระบบจะ block sync write path ชั่วคราวและแสดงข้อความ warning ในหน้า Sync จนกว่าจะแก้ปัญหา migration
 
 ต้องมี server ไหม:
 - ไม่ต้องมี ถ้าใช้งานเครื่องเดียว (สถานะ `LOCAL_ONLY`)
@@ -261,6 +357,10 @@ console.log(summary);
 
 Recovery (Backup & Restore):
 - ก่อน restore ระบบจะทำ preflight (`pending outbox`, `open conflicts`, `latest backup`)
+- ก่อน queue restore/import ระบบจะแสดง `dry-run summary` ใน confirmation:
+  - source ของข้อมูลกู้คืน (latest internal backup หรือไฟล์ที่เลือก)
+  - จำนวน `projects/tasks/templates` ที่จะถูก restore
+  - จำนวน `pending outbox` และ `open conflicts` ที่จะถูกเคลียร์
 - ถ้ามี `pending outbox` หรือ `open conflicts` ระบบจะบังคับเป็น force restore flow พร้อม confirmation ชัดเจน
 - มีปุ่ม `Restore Latest Backup` (snapshot ล่าสุดที่ export ภายในเครื่อง)
 - หลัง restore ระบบจะ clear stale sync state (`sync_outbox`, `sync_conflicts`, checkpoint) และ trigger sync รอบใหม่อัตโนมัติเมื่อมี transport

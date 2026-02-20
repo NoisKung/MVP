@@ -40,6 +40,14 @@ interface TaskBoardProps {
   onStatusChange: (taskId: string, newStatus: TaskStatus) => void;
   onDelete: (taskId: string) => void;
   onCreateClick: () => void;
+  selectedTaskIds?: string[];
+  selectionBusy?: boolean;
+  onToggleTaskSelection?: (taskId: string, nextSelected: boolean) => void;
+  activeFocusTaskId?: string | null;
+  focusElapsedSeconds?: number;
+  focusBusy?: boolean;
+  onStartFocus?: (task: Task) => void;
+  onStopFocus?: (task: Task) => void;
 }
 
 export function TaskBoard({
@@ -49,6 +57,14 @@ export function TaskBoard({
   onStatusChange,
   onDelete,
   onCreateClick,
+  selectedTaskIds = [],
+  selectionBusy = false,
+  onToggleTaskSelection,
+  activeFocusTaskId = null,
+  focusElapsedSeconds = 0,
+  focusBusy = false,
+  onStartFocus,
+  onStopFocus,
 }: TaskBoardProps) {
   const { t } = useI18n();
   const [draggedTaskId, setDraggedTaskId] = useState<string | null>(null);
@@ -61,6 +77,10 @@ export function TaskBoard({
   const taskById = useMemo(() => {
     return new Map(tasks.map((task) => [task.id, task]));
   }, [tasks]);
+  const selectedTaskIdSet = useMemo(
+    () => new Set(selectedTaskIds),
+    [selectedTaskIds],
+  );
   const visibleTaskIds = useMemo(() => tasks.map((task) => task.id), [tasks]);
   const { data: subtaskStats = [] } = useTaskSubtaskStats(visibleTaskIds);
   const subtaskProgressByTaskId = useMemo(() => {
@@ -262,6 +282,15 @@ export function TaskBoard({
                         onDragStart={handleTaskDragStart}
                         onDragEnd={handleTaskDragEnd}
                         isDragging={draggedTaskId === task.id}
+                        selectable={Boolean(onToggleTaskSelection)}
+                        selected={selectedTaskIdSet.has(task.id)}
+                        selectionBusy={selectionBusy}
+                        onToggleSelect={onToggleTaskSelection}
+                        activeFocusTaskId={activeFocusTaskId}
+                        focusElapsedSeconds={focusElapsedSeconds}
+                        focusBusy={focusBusy}
+                        onStartFocus={onStartFocus}
+                        onStopFocus={onStopFocus}
                       />
                     </div>
                   ))

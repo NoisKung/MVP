@@ -1,6 +1,6 @@
 # SoloStack Product Roadmap
 
-อัปเดตล่าสุด: 2026-02-18
+อัปเดตล่าสุด: 2026-02-20
 
 ## Product Principles
 
@@ -38,6 +38,7 @@
 | P3-5 | Cloud Provider Connectors / Platform (Google/Microsoft/iCloud/AWS) | Discovery | เพิ่มทางเลือกการ sync ตาม ecosystem ผู้ใช้และตัวเลือก backend platform |
 | P3-6 | MCP Server for SoloStack Agent Data Access | In Progress | ให้ Agent ดึงข้อมูลไปวิเคราะห์/สรุป/วางแผนได้อย่างปลอดภัย |
 | P3-7 | Product Quality of Life (QoL) | In Progress | ลด friction การใช้งานรายวันและลด human error |
+| P3-8 | Internationalization (TH/EN) | In Progress | รองรับ UI สองภาษา (ไทย/อังกฤษ) และให้ผู้ใช้สลับภาษาได้เอง |
 
 ## Active Plan: P3-1 Sync Foundation + Desktop Beta
 
@@ -308,6 +309,15 @@
 - กำลังทำต่อ:
   - เตรียม mobile beta client ให้ใช้ contract/runtime tuning เดียวกับ desktop
 
+### P3-2 Core Readiness Update (2026-02-20)
+
+- เสร็จแล้ว (shared-core ใน repo นี้):
+  - lock runtime preset parity (`desktop`/`mobile_beta`) และ guardrails ใน sync loop
+  - ครอบคลุม test matrix ฝั่ง core/runtime profile แล้ว
+  - สรุป checklist readiness ไว้ที่ `docs/p3-2-mobile-beta-core-readiness-v0.1.md`
+- คงเหลือ:
+  - พัฒนา/ทดสอบ dedicated mobile client UI และ desktop<->mobile real-device flow
+
 ## Initiative: SoloStack iOS + Android Version (P3-2 Expansion)
 
 ### Product Goal
@@ -548,7 +558,7 @@
 - Personal Conflict Strategy Defaults
 - Command Palette Workflow Actions
 
-### QoL Progress Snapshot (2026-02-18)
+### QoL Progress Snapshot (2026-02-20)
 
 - Done:
   - เพิ่ม `Keyboard Shortcut Help` modal (เปิดจาก `?` และปุ่ม `Shortcuts ?` ใน sidebar)
@@ -567,8 +577,166 @@
     - `Resolve conflict` / `Retry conflict`
     - `Restore latest backup`
     - `Restore from file (import backup)`
+  - เพิ่ม `restore dry-run summary` ก่อน queue:
+    - `Restore latest backup` (อ่าน latest backup summary จาก preflight)
+    - `Restore from file` (preview summary จาก payload ก่อนยืนยัน)
+    - แสดง impact ที่จะเคลียร์ `pending outbox` และ `open conflicts` ใน confirmation เดียวกัน
+  - เพิ่ม `Resume Last Context` baseline:
+    - จำ `active view` ล่าสุดไว้ และ restore อัตโนมัติเมื่อเปิดแอปใหม่
+  - ขยาย `Resume Last Context`:
+    - จำ `Projects` context (`selected project`, `search`, `status filter`, `task section filter`)
+    - จำ `active saved view` แยกต่อ `Board/Today/Upcoming`
+  - เพิ่ม `Bulk Edit / Multi-select Tasks` baseline:
+    - เลือกหลายงานจากการ์ดใน `Board/Today/Upcoming`
+    - มี `Select shown` / `Clear selected`
+    - ทำ bulk actions ได้จากแถบเดียว: `status`, `priority`, `project`, `important`
+  - ปิด `Bulk Edit / Multi-select Tasks` extension:
+    - เพิ่ม bulk fields: `due`, `reminder`, `recurrence`
+    - เพิ่ม confirmation summary ก่อน apply bulk edit ทุกครั้ง
+  - ปิด `Resume Last Context` extension (detail focus state):
+    - persist `TaskForm` focus (`CREATE`/`EDIT`) พร้อม `taskId/projectId`
+    - reopen form/task เดิมอัตโนมัติเมื่อเปิดแอปใหม่
+  - ปิด `Snooze Reminder from Notification`:
+    - เพิ่ม action จาก notification: `15m`, `1h`, `Tomorrow`
+    - map action -> update `remind_at` อัตโนมัติ
+    - tap notification ยังเปิด task เดิมเหมือนเดิม
+  - ปิด `Personal Conflict Strategy Defaults`:
+    - เพิ่มหน้า config ใน `Settings > Sync` สำหรับตั้ง default strategy ต่อ conflict type
+    - เพิ่มปุ่ม `Apply Default` ใน conflict list (ทั้ง Conflict Center และ Settings)
+    - กรณี default เป็น `manual_merge` จะเปิด editor เพื่อให้ payload ครบตาม contract
+  - ปิด `Command Palette Workflow Actions`:
+    - เพิ่ม actions: `Run Sync now`, `Export backup`, `Open Sync diagnostics`, `Open Restore preflight`
+    - เพิ่ม disabled state ใน command เมื่อ action ยังไม่พร้อม (เช่น sync ไม่มี transport หรือกำลังรัน)
+    - เชื่อม `Open Sync diagnostics` / `Open Restore preflight` ให้เปิด Settings และ scroll ไป section เป้าหมายทันที
+  - ปิด `Lightweight Focus Mode`:
+    - เพิ่มปุ่ม start/stop focus บน `TaskCard` (Board/Today/Upcoming/Projects/Calendar)
+    - แสดง elapsed timer (`mm:ss` / `h:mm:ss`) บนการ์ดที่กำลัง focus
+    - เพิ่ม global focus indicator + stop control ใน sidebar footer เพื่อหยุด session ได้จากทุกหน้า
+    - บันทึก focus session ลง `sessions` เมื่อ stop
+    - harden การลบ task: clear `sessions.task_id` เป็น `NULL` ก่อน delete เพื่อกัน FK fail
 - Next:
-  - เพิ่ม dry-run summary ก่อน queue restore/import
+  - QoL Sprint C ปิดครบทุกหัวข้อแล้ว; ดึงงานถัดไปจาก `P3-8 i18n` / rollout backlog
+
+## New Initiative: P3-8 Internationalization (i18n) TH/EN
+
+### Objective
+
+- รองรับภาษา UI อย่างน้อย 2 ภาษา: ไทย (`th`) และอังกฤษ (`en`)
+- ให้ผู้ใช้สลับภาษาเองได้จาก `Settings` โดยไม่กระทบข้อมูลงาน
+- คงคุณภาพ UX เดิม: โหลดเร็ว, อ่านง่าย, และไม่เกิด fallback ข้อความแปลก
+
+### Scope v1 (In)
+
+- เพิ่ม i18n infrastructure ฝั่ง client (`React`) พร้อม fallback language
+- ครอบคลุมข้อความในหน้าหลัก:
+  - `Board`, `Projects`, `Today`, `Upcoming`, `Dashboard`, `Weekly Review`
+  - `Settings`, `Conflict Center`, dialog สำคัญ, notification ข้อความระบบ
+- รองรับการสลับภาษา runtime (ไม่ต้อง restart แอป)
+- เก็บค่า locale ใน settings key กลางของแอป (`app.locale`)
+- default locale ใช้ลำดับ:
+  - ค่าที่ผู้ใช้ตั้งไว้
+  - ระบบปฏิบัติการ (`navigator.language`)
+  - fallback เป็น `en`
+
+### Out of Scope v1 (Out)
+
+- แปล payload ข้อมูลผู้ใช้ (เช่น title/notes ของ task)
+- localize ภาษาใน MVP CLI และ MCP tool response
+- แปลภาษาธรรมชาติ (NLP parser) ทุกภาษาแบบเต็มรูปแบบ
+
+### Technical Direction
+
+- ใช้ key-based translations (ไม่ hardcode string ใน component)
+- แยก resource file ชัดเจน เช่น:
+  - `src/i18n/en.json`
+  - `src/i18n/th.json`
+- ใช้ namespace ต่อโดเมน (`board.*`, `projects.*`, `settings.*`, `sync.*`)
+- รองรับ pluralization และ date/time formatting ผ่าน `Intl`
+- ใส่ missing-key guard ใน dev mode เพื่อกันหลุด key translation
+
+### Rollout Plan (Suggested)
+
+1. Sprint i18n-A (2-3 วัน)
+- วาง infra + locale provider + settings binding
+- migrate shared/common labels ก่อน
+
+2. Sprint i18n-B (3-5 วัน)
+- ครอบคลุม core views และ settings/sync/conflict
+- เติม test สำหรับ language switch + fallback
+
+3. Sprint i18n-C (2-3 วัน)
+- copy review (TH/EN), polish typography/spacing
+- freeze key set และออก beta feedback รอบแรก
+
+### Acceptance Targets
+
+- ผู้ใช้สลับ `TH`/`EN` ได้จาก UI และเห็นผลทันทีทุกหน้าที่อยู่ใน scope
+- ไม่มี hardcoded English string หลุดในหน้าหลักที่กำหนดใน v1
+- fallback ทำงานถูกต้องเมื่อ key หายหรือ locale ไม่รองรับ
+- ผ่าน quality gates:
+  1. `npm run test`
+  2. `npm run test:e2e`
+  3. `npm run build`
+
+## Upgrade Plan: Old -> New (Migration Track)
+
+### Objective
+
+- ให้ผู้ใช้เดิมอัปเกรดจาก build เก่าไป build ใหม่ได้แบบไม่สูญหายข้อมูล
+- รองรับการย้าย namespace/app data จาก `com.antigravity.solostack` -> `com.solutionsstudio.solostack`
+- ทำ one-time migration แบบอัตโนมัติครั้งแรกที่เปิดแอปเวอร์ชันใหม่
+
+### Scope v1 (In)
+
+- ตรวจหา legacy DB path ของ bundle เก่า
+- migrate DB หลักไป path ใหม่แบบปลอดภัย (copy-then-verify-then-switch)
+- เก็บ migration marker เพื่อให้ flow เป็น idempotent (รันซ้ำแล้วไม่เสียหาย)
+- migrate settings สำคัญที่เกี่ยวกับ:
+  - sync endpoints/provider/runtime profile
+  - backup metadata ล่าสุด
+  - app locale (`app.locale`) เมื่อเริ่มใช้ i18n
+- แจ้งสถานะ migration ใน startup log/diagnostics เพื่อช่วย support
+
+### Out of Scope v1 (Out)
+
+- downgrade จาก bundle ใหม่กลับ bundle เก่า
+- รวมข้อมูลจากหลาย legacy DB เข้าไฟล์เดียวแบบ auto-merge
+- migrate ข้าม major schema ที่ไม่เข้ากันโดยไม่มี preflight
+
+### Technical Direction
+
+- เพิ่ม migration orchestrator ใน startup path ก่อนเปิด sync loop
+- ลำดับทำงาน:
+  1. preflight ตรวจไฟล์เก่า/ใหม่ และ disk free space ขั้นต่ำ
+  2. lock migration (กัน race จากหลาย process)
+  3. copy DB ไปตำแหน่งใหม่ + verify ขนาด/เปิดอ่านได้
+  4. set migration marker + release lock
+  5. fallback: ถ้า fail ให้ใช้ DB path เดิมชั่วคราวพร้อม warning ชัดเจน
+- เขียน event log สำหรับ `migration_started`, `migration_succeeded`, `migration_failed`
+
+### Rollout Plan (Suggested)
+
+1. Phase A (implementation + tests)
+- unit/integration test สำหรับ migration happy path + fail path
+- เพิ่ม fixture จำลอง legacy directory
+
+2. Phase B (internal beta)
+- ทดสอบอัปเกรดจาก v0.1.3/v0.1.4 -> build ใหม่บน macOS/Windows
+- เก็บสถิติ migration success rate + startup time
+
+3. Phase C (production release)
+- เปิดใช้ migration default
+- monitor failure buckets และมี hotfix path ถ้าพบ edge case
+
+### Acceptance Targets
+
+- ผู้ใช้ที่มีข้อมูลใน path เก่าสามารถเปิดเวอร์ชันใหม่แล้วเห็นข้อมูลเดิมครบ
+- migration รันครั้งเดียวและไม่ทำข้อมูลซ้ำ/หายเมื่อเปิดแอปซ้ำ
+- ถ้า migration fail แอปยังเปิดได้ (degraded mode) และมีข้อความ/diagnostics ชัดเจน
+- ผ่าน quality gates:
+  1. `npm run test`
+  2. `npm run test:e2e`
+  3. `npm run build`
 
 ## Open Decisions (Proposed for Sign-off)
 
@@ -588,10 +756,13 @@
 - **Policy:** access token อายุสั้น, refresh token ตาม environment policy, รองรับ revoke per device
 
 3. Sync interval ที่เหมาะสมระหว่าง responsiveness กับ battery
-- **Proposal:** ใช้ค่าเริ่มต้นตาม implementation ปัจจุบัน
-- `desktop`: foreground 60s / background 300s
-- `mobile beta`: foreground 120s / background 600s
-- **Guardrail:** exponential backoff สูงสุด 300s และมี `Sync now` manual override
+- **Proposal:** ให้ผู้ใช้ปรับได้เองจาก UI เป็นค่าเริ่มต้น (user-configurable runtime)
+- มี preset แนะนำเริ่มต้น:
+  - `desktop`: foreground 60s / background 300s
+  - `mobile beta`: foreground 120s / background 600s
+- **Guardrail:** มี min/max bounds, exponential backoff สูงสุด 300s และมี `Sync now` manual override
+- **UX:** แสดง impact โดยย่อ (battery/network) และมีปุ่ม reset กลับค่าแนะนำ
+- **Decision:** locked โดย product direction (ผู้ใช้ตั้งค่าเองใน UI)
 
 4. ขอบเขต telemetry สำหรับ desktop beta
 - **Proposal:** freeze ตาม `telemetry-spec v0.1` (Sync Health + Conflict Lifecycle + Connector Reliability + MCP Runtime)
@@ -608,8 +779,10 @@
 - **Safety:** preflight ทุกครั้ง, ถ้ามี pending outbox/open conflicts ให้ require explicit force
 
 7. Provider connector strategy ระยะกลาง
-- **Proposal:** `Google-first` (ใช้ `appDataFolder`) ใน pilot, ตามด้วย `OneDrive approot`
-- **เหตุผล:** scope แคบกว่าและ surface area ง่ายกว่าในรอบเริ่มต้น แต่คง provider-neutral contract เดิม
+- **Proposal:** ให้ผู้ใช้เลือก provider ได้เองจาก UI (เช่น Google / Microsoft / iCloud / SoloStack Cloud-AWS)
+- **Default UX:** เริ่มด้วย provider-neutral mode และแนะนำ connector ตาม platform/account ที่ผู้ใช้ล็อกอินอยู่
+- **Guardrail:** แสดง capability/ข้อจำกัดของแต่ละ provider ชัดเจนก่อนเปิดใช้งาน
+- **Decision:** locked โดย product direction (ไม่ fix provider เดียว)
 
 8. AWS architecture decision (รายละเอียดเชิงแพลตฟอร์ม)
 - **Proposal:** ใช้ `API Gateway + Lambda + DynamoDB on-demand` เป็น default profile
@@ -620,6 +793,16 @@
 - hosted MCP เปิดใน phase ถัดไปสำหรับ tenant ที่ต้องการ centralized control
 - read-only tools เป็นค่าเริ่มต้น และเปิด write tools หลังผ่าน guardrails (allowlist + audit + latency/error gate) อย่างน้อย 1 release cycle
 
+10. i18n default locale + translation governance
+- **Proposal:** default เป็นระบบตรวจ locale อัตโนมัติครั้งแรก แล้วให้ผู้ใช้ override ได้จาก Settings
+- ใช้ key governance: ทุก PR ที่เพิ่ม UI string ต้องเพิ่ม translation อย่างน้อย `en` และ `th` ใน change set เดียวกัน
+- freeze key naming convention ก่อนเริ่ม Sprint i18n-B เพื่อลด migration cost
+
+11. Old -> New upgrade fallback policy
+- **Proposal:** ใช้ `copy-then-verify` เป็น default และเก็บไฟล์ legacy ไว้จนกว่าจะผ่านอย่างน้อย 1 successful startup cycle
+- ถ้า migration fail ให้ fallback เข้า degraded mode โดยไม่เริ่ม sync write path จนกว่าจะกู้สำเร็จหรือผู้ใช้ยืนยัน override
+- เพิ่ม diagnostics key สำหรับ support (`migration.last_status`, `migration.last_error`, `migration.legacy_path_detected`)
+
 ## Immediate Next Actions
 
 1. ~~เพิ่ม E2E + integration coverage สำหรับ resolve -> sync success path (with transport)~~ [done]
@@ -627,3 +810,6 @@
 3. ~~ทำ technical spike เปรียบเทียบ Google `appDataFolder` vs OneDrive `approot`~~ [done]
 4. ~~ออกแบบ MCP tool contract ชุดแรก (`get_tasks`, `get_projects`, `get_weekly_review`)~~ [done]
 5. ~~ทำ AWS reference spike (sync API + MCP hosting + cost baseline)~~ [done]
+6. ~~ตั้ง i18n foundation (`TH/EN`) + key governance และเริ่ม migrate strings กลุ่ม `Settings`/`Sync` ก่อน~~ [done]
+7. ~~ปิด migration hardening checklist สำหรับ old -> new (legacy path detection, marker idempotency, diagnostics keys)~~ [done]
+8. ทำ dedicated mobile client beta implementation (UI + real-device desktop<->mobile sync validation)

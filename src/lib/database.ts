@@ -7,6 +7,7 @@ import type {
   BackupImportResult,
   BackupPayload,
   BackupRestorePreflight,
+  CreateSessionInput,
   DeletedRecord,
   ResolveSyncConflictInput,
   Task,
@@ -15,10 +16,12 @@ import type {
   SyncCheckpoint,
   SyncConflictEventRecord,
   SyncConflictEventType,
+  SyncConflictDefaultStrategy,
   SyncConflictObservabilityCounters,
   SyncConflictReportPayload,
   SyncConflictRecord,
   SyncConflictResolutionStrategy,
+  SyncConflictStrategyDefaults,
   SyncConflictStatus,
   SyncConflictType,
   SyncEndpointSettings,
@@ -38,6 +41,7 @@ import type {
   TaskSubtaskStats,
   TaskChangelog,
   TaskChangelogAction,
+  MigrationDiagnosticsSetting,
   ProjectStatus,
   TaskRecurrence,
   TaskDashboardStats,
@@ -49,6 +53,7 @@ import type {
   CreateTaskInput,
   UpdateProjectInput,
   UpdateSyncProviderSettingsInput,
+  UpdateSyncConflictStrategyDefaultsInput,
   UpdateTaskSubtaskInput,
   UpdateSyncEndpointSettingsInput,
   UpdateAppLocaleSettingInput,
@@ -63,6 +68,7 @@ import {
   isTaskNotesCollision,
   isTaskProjectNotFoundConflict,
 } from "./sync-conflict-rules";
+import { summarizeBackupPayload } from "./backup-summary";
 
 const DATABASE_NAME = "sqlite:solostack.db";
 
@@ -140,6 +146,11 @@ const SYNC_CONFLICT_RESOLUTION_STRATEGIES: SyncConflictResolutionStrategy[] = [
   "manual_merge",
   "retry",
 ];
+const SYNC_CONFLICT_DEFAULT_STRATEGIES: SyncConflictDefaultStrategy[] = [
+  "keep_local",
+  "keep_remote",
+  "manual_merge",
+];
 const SYNC_CONFLICT_EVENT_TYPES: SyncConflictEventType[] = [
   "detected",
   "resolved",
@@ -193,11 +204,17 @@ const DB_ERROR_CODES = {
 const SYNC_SETTINGS_DEVICE_ID_KEY = "sync.device_id";
 const APP_LOCALE_KEY = "app.locale";
 const APP_LOCALES: AppLocale[] = ["en", "th"];
+const MIGRATION_LAST_STATUS_KEY = "migration.last_status";
+const MIGRATION_LAST_ERROR_KEY = "migration.last_error";
+const MIGRATION_LEGACY_PATH_DETECTED_KEY = "migration.legacy_path_detected";
+const MIGRATION_SYNC_WRITE_BLOCKED_KEY = "migration.sync_write_blocked";
 const SYNC_SETTINGS_PUSH_URL_KEY = "local.sync.push_url";
 const SYNC_SETTINGS_PULL_URL_KEY = "local.sync.pull_url";
 const SYNC_SETTINGS_PROVIDER_KEY = "local.sync.provider";
 const SYNC_SETTINGS_PROVIDER_CONFIG_KEY = "local.sync.provider_config";
 const SYNC_SETTINGS_RUNTIME_PROFILE_KEY = "local.sync.runtime_profile";
+const SYNC_SETTINGS_CONFLICT_STRATEGY_DEFAULTS_KEY =
+  "local.sync.conflict_strategy_defaults";
 const SYNC_SETTINGS_AUTO_INTERVAL_SECONDS_KEY =
   "local.sync.auto_interval_seconds";
 const SYNC_SETTINGS_BACKGROUND_INTERVAL_SECONDS_KEY =
@@ -225,9 +242,34 @@ const MOBILE_SYNC_PUSH_LIMIT = 120;
 const MOBILE_SYNC_PULL_LIMIT = 120;
 const MOBILE_SYNC_MAX_PULL_PAGES = 3;
 const DEFAULT_SYNC_PROVIDER: SyncProvider = "provider_neutral";
+const DEFAULT_SYNC_CONFLICT_STRATEGY_DEFAULTS: SyncConflictStrategyDefaults = {
+  field_conflict: "keep_local",
+  delete_vs_update: "keep_local",
+  notes_collision: "manual_merge",
+  validation_error: "keep_local",
+};
 const LOCAL_ONLY_SETTING_PREFIX = "local.";
 const SYNC_CONFLICT_EVENT_MAX_PER_CONFLICT = 200;
 const SYNC_CONFLICT_EVENT_RETENTION_DAYS = 90;
+
+interface StartupMigrationReport {
+  legacy_path_detected: boolean;
+  marker_present: boolean;
+  migration_attempted: boolean;
+  migration_completed: boolean;
+  migration_error: string | null;
+}
+
+const DEFAULT_STARTUP_MIGRATION_REPORT: StartupMigrationReport = {
+  legacy_path_detected: false,
+  marker_present: false,
+  migration_attempted: false,
+  migration_completed: false,
+  migration_error: null,
+};
+
+let startupMigrationReportPromise: Promise<StartupMigrationReport> | null =
+  null;
 
 /** Get or create the database connection singleton */
 async function getDb(): Promise<Database> {
@@ -459,6 +501,7 @@ async function initSchema(db: Database): Promise<void> {
   await ensureTaskTemplateColumns(db);
   await ensureTaskSubtaskColumns(db);
   await ensureSyncTablesReady(db);
+  await ensureMigrationDiagnosticsSeeded(db);
   await db.execute(`
     CREATE INDEX IF NOT EXISTS idx_tasks_due_at
     ON tasks(due_at)
@@ -588,6 +631,99 @@ async function ensureSyncTablesReady(db: Database): Promise<void> {
         updated_at
       )
        VALUES (1, NULL, NULL, CURRENT_TIMESTAMP)`,
+  );
+}
+
+async function upsertSettingValue(
+  db: Database,
+  key: string,
+  value: string,
+): Promise<void> {
+  await db.execute(
+    `INSERT INTO settings (key, value)
+         VALUES ($1, $2)
+    ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+    [key, value],
+  );
+}
+
+function normalizeStartupMigrationReport(
+  value: unknown,
+): StartupMigrationReport {
+  if (!isPlainObject(value)) return { ...DEFAULT_STARTUP_MIGRATION_REPORT };
+  const legacy_path_detected = Boolean(value.legacy_path_detected);
+  const marker_present = Boolean(value.marker_present);
+  const migration_attempted = Boolean(value.migration_attempted);
+  const migration_completed = Boolean(value.migration_completed);
+  const migration_error =
+    typeof value.migration_error === "string" && value.migration_error.trim()
+      ? value.migration_error.trim()
+      : null;
+
+  return {
+    legacy_path_detected,
+    marker_present,
+    migration_attempted,
+    migration_completed,
+    migration_error,
+  };
+}
+
+async function readStartupMigrationReport(): Promise<StartupMigrationReport> {
+  if (!startupMigrationReportPromise) {
+    startupMigrationReportPromise = (async () => {
+      if (typeof window === "undefined") {
+        return { ...DEFAULT_STARTUP_MIGRATION_REPORT };
+      }
+
+      try {
+        const { isTauri, invoke } = await import("@tauri-apps/api/core");
+        if (!isTauri()) {
+          return { ...DEFAULT_STARTUP_MIGRATION_REPORT };
+        }
+
+        const report = await invoke<unknown>("get_startup_migration_report");
+        return normalizeStartupMigrationReport(report);
+      } catch {
+        return { ...DEFAULT_STARTUP_MIGRATION_REPORT };
+      }
+    })();
+  }
+
+  return startupMigrationReportPromise;
+}
+
+function resolveMigrationLastStatus(report: StartupMigrationReport): string {
+  if (report.migration_attempted) {
+    return report.migration_completed ? "completed" : "failed";
+  }
+  if (report.legacy_path_detected) {
+    return report.marker_present || report.migration_completed
+      ? "completed"
+      : "legacy_detected";
+  }
+  return "not_checked";
+}
+
+async function ensureMigrationDiagnosticsSeeded(db: Database): Promise<void> {
+  const report = await readStartupMigrationReport();
+  const lastStatus = resolveMigrationLastStatus(report);
+  const lastError = report.migration_error ?? "";
+  const legacyDetected = report.legacy_path_detected ? "1" : "0";
+  const syncWriteBlocked =
+    report.migration_attempted && !report.migration_completed ? "1" : "0";
+
+  await upsertSettingValue(db, MIGRATION_LAST_STATUS_KEY, lastStatus);
+  await upsertSettingValue(db, MIGRATION_LAST_ERROR_KEY, lastError);
+  await upsertSettingValue(
+    db,
+    MIGRATION_LEGACY_PATH_DETECTED_KEY,
+    legacyDetected,
+  );
+  await upsertSettingValue(
+    db,
+    MIGRATION_SYNC_WRITE_BLOCKED_KEY,
+    syncWriteBlocked,
   );
 }
 
@@ -882,6 +1018,21 @@ function asSyncConflictResolutionStrategy(
   return null;
 }
 
+function asSyncConflictDefaultStrategy(
+  value: unknown,
+  fallback: SyncConflictDefaultStrategy,
+): SyncConflictDefaultStrategy {
+  if (
+    typeof value === "string" &&
+    SYNC_CONFLICT_DEFAULT_STRATEGIES.includes(
+      value as SyncConflictDefaultStrategy,
+    )
+  ) {
+    return value as SyncConflictDefaultStrategy;
+  }
+  return fallback;
+}
+
 function asSyncConflictEventType(value: unknown): SyncConflictEventType {
   if (
     typeof value === "string" &&
@@ -940,6 +1091,52 @@ function parseSyncProviderConfigValue(
     return normalizeSyncProviderConfigObject(JSON.parse(value));
   } catch {
     return null;
+  }
+}
+
+function normalizeSyncConflictStrategyDefaultsObject(
+  value: unknown,
+): SyncConflictStrategyDefaults {
+  if (!isPlainObject(value)) {
+    return {
+      ...DEFAULT_SYNC_CONFLICT_STRATEGY_DEFAULTS,
+    };
+  }
+
+  return {
+    field_conflict: asSyncConflictDefaultStrategy(
+      value.field_conflict,
+      DEFAULT_SYNC_CONFLICT_STRATEGY_DEFAULTS.field_conflict,
+    ),
+    delete_vs_update: asSyncConflictDefaultStrategy(
+      value.delete_vs_update,
+      DEFAULT_SYNC_CONFLICT_STRATEGY_DEFAULTS.delete_vs_update,
+    ),
+    notes_collision: asSyncConflictDefaultStrategy(
+      value.notes_collision,
+      DEFAULT_SYNC_CONFLICT_STRATEGY_DEFAULTS.notes_collision,
+    ),
+    validation_error: asSyncConflictDefaultStrategy(
+      value.validation_error,
+      DEFAULT_SYNC_CONFLICT_STRATEGY_DEFAULTS.validation_error,
+    ),
+  };
+}
+
+function parseSyncConflictStrategyDefaultsValue(
+  value: unknown,
+): SyncConflictStrategyDefaults {
+  if (typeof value !== "string" || !value.trim()) {
+    return {
+      ...DEFAULT_SYNC_CONFLICT_STRATEGY_DEFAULTS,
+    };
+  }
+  try {
+    return normalizeSyncConflictStrategyDefaultsObject(JSON.parse(value));
+  } catch {
+    return {
+      ...DEFAULT_SYNC_CONFLICT_STRATEGY_DEFAULTS,
+    };
   }
 }
 
@@ -1048,6 +1245,47 @@ export async function updateAppLocaleSetting(
   );
   return {
     locale,
+  };
+}
+
+export async function getMigrationDiagnosticsSetting(): Promise<MigrationDiagnosticsSetting> {
+  const db = await getDb();
+  const rows = await db.select<AppSettingRecord[]>(
+    "SELECT key, value FROM settings WHERE key IN ($1, $2, $3, $4)",
+    [
+      MIGRATION_LAST_STATUS_KEY,
+      MIGRATION_LAST_ERROR_KEY,
+      MIGRATION_LEGACY_PATH_DETECTED_KEY,
+      MIGRATION_SYNC_WRITE_BLOCKED_KEY,
+    ],
+  );
+
+  let lastStatus = "not_checked";
+  let lastError: string | null = null;
+  let legacyPathDetected = false;
+  let syncWriteBlocked = false;
+
+  for (const row of rows) {
+    if (row.key === MIGRATION_LAST_STATUS_KEY) {
+      const normalizedStatus = row.value?.trim();
+      lastStatus = normalizedStatus || "not_checked";
+    } else if (row.key === MIGRATION_LAST_ERROR_KEY) {
+      const normalizedError = row.value?.trim() ?? "";
+      lastError = normalizedError ? normalizedError : null;
+    } else if (row.key === MIGRATION_LEGACY_PATH_DETECTED_KEY) {
+      legacyPathDetected =
+        row.value === "1" || row.value.toLowerCase() === "true";
+    } else if (row.key === MIGRATION_SYNC_WRITE_BLOCKED_KEY) {
+      syncWriteBlocked =
+        row.value === "1" || row.value.toLowerCase() === "true";
+    }
+  }
+
+  return {
+    last_status: lastStatus,
+    last_error: lastError,
+    legacy_path_detected: legacyPathDetected,
+    sync_write_blocked: syncWriteBlocked,
   };
 }
 
@@ -1193,6 +1431,50 @@ export async function updateSyncProviderSettings(
     provider,
     provider_config: providerConfig,
   };
+}
+
+export async function getSyncConflictStrategyDefaults(): Promise<SyncConflictStrategyDefaults> {
+  const db = await getDb();
+  const rows = await db.select<AppSettingRecord[]>(
+    "SELECT key, value FROM settings WHERE key = $1 LIMIT 1",
+    [SYNC_SETTINGS_CONFLICT_STRATEGY_DEFAULTS_KEY],
+  );
+
+  return parseSyncConflictStrategyDefaultsValue(rows[0]?.value ?? null);
+}
+
+export async function updateSyncConflictStrategyDefaults(
+  input: UpdateSyncConflictStrategyDefaultsInput,
+): Promise<SyncConflictStrategyDefaults> {
+  const db = await getDb();
+  const existing = await getSyncConflictStrategyDefaults();
+  const next: SyncConflictStrategyDefaults = {
+    field_conflict: asSyncConflictDefaultStrategy(
+      input.field_conflict,
+      existing.field_conflict,
+    ),
+    delete_vs_update: asSyncConflictDefaultStrategy(
+      input.delete_vs_update,
+      existing.delete_vs_update,
+    ),
+    notes_collision: asSyncConflictDefaultStrategy(
+      input.notes_collision,
+      existing.notes_collision,
+    ),
+    validation_error: asSyncConflictDefaultStrategy(
+      input.validation_error,
+      existing.validation_error,
+    ),
+  };
+
+  await db.execute(
+    `INSERT INTO settings (key, value)
+         VALUES ($1, $2)
+    ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+    [SYNC_SETTINGS_CONFLICT_STRATEGY_DEFAULTS_KEY, JSON.stringify(next)],
+  );
+
+  return next;
 }
 
 function getSyncRuntimeDefaultsByPreset(
@@ -3546,11 +3828,57 @@ export async function deleteTask(id: string): Promise<void> {
     "SELECT * FROM task_subtasks WHERE task_id = $1",
     [id],
   );
+  await db.execute(
+    `UPDATE sessions
+        SET task_id = NULL
+      WHERE task_id = $1`,
+    [id],
+  );
   await db.execute("DELETE FROM tasks WHERE id = $1", [id]);
   for (const subtask of subtaskRows) {
     await enqueueEntityDelete("TASK_SUBTASK", subtask.id, deviceId, now);
   }
   await enqueueEntityDelete("TASK", task.id, deviceId, now);
+}
+
+/** Persist one completed focus/work session */
+export async function createSession(
+  input: CreateSessionInput,
+): Promise<SessionRecord> {
+  const db = await getDb();
+  const id = uuidv4();
+  const normalizedTaskId =
+    typeof input.task_id === "string" && input.task_id.trim()
+      ? input.task_id.trim()
+      : null;
+  const normalizedDurationMinutes = Math.max(
+    1,
+    Math.trunc(Number(input.duration_minutes) || 0),
+  );
+  const completedAtRaw =
+    typeof input.completed_at === "string" && input.completed_at.trim()
+      ? input.completed_at.trim()
+      : new Date().toISOString();
+  const completedAt = Number.isNaN(Date.parse(completedAtRaw))
+    ? new Date().toISOString()
+    : new Date(completedAtRaw).toISOString();
+
+  await db.execute(
+    `INSERT INTO sessions (
+        id,
+        task_id,
+        duration_minutes,
+        completed_at
+      )
+       VALUES ($1, $2, $3, $4)`,
+    [id, normalizedTaskId, normalizedDurationMinutes, completedAt],
+  );
+
+  const rows = await db.select<SessionRecord[]>(
+    "SELECT * FROM sessions WHERE id = $1 LIMIT 1",
+    [id],
+  );
+  return rows[0];
 }
 
 /** Get task counts by status */
@@ -4200,12 +4528,26 @@ async function getBackupRestorePreflightFromDb(
   const pendingOutboxChanges = Math.max(0, Number(outboxRows[0]?.count ?? 0));
   const openConflicts = Math.max(0, Number(conflictRows[0]?.count ?? 0));
   const hasLatestBackup = Boolean(latestBackupSettings.latestPayloadJson);
+  let latestBackupSummary: BackupImportResult | null = null;
+  if (latestBackupSettings.latestPayloadJson) {
+    try {
+      const parsedLatestPayload = JSON.parse(
+        latestBackupSettings.latestPayloadJson,
+      ) as unknown;
+      const normalizedLatestPayload =
+        normalizeBackupPayload(parsedLatestPayload);
+      latestBackupSummary = summarizeBackupPayload(normalizedLatestPayload);
+    } catch {
+      latestBackupSummary = null;
+    }
+  }
 
   return {
     pending_outbox_changes: pendingOutboxChanges,
     open_conflicts: openConflicts,
     has_latest_backup: hasLatestBackup,
     latest_backup_exported_at: latestBackupSettings.latestExportedAt,
+    latest_backup_summary: latestBackupSummary,
     requires_force_restore: pendingOutboxChanges > 0 || openConflicts > 0,
   };
 }
@@ -4488,8 +4830,13 @@ export async function importBackupPayload(
     `SELECT key, value
        FROM settings
       WHERE key = $1
-         OR key LIKE $2`,
-    [SYNC_SETTINGS_DEVICE_ID_KEY, `${LOCAL_ONLY_SETTING_PREFIX}%`],
+         OR key LIKE $2
+         OR key LIKE $3`,
+    [
+      SYNC_SETTINGS_DEVICE_ID_KEY,
+      `${LOCAL_ONLY_SETTING_PREFIX}%`,
+      "migration.%",
+    ],
   );
   const {
     settings,
@@ -4706,15 +5053,7 @@ export async function importBackupPayload(
     throw error;
   }
 
-  return {
-    settings: settings.length,
-    projects: projects.length,
-    tasks: tasks.length,
-    sessions: sessions.length,
-    task_subtasks: taskSubtasks.length,
-    task_changelogs: taskChangelogs.length,
-    task_templates: taskTemplates.length,
-  };
+  return summarizeBackupPayload(backupPayload);
 }
 
 /** Restore the latest exported local snapshot with preflight guardrails */

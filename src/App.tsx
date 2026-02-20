@@ -26,20 +26,27 @@ import {
   useUpdateTask,
   useDeleteTask,
   useDeleteProject,
+  useCreateSession,
+  useExportBackup,
   useImportBackup,
   useResolveSyncConflict,
   useRestoreLatestBackup,
   useSyncConflicts,
+  useSyncConflictStrategyDefaults,
   useSyncProviderSettings,
   useSyncRuntimeProfileSettings,
   useSyncRuntimeSettings,
   useSyncSettings,
   useUpdateSyncProviderSettings,
+  useUpdateSyncConflictStrategyDefaults,
   useUpdateSyncRuntimeSettings,
   useUpdateSyncSettings,
   useUpdateAppLocaleSetting,
 } from "./hooks/use-tasks";
-import { useReminderNotifications } from "./hooks/use-reminder-notifications";
+import {
+  type ReminderSnoozePreset,
+  useReminderNotifications,
+} from "./hooks/use-reminder-notifications";
 import { useQuickCaptureShortcut } from "./hooks/use-quick-capture-shortcut";
 import { useTaskFilters } from "./hooks/use-task-filters";
 import { useSync } from "./hooks/use-sync";
@@ -48,15 +55,18 @@ import type {
   AppLocale,
   CreateTaskInput,
   UpdateTaskInput,
+  TaskRecurrence,
   TaskStatus,
   Task,
   SyncConflictRecord,
+  SyncConflictStrategyDefaults,
   ResolveSyncConflictInput,
   SyncPushChange,
   SyncProvider,
   SyncRuntimeProfileSetting,
   SyncStatus,
   UpdateSyncEndpointSettingsInput,
+  UpdateSyncConflictStrategyDefaultsInput,
   UpdateSyncProviderSettingsInput,
   UpdateSyncRuntimeSettingsInput,
 } from "./lib/types";
@@ -74,6 +84,15 @@ import {
   parseSyncPullResponse,
   parseSyncPushResponse,
 } from "./lib/sync-contract";
+import {
+  type BulkTaskPatch,
+  buildBulkUpdateConfirmationMessage,
+  buildBulkUpdateTaskInputs,
+  hasBulkTaskPatch,
+  normalizeSelectedTaskIdsToVisible,
+  toggleSelectAllVisibleTasks,
+  toggleTaskSelection,
+} from "./lib/task-bulk";
 import { localizeErrorMessage } from "./lib/error-message";
 import "./index.css";
 
@@ -152,6 +171,35 @@ function getSyncStatusLabel(input: {
   return translate(input.locale, "sync.status.attention");
 }
 
+function buildReminderSnoozeIsoTimestamp(
+  preset: ReminderSnoozePreset,
+  now = new Date(),
+): string {
+  if (preset === "SNOOZE_15_MINUTES") {
+    return new Date(now.getTime() + 15 * 60 * 1000).toISOString();
+  }
+  if (preset === "SNOOZE_1_HOUR") {
+    return new Date(now.getTime() + 60 * 60 * 1000).toISOString();
+  }
+
+  const tomorrow = new Date(now);
+  tomorrow.setDate(tomorrow.getDate() + 1);
+  tomorrow.setHours(9, 0, 0, 0);
+  return tomorrow.toISOString();
+}
+
+function formatFocusElapsed(totalSeconds: number): string {
+  const normalizedSeconds = Math.max(0, Math.floor(totalSeconds));
+  const hours = Math.floor(normalizedSeconds / 3600);
+  const minutes = Math.floor((normalizedSeconds % 3600) / 60);
+  const seconds = normalizedSeconds % 60;
+
+  if (hours > 0) {
+    return `${hours}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+  }
+  return `${String(minutes)}:${String(seconds).padStart(2, "0")}`;
+}
+
 type AutosaveStatus = "ready" | "saving" | "saved" | "error";
 
 interface AutosaveIndicator {
@@ -187,7 +235,15 @@ interface DeleteProjectQueueResult {
   undoWindowMs: number;
 }
 
+type SettingsFocusTarget = "sync_diagnostics" | "backup_preflight";
+
 const DEFAULT_UNDO_WINDOW_MS = 5_000;
+const DEFAULT_SYNC_CONFLICT_STRATEGY_DEFAULTS: SyncConflictStrategyDefaults = {
+  field_conflict: "keep_local",
+  delete_vs_update: "keep_local",
+  notes_collision: "manual_merge",
+  validation_error: "keep_local",
+};
 
 function createUndoQueueItemId(): string {
   return `undo-${Date.now()}-${Math.floor(Math.random() * 100000)}`;
@@ -444,6 +500,11 @@ function AppContent() {
     setEditingTask,
     isCreateOpen,
     setIsCreateOpen,
+    projectsViewContext,
+    setProjectsViewContext,
+    taskDetailFocus,
+    setTaskDetailFocus,
+    clearTaskDetailFocus,
   } = useAppStore();
   const {
     data: allTasks = [],
@@ -471,11 +532,19 @@ function AppContent() {
   const updateTask = useUpdateTask();
   const deleteTask = useDeleteTask();
   const deleteProject = useDeleteProject();
+  const createSession = useCreateSession();
+  const exportBackup = useExportBackup();
   const importBackup = useImportBackup();
   const restoreLatestBackup = useRestoreLatestBackup();
   const { data: syncConflicts = [], isLoading: isSyncConflictsLoading } =
     useSyncConflicts("open", 50);
   const resolveSyncConflict = useResolveSyncConflict();
+  const {
+    data: syncConflictStrategyDefaults,
+    isLoading: isSyncConflictStrategyDefaultsLoading,
+  } = useSyncConflictStrategyDefaults();
+  const updateSyncConflictStrategyDefaults =
+    useUpdateSyncConflictStrategyDefaults();
   const {
     data: syncProviderSettings,
     isLoading: isSyncProviderSettingsLoading,
@@ -518,6 +587,8 @@ function AppContent() {
     deleteSavedView,
   } = useTaskFilters(activeView);
   const [actionError, setActionError] = useState<string | null>(null);
+  const [selectedTaskIds, setSelectedTaskIds] = useState<string[]>([]);
+  const [isBulkEditRunning, setIsBulkEditRunning] = useState(false);
   const [isQuickCaptureOpen, setIsQuickCaptureOpen] = useState(false);
   const [quickCaptureError, setQuickCaptureError] = useState<string | null>(
     null,
@@ -526,10 +597,20 @@ function AppContent() {
   const [lastAutosaveError, setLastAutosaveError] = useState<string | null>(
     null,
   );
+  const [activeFocusTaskId, setActiveFocusTaskId] = useState<string | null>(
+    null,
+  );
+  const [activeFocusStartedAt, setActiveFocusStartedAt] = useState<
+    string | null
+  >(null);
+  const [focusClock, setFocusClock] = useState(0);
   const [autosaveClock, setAutosaveClock] = useState(0);
   const [undoQueue, setUndoQueue] = useState<UndoQueueItem[]>([]);
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
   const [isShortcutHelpOpen, setIsShortcutHelpOpen] = useState(false);
+  const [settingsFocusTarget, setSettingsFocusTarget] =
+    useState<SettingsFocusTarget | null>(null);
+  const [settingsFocusRequestId, setSettingsFocusRequestId] = useState(0);
   const [createModalProjectId, setCreateModalProjectId] = useState<
     string | null
   >(null);
@@ -567,6 +648,10 @@ function AppContent() {
   const e2eTransportOutboxRef = useRef<SyncPushChange[]>([]);
   const e2eResolvedIncomingKeysRef = useRef<Set<string>>(new Set());
   const [isE2EConflictResolving, setIsE2EConflictResolving] = useState(false);
+  const [e2eSyncConflictStrategyDefaults, setE2ESyncConflictStrategyDefaults] =
+    useState<SyncConflictStrategyDefaults>(
+      DEFAULT_SYNC_CONFLICT_STRATEGY_DEFAULTS,
+    );
   const e2eSyncFailureBudgetRef = useRef(0);
   const [e2eMigrationSyncWriteBlocked, setE2EMigrationSyncWriteBlocked] =
     useState(false);
@@ -584,10 +669,16 @@ function AppContent() {
   const [isE2ESyncRunning, setIsE2ESyncRunning] = useState(false);
   const undoQueueRef = useRef<UndoQueueItem[]>([]);
   const undoTimerRef = useRef<number | null>(null);
+  const hasRestoredTaskDetailFocusRef = useRef(false);
   const effectiveSyncProvider =
     e2eBridgeEnabled && e2eTransportModeEnabled
       ? e2eSyncProvider
       : (syncProviderSettings?.provider ?? "provider_neutral");
+  const effectiveSyncConflictStrategyDefaults =
+    e2eBridgeEnabled && e2eTransportModeEnabled
+      ? e2eSyncConflictStrategyDefaults
+      : (syncConflictStrategyDefaults ??
+        DEFAULT_SYNC_CONFLICT_STRATEGY_DEFAULTS);
   const effectiveSyncProviderConfig =
     e2eBridgeEnabled && e2eTransportModeEnabled
       ? e2eSyncProviderConfig
@@ -693,6 +784,28 @@ function AppContent() {
       visibleSyncStatus,
     ],
   );
+  const activeFocusElapsedSeconds = useMemo(() => {
+    if (!activeFocusStartedAt) return 0;
+    const parsed = Date.parse(activeFocusStartedAt);
+    if (Number.isNaN(parsed)) return 0;
+    return Math.max(0, Math.floor((Date.now() - parsed) / 1000));
+  }, [activeFocusStartedAt, focusClock]);
+  useEffect(() => {
+    if (!activeFocusTaskId || !activeFocusStartedAt) return;
+    const timer = window.setInterval(() => {
+      setFocusClock((previous) => previous + 1);
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, [activeFocusStartedAt, activeFocusTaskId]);
+  useEffect(() => {
+    if (!activeFocusTaskId) return;
+    const taskStillExists = allTasks.some(
+      (task) => task.id === activeFocusTaskId,
+    );
+    if (taskStillExists) return;
+    setActiveFocusTaskId(null);
+    setActiveFocusStartedAt(null);
+  }, [activeFocusTaskId, allTasks]);
   const markAutosaveSuccess = useCallback(() => {
     setLastAutosaveError(null);
     setLastAutosavedAt(new Date().toISOString());
@@ -765,6 +878,7 @@ function AppContent() {
     updateTask.isPending ||
     deleteTask.isPending ||
     deleteProject.isPending ||
+    createSession.isPending ||
     importBackup.isPending ||
     restoreLatestBackup.isPending ||
     (e2eBridgeEnabled
@@ -1371,6 +1485,32 @@ function AppContent() {
       updateSyncRuntimeSettings,
     ],
   );
+  const handleSaveSyncConflictStrategyDefaults = useCallback(
+    async (input: UpdateSyncConflictStrategyDefaultsInput): Promise<void> => {
+      if (e2eBridgeEnabled && e2eTransportModeEnabled) {
+        setE2ESyncConflictStrategyDefaults((previous) => ({
+          ...previous,
+          ...input,
+        }));
+        markAutosaveSuccess();
+        return;
+      }
+      try {
+        await updateSyncConflictStrategyDefaults.mutateAsync(input);
+        markAutosaveSuccess();
+      } catch (error) {
+        markAutosaveFailure(error);
+        throw error;
+      }
+    },
+    [
+      e2eBridgeEnabled,
+      e2eTransportModeEnabled,
+      markAutosaveFailure,
+      markAutosaveSuccess,
+      updateSyncConflictStrategyDefaults,
+    ],
+  );
   const handleSaveSyncProviderSettings = useCallback(
     async (input: UpdateSyncProviderSettingsInput): Promise<void> => {
       if (e2eBridgeEnabled && e2eTransportModeEnabled) {
@@ -1418,10 +1558,48 @@ function AppContent() {
     setEditingTask(null);
     setCreateModalProjectId(null);
     setIsCreateOpen(false);
+    clearTaskDetailFocus();
     setIsQuickCaptureOpen(true);
-  }, [setEditingTask, setIsCreateOpen]);
+  }, [clearTaskDetailFocus, setEditingTask, setIsCreateOpen]);
 
   useQuickCaptureShortcut(openQuickCapture);
+
+  const openSettingsWithFocus = useCallback(
+    (target: SettingsFocusTarget) => {
+      setActiveView("settings");
+      setSettingsFocusTarget(target);
+      setSettingsFocusRequestId((previous) => previous + 1);
+    },
+    [setActiveView],
+  );
+
+  const handleCommandPaletteSyncNow = useCallback(() => {
+    if (visibleSyncIsRunning || !visibleSyncHasTransport) return;
+    void visibleSyncNow();
+  }, [visibleSyncHasTransport, visibleSyncIsRunning, visibleSyncNow]);
+
+  const handleCommandPaletteExportBackup = useCallback(() => {
+    setActionError(null);
+    void exportBackup
+      .mutateAsync()
+      .then((payload) => {
+        const backupText = JSON.stringify(payload, null, 2);
+        const blob = new Blob([backupText], { type: "application/json" });
+        const url = URL.createObjectURL(blob);
+        const safeTimestamp = payload.exported_at.replace(/[:.]/g, "-");
+        const filename = `solostack-backup-${safeTimestamp}.json`;
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = filename;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        window.setTimeout(() => URL.revokeObjectURL(url), 0);
+      })
+      .catch((error) => {
+        setActionError(getErrorMessage(error, appLocale));
+      });
+  }, [appLocale, exportBackup]);
 
   const openCreateModal = useCallback(
     (projectId: string | null = null) => {
@@ -1430,8 +1608,13 @@ function AppContent() {
       setEditingTask(null);
       setCreateModalProjectId(projectId);
       setIsCreateOpen(true);
+      setTaskDetailFocus({
+        mode: "CREATE",
+        taskId: null,
+        projectId,
+      });
     },
-    [closeQuickCapture, setEditingTask, setIsCreateOpen],
+    [closeQuickCapture, setEditingTask, setIsCreateOpen, setTaskDetailFocus],
   );
 
   const handleRemindersEnabledChange = useCallback((enabled: boolean) => {
@@ -1516,6 +1699,11 @@ function AppContent() {
       setCreateModalProjectId(null);
       setIsCreateOpen(false);
       setEditingTask(matchedTask);
+      setTaskDetailFocus({
+        mode: "EDIT",
+        taskId: matchedTask.id,
+        projectId: matchedTask.project_id ?? null,
+      });
       setActiveView("board");
     },
     [
@@ -1525,6 +1713,7 @@ function AppContent() {
       setCreateModalProjectId,
       setEditingTask,
       setIsCreateOpen,
+      setTaskDetailFocus,
     ],
   );
 
@@ -1532,15 +1721,81 @@ function AppContent() {
     (task: Task) => {
       closeQuickCapture();
       setEditingTask(task);
+      setTaskDetailFocus({
+        mode: "EDIT",
+        taskId: task.id,
+        projectId: task.project_id ?? null,
+      });
     },
-    [closeQuickCapture, setEditingTask],
+    [closeQuickCapture, setEditingTask, setTaskDetailFocus],
   );
+  const handleTaskReminderSnooze = useCallback(
+    (input: { taskId: string; preset: ReminderSnoozePreset }) => {
+      const taskId = input.taskId.trim();
+      if (!taskId) return;
+
+      setActionError(null);
+      const nextReminderAt = buildReminderSnoozeIsoTimestamp(input.preset);
+      void updateTask
+        .mutateAsync({ id: taskId, remind_at: nextReminderAt })
+        .then(() => {
+          markAutosaveSuccess();
+        })
+        .catch((error) => {
+          setActionError(getErrorMessage(error, appLocale));
+          markAutosaveFailure(error);
+        });
+    },
+    [appLocale, markAutosaveFailure, markAutosaveSuccess, updateTask],
+  );
+
+  useEffect(() => {
+    if (hasRestoredTaskDetailFocusRef.current) return;
+
+    if (taskDetailFocus.mode === "IDLE") {
+      hasRestoredTaskDetailFocusRef.current = true;
+      return;
+    }
+
+    if (taskDetailFocus.mode === "CREATE") {
+      openCreateModal(taskDetailFocus.projectId ?? null);
+      hasRestoredTaskDetailFocusRef.current = true;
+      return;
+    }
+
+    if (taskDetailFocus.mode === "EDIT") {
+      if (isLoadingAllTasks) return;
+
+      const targetTaskId = taskDetailFocus.taskId?.trim() ?? "";
+      if (!targetTaskId) {
+        clearTaskDetailFocus();
+        hasRestoredTaskDetailFocusRef.current = true;
+        return;
+      }
+
+      const matchedTask = allTasks.find((task) => task.id === targetTaskId);
+      if (matchedTask) {
+        handleEditTask(matchedTask);
+      } else {
+        clearTaskDetailFocus();
+      }
+      hasRestoredTaskDetailFocusRef.current = true;
+    }
+  }, [
+    allTasks,
+    clearTaskDetailFocus,
+    handleEditTask,
+    isLoadingAllTasks,
+    openCreateModal,
+    taskDetailFocus,
+  ]);
 
   useReminderNotifications(
     allTasks,
     remindersEnabled && !isLoadingAllTasks && !isAllTasksError,
     appLocale,
     handleTaskNotificationOpen,
+    handleTaskReminderSnooze,
   );
 
   useEffect(() => {
@@ -1660,6 +1915,74 @@ function AppContent() {
     isShortcutHelpOpen,
   ]);
 
+  const clearActiveFocusSession = useCallback(() => {
+    setActiveFocusTaskId(null);
+    setActiveFocusStartedAt(null);
+  }, []);
+
+  const handleStartFocus = useCallback(
+    (task: Task) => {
+      if (!task.id.trim()) return;
+      if (createSession.isPending) return;
+      if (activeFocusTaskId === task.id && activeFocusStartedAt) return;
+      if (activeFocusTaskId && activeFocusTaskId !== task.id) return;
+      setActionError(null);
+      setActiveFocusTaskId(task.id);
+      setActiveFocusStartedAt(new Date().toISOString());
+      setFocusClock((previous) => previous + 1);
+    },
+    [activeFocusStartedAt, activeFocusTaskId, createSession.isPending],
+  );
+
+  const handleStopFocus = useCallback(
+    (task?: Task) => {
+      if (createSession.isPending) return;
+      if (!activeFocusTaskId || !activeFocusStartedAt) return;
+      if (task && task.id !== activeFocusTaskId) return;
+
+      const startedAtMs = Date.parse(activeFocusStartedAt);
+      if (Number.isNaN(startedAtMs)) {
+        clearActiveFocusSession();
+        return;
+      }
+
+      const elapsedSeconds = Math.max(
+        1,
+        Math.floor((Date.now() - startedAtMs) / 1000),
+      );
+      const durationMinutes = Math.max(1, Math.round(elapsedSeconds / 60));
+      const taskExists = allTasks.some((item) => item.id === activeFocusTaskId);
+
+      setActionError(null);
+      void createSession
+        .mutateAsync({
+          task_id: taskExists ? activeFocusTaskId : null,
+          duration_minutes: durationMinutes,
+          completed_at: new Date().toISOString(),
+        })
+        .then(() => {
+          markAutosaveSuccess();
+        })
+        .catch((error) => {
+          setActionError(getErrorMessage(error, appLocale));
+          markAutosaveFailure(error);
+        })
+        .finally(() => {
+          clearActiveFocusSession();
+        });
+    },
+    [
+      activeFocusStartedAt,
+      activeFocusTaskId,
+      allTasks,
+      appLocale,
+      clearActiveFocusSession,
+      createSession,
+      markAutosaveFailure,
+      markAutosaveSuccess,
+    ],
+  );
+
   const handleCreate = async (input: CreateTaskInput | UpdateTaskInput) => {
     setActionError(null);
     try {
@@ -1667,6 +1990,7 @@ function AppContent() {
       markAutosaveSuccess();
       setIsCreateOpen(false);
       setCreateModalProjectId(null);
+      clearTaskDetailFocus();
     } catch (error) {
       setActionError(getErrorMessage(error, appLocale));
       markAutosaveFailure(error);
@@ -1679,6 +2003,7 @@ function AppContent() {
       await updateTask.mutateAsync(input as UpdateTaskInput);
       markAutosaveSuccess();
       setEditingTask(null);
+      clearTaskDetailFocus();
     } catch (error) {
       setActionError(getErrorMessage(error, appLocale));
       markAutosaveFailure(error);
@@ -1700,6 +2025,10 @@ function AppContent() {
 
   const handleDelete = (taskId: string) => {
     setActionError(null);
+    if (activeFocusTaskId === taskId) {
+      const focusedTask = allTasks.find((task) => task.id === taskId);
+      handleStopFocus(focusedTask);
+    }
     const matchedTask = allTasks.find((task) => task.id === taskId);
     const label = matchedTask?.title?.trim()
       ? translate(appLocale, "app.undo.deleteTaskNamed", {
@@ -1814,6 +2143,142 @@ function AppContent() {
     if (!taskViewState) return [];
     return applyTaskFilters(taskViewState.tasks, filters);
   }, [taskViewState, filters]);
+  const visibleTaskIds = useMemo(
+    () => filteredTaskViewTasks.map((task) => task.id),
+    [filteredTaskViewTasks],
+  );
+  const selectedTaskIdSet = useMemo(
+    () => new Set(selectedTaskIds),
+    [selectedTaskIds],
+  );
+  const areAllVisibleTasksSelected =
+    visibleTaskIds.length > 0 &&
+    visibleTaskIds.every((taskId) => selectedTaskIdSet.has(taskId));
+
+  useEffect(() => {
+    if (!taskViewState) {
+      setSelectedTaskIds((previousSelectedTaskIds) =>
+        previousSelectedTaskIds.length > 0 ? [] : previousSelectedTaskIds,
+      );
+      return;
+    }
+
+    setSelectedTaskIds((previousSelectedTaskIds) => {
+      const normalizedSelection = normalizeSelectedTaskIdsToVisible(
+        previousSelectedTaskIds,
+        visibleTaskIds,
+      );
+      if (
+        normalizedSelection.length === previousSelectedTaskIds.length &&
+        normalizedSelection.every(
+          (taskId, index) => taskId === previousSelectedTaskIds[index],
+        )
+      ) {
+        return previousSelectedTaskIds;
+      }
+      return normalizedSelection;
+    });
+  }, [taskViewState, visibleTaskIds]);
+
+  const handleToggleTaskSelection = useCallback(
+    (taskId: string, nextSelected: boolean) => {
+      setSelectedTaskIds((previousSelectedTaskIds) =>
+        toggleTaskSelection(previousSelectedTaskIds, taskId, nextSelected),
+      );
+    },
+    [],
+  );
+  const handleToggleSelectAllVisibleTasks = useCallback(() => {
+    setSelectedTaskIds((previousSelectedTaskIds) =>
+      toggleSelectAllVisibleTasks(previousSelectedTaskIds, visibleTaskIds),
+    );
+  }, [visibleTaskIds]);
+  const handleClearSelectedTasks = useCallback(() => {
+    setSelectedTaskIds([]);
+  }, []);
+  const runBulkTaskUpdate = useCallback(
+    async (patch: BulkTaskPatch) => {
+      if (!hasBulkTaskPatch(patch)) return;
+
+      const updateInputs = buildBulkUpdateTaskInputs(selectedTaskIds, patch);
+      if (updateInputs.length === 0) return;
+      const projectNameMap = Object.fromEntries(
+        projects.map((project) => [project.id, project.name]),
+      ) as Record<string, string>;
+      const confirmMessage = buildBulkUpdateConfirmationMessage({
+        locale: appLocale,
+        selectedCount: updateInputs.length,
+        patch,
+        projectNameById: projectNameMap,
+      });
+      if (!window.confirm(confirmMessage)) return;
+
+      setActionError(null);
+      setIsBulkEditRunning(true);
+      try {
+        for (const updateInput of updateInputs) {
+          await updateTask.mutateAsync(updateInput);
+        }
+        markAutosaveSuccess();
+        setSelectedTaskIds([]);
+      } catch (error) {
+        setActionError(getErrorMessage(error, appLocale));
+        markAutosaveFailure(error);
+      } finally {
+        setIsBulkEditRunning(false);
+      }
+    },
+    [
+      appLocale,
+      markAutosaveFailure,
+      markAutosaveSuccess,
+      projects,
+      selectedTaskIds,
+      updateTask,
+    ],
+  );
+  const handleBulkSetStatus = useCallback(
+    (status: TaskStatus) => {
+      void runBulkTaskUpdate({ status });
+    },
+    [runBulkTaskUpdate],
+  );
+  const handleBulkSetPriority = useCallback(
+    (priority: UpdateTaskInput["priority"]) => {
+      void runBulkTaskUpdate({ priority });
+    },
+    [runBulkTaskUpdate],
+  );
+  const handleBulkSetProject = useCallback(
+    (projectId: string | null) => {
+      void runBulkTaskUpdate({ project_id: projectId });
+    },
+    [runBulkTaskUpdate],
+  );
+  const handleBulkSetImportant = useCallback(
+    (important: boolean) => {
+      void runBulkTaskUpdate({ is_important: important });
+    },
+    [runBulkTaskUpdate],
+  );
+  const handleBulkSetDueAt = useCallback(
+    (dueAt: string | null) => {
+      void runBulkTaskUpdate({ due_at: dueAt });
+    },
+    [runBulkTaskUpdate],
+  );
+  const handleBulkSetRemindAt = useCallback(
+    (remindAt: string | null) => {
+      void runBulkTaskUpdate({ remind_at: remindAt });
+    },
+    [runBulkTaskUpdate],
+  );
+  const handleBulkSetRecurrence = useCallback(
+    (recurrence: TaskRecurrence) => {
+      void runBulkTaskUpdate({ recurrence });
+    },
+    [runBulkTaskUpdate],
+  );
 
   const availableProjects = useMemo(
     () => projects.map((project) => ({ id: project.id, name: project.name })),
@@ -1834,6 +2299,18 @@ function AppContent() {
     ? isE2EConflictResolving
     : resolveSyncConflict.isPending || hasPendingConflictUndo;
   const activeUndoAction = undoQueue[0] ?? null;
+  const activeFocusTaskTitle = useMemo(() => {
+    if (!activeFocusTaskId) return null;
+    return (
+      allTasks.find((task) => task.id === activeFocusTaskId)?.title ?? null
+    );
+  }, [activeFocusTaskId, allTasks]);
+  const activeFocusElapsedLabel =
+    activeFocusTaskId && activeFocusStartedAt
+      ? translate(appLocale, "taskCard.focus.elapsed", {
+          duration: formatFocusElapsed(activeFocusElapsedSeconds),
+        })
+      : null;
 
   const content = taskViewState?.isLoading ? (
     <div
@@ -1907,6 +2384,14 @@ function AppContent() {
       onStatusChange={handleStatusChange}
       onDelete={handleDelete}
       onCreateClick={() => openCreateModal(null)}
+      selectedTaskIds={selectedTaskIds}
+      selectionBusy={isBulkEditRunning}
+      onToggleTaskSelection={handleToggleTaskSelection}
+      activeFocusTaskId={activeFocusTaskId}
+      focusElapsedSeconds={activeFocusElapsedSeconds}
+      focusBusy={createSession.isPending}
+      onStartFocus={handleStartFocus}
+      onStopFocus={handleStopFocus}
     />
   ) : activeView === "today" || activeView === "upcoming" ? (
     <TaskScheduleView
@@ -1917,6 +2402,14 @@ function AppContent() {
       onStatusChange={handleStatusChange}
       onDelete={handleDelete}
       onCreateClick={() => openCreateModal(null)}
+      selectedTaskIds={selectedTaskIds}
+      selectionBusy={isBulkEditRunning}
+      onToggleTaskSelection={handleToggleTaskSelection}
+      activeFocusTaskId={activeFocusTaskId}
+      focusElapsedSeconds={activeFocusElapsedSeconds}
+      focusBusy={createSession.isPending}
+      onStartFocus={handleStartFocus}
+      onStopFocus={handleStopFocus}
     />
   ) : activeView === "projects" ? (
     <ProjectView
@@ -1932,6 +2425,13 @@ function AppContent() {
       onDeleteProject={handleDeleteProject}
       isDeleteProjectPending={deleteProject.isPending}
       pendingDeleteProjectIds={pendingProjectDeleteUndoIds}
+      projectViewContext={projectsViewContext}
+      onProjectViewContextChange={setProjectsViewContext}
+      activeFocusTaskId={activeFocusTaskId}
+      focusElapsedSeconds={activeFocusElapsedSeconds}
+      focusBusy={createSession.isPending}
+      onStartFocus={handleStartFocus}
+      onStopFocus={handleStopFocus}
     />
   ) : activeView === "calendar" ? (
     isLoadingAllTasks ? (
@@ -2006,6 +2506,11 @@ function AppContent() {
         onStatusChange={handleStatusChange}
         onDelete={handleDelete}
         onCreateClick={() => openCreateModal(null)}
+        activeFocusTaskId={activeFocusTaskId}
+        focusElapsedSeconds={activeFocusElapsedSeconds}
+        focusBusy={createSession.isPending}
+        onStartFocus={handleStartFocus}
+        onStopFocus={handleStopFocus}
       />
     )
   ) : activeView === "review" ? (
@@ -2020,6 +2525,7 @@ function AppContent() {
       syncConflicts={visibleSyncConflicts}
       syncConflictsLoading={visibleSyncConflictsLoading}
       syncConflictResolving={visibleSyncConflictResolving}
+      syncConflictStrategyDefaults={effectiveSyncConflictStrategyDefaults}
       onResolveSyncConflict={handleResolveSyncConflict}
       onOpenSyncSettings={() => setActiveView("settings")}
     />
@@ -2088,6 +2594,22 @@ function AppContent() {
       syncConflictsLoading={visibleSyncConflictsLoading}
       syncConflictResolving={visibleSyncConflictResolving}
       onResolveSyncConflict={handleResolveSyncConflict}
+      syncConflictStrategyDefaults={effectiveSyncConflictStrategyDefaults}
+      syncConflictStrategyDefaultsLoading={
+        e2eBridgeEnabled && e2eTransportModeEnabled
+          ? false
+          : isSyncConflictStrategyDefaultsLoading
+      }
+      syncConflictStrategyDefaultsSaving={
+        e2eBridgeEnabled && e2eTransportModeEnabled
+          ? false
+          : updateSyncConflictStrategyDefaults.isPending
+      }
+      onSaveSyncConflictStrategyDefaults={
+        handleSaveSyncConflictStrategyDefaults
+      }
+      focusTarget={settingsFocusTarget}
+      focusRequestId={settingsFocusRequestId}
       backupRestoreLatestBusy={
         restoreLatestBackup.isPending || hasPendingBackupRestoreUndo
       }
@@ -2110,6 +2632,9 @@ function AppContent() {
         autosaveStatusDetail={autosaveIndicator.detail}
         onOpenConflictCenter={() => setActiveView("conflicts")}
         onOpenShortcutHelp={openShortcutHelp}
+        focusSessionTaskTitle={activeFocusTaskTitle}
+        focusSessionElapsedLabel={activeFocusElapsedLabel}
+        onStopFocusSession={() => handleStopFocus()}
       >
         {taskViewState &&
           !taskViewState.isLoading &&
@@ -2122,6 +2647,9 @@ function AppContent() {
               hasActiveFilters={hasActiveFilters}
               visibleTasks={filteredTaskViewTasks.length}
               totalTasks={taskViewState.tasks.length}
+              selectedTaskCount={selectedTaskIds.length}
+              allVisibleSelected={areAllVisibleTasksSelected}
+              bulkEditBusy={isBulkEditRunning}
               onSearchChange={setSearch}
               onToggleProject={toggleProject}
               onToggleStatus={toggleStatus}
@@ -2133,6 +2661,15 @@ function AppContent() {
               onSaveCurrentView={saveCurrentFiltersAsView}
               onApplySavedView={applySavedView}
               onDeleteSavedView={deleteSavedView}
+              onToggleSelectAllVisible={handleToggleSelectAllVisibleTasks}
+              onClearSelectedTasks={handleClearSelectedTasks}
+              onBulkSetStatus={handleBulkSetStatus}
+              onBulkSetPriority={handleBulkSetPriority}
+              onBulkSetProject={handleBulkSetProject}
+              onBulkSetImportant={handleBulkSetImportant}
+              onBulkSetDueAt={handleBulkSetDueAt}
+              onBulkSetRemindAt={handleBulkSetRemindAt}
+              onBulkSetRecurrence={handleBulkSetRecurrence}
             />
           )}
         {actionError && (
@@ -2164,9 +2701,19 @@ function AppContent() {
           isOpen={isCommandPaletteOpen}
           activeView={activeView}
           tasks={allTasks}
+          syncNowDisabled={visibleSyncIsRunning || !visibleSyncHasTransport}
+          exportBackupDisabled={exportBackup.isPending}
           onClose={closeCommandPalette}
           onOpenCreate={() => openCreateModal(null)}
           onOpenQuickCapture={openQuickCapture}
+          onSyncNow={handleCommandPaletteSyncNow}
+          onExportBackup={handleCommandPaletteExportBackup}
+          onOpenSyncDiagnostics={() =>
+            openSettingsWithFocus("sync_diagnostics")
+          }
+          onOpenRestorePreflight={() =>
+            openSettingsWithFocus("backup_preflight")
+          }
           onEditTask={handleEditTask}
           onChangeTaskStatus={handleStatusChange}
           onChangeView={setActiveView}
@@ -2193,6 +2740,7 @@ function AppContent() {
             onClose={() => {
               setIsCreateOpen(false);
               setCreateModalProjectId(null);
+              clearTaskDetailFocus();
             }}
           />
         )}
@@ -2202,7 +2750,10 @@ function AppContent() {
           <TaskForm
             task={editingTask}
             onSubmit={handleUpdate}
-            onClose={() => setEditingTask(null)}
+            onClose={() => {
+              setEditingTask(null);
+              clearTaskDetailFocus();
+            }}
           />
         )}
       </AppShell>

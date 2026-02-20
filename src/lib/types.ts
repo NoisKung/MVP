@@ -121,6 +121,13 @@ export interface SessionRecord {
   completed_at: string;
 }
 
+/** Input for recording a completed focus/work session */
+export interface CreateSessionInput {
+  task_id?: string | null;
+  duration_minutes: number;
+  completed_at?: string;
+}
+
 /** A generic key-value app setting stored in SQLite */
 export interface AppSettingRecord {
   key: string;
@@ -265,6 +272,7 @@ export interface BackupRestorePreflight {
   open_conflicts: number;
   has_latest_backup: boolean;
   latest_backup_exported_at: string | null;
+  latest_backup_summary: BackupImportResult | null;
   requires_force_restore: boolean;
 }
 
@@ -283,6 +291,14 @@ export type SyncStatus =
   | "OFFLINE"
   | "CONFLICT"
   | "LOCAL_ONLY";
+
+/** Startup migration diagnostics stored in settings */
+export interface MigrationDiagnosticsSetting {
+  last_status: string;
+  last_error: string | null;
+  legacy_path_detected: boolean;
+  sync_write_blocked: boolean;
+}
 
 export interface SyncSessionDiagnostics {
   total_cycles: number;
@@ -397,6 +413,25 @@ export type SyncConflictResolutionStrategy =
   | "keep_remote"
   | "manual_merge"
   | "retry";
+
+export type SyncConflictDefaultStrategy =
+  | "keep_local"
+  | "keep_remote"
+  | "manual_merge";
+
+export interface SyncConflictStrategyDefaults {
+  field_conflict: SyncConflictDefaultStrategy;
+  delete_vs_update: SyncConflictDefaultStrategy;
+  notes_collision: SyncConflictDefaultStrategy;
+  validation_error: SyncConflictDefaultStrategy;
+}
+
+export interface UpdateSyncConflictStrategyDefaultsInput {
+  field_conflict?: SyncConflictDefaultStrategy;
+  delete_vs_update?: SyncConflictDefaultStrategy;
+  notes_collision?: SyncConflictDefaultStrategy;
+  validation_error?: SyncConflictDefaultStrategy;
+}
 
 export type SyncConflictEventType =
   | "detected"
@@ -602,6 +637,33 @@ export interface SavedTaskView {
   filters: TaskFilterState;
   created_at: string;
   updated_at: string;
+}
+
+/** Selected saved-view ids per sortable task view */
+export type TaskActiveSavedViewIds = Record<TaskSortableView, string | null>;
+
+/** Project view status filter options */
+export type ProjectViewStatusFilter = "ALL" | "ACTIVE" | "COMPLETED";
+
+/** Project view task section filter options */
+export type ProjectViewTaskSectionFilter = "ALL" | "TODO" | "DOING" | "DONE";
+
+/** Persisted project view context used for resume-last-context */
+export interface ProjectViewContextState {
+  selectedProjectId: string | null;
+  projectSearch: string;
+  projectStatusFilter: ProjectViewStatusFilter;
+  taskSectionFilter: ProjectViewTaskSectionFilter;
+}
+
+/** Task detail focus modes persisted for resume-last-context */
+export type TaskDetailFocusMode = "IDLE" | "CREATE" | "EDIT";
+
+/** Persisted task detail focus state (form mode + target ids) */
+export interface TaskDetailFocusState {
+  mode: TaskDetailFocusMode;
+  taskId: string | null;
+  projectId: string | null;
 }
 
 /** Application view modes */
