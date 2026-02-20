@@ -3,6 +3,7 @@ import {
   advanceCursor,
   applyPullBatch,
   preparePushBatch,
+  SYNC_ENGINE_ERROR_CODES,
 } from "@/lib/sync-engine";
 import type {
   SyncOutboxRecord,
@@ -312,6 +313,6 @@ describe("sync-engine", () => {
         serverTime: "2026-02-17T04:00:00.000Z",
         setCheckpoint: async () => undefined,
       }),
-    ).rejects.toThrow(/serverCursor/i);
+    ).rejects.toThrow(SYNC_ENGINE_ERROR_CODES.SERVER_CURSOR_REQUIRED);
   });
 });

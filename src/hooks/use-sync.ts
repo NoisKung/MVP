@@ -3,8 +3,11 @@ import { useQueryClient } from "@tanstack/react-query";
 import { getSyncCheckpoint } from "@/lib/database";
 import { runLocalSyncCycle } from "@/lib/sync-service";
 import { resolveSyncTransportConfig } from "@/lib/sync-transport";
+import { translate } from "@/lib/i18n";
+import { localizeErrorMessage } from "@/lib/error-message";
 import type { RunSyncCycleSummary } from "@/lib/sync-runner";
 import type {
+  AppLocale,
   SyncProvider,
   SyncRuntimeProfileSetting,
   SyncSessionDiagnostics,
@@ -16,7 +19,6 @@ const DEFAULT_BACKGROUND_SYNC_INTERVAL_MS = 300_000;
 const DEFAULT_SYNC_PUSH_LIMIT = 200;
 const DEFAULT_SYNC_PULL_LIMIT = 200;
 const DEFAULT_SYNC_MAX_PULL_PAGES = 5;
-const OFFLINE_SYNC_MESSAGE = "Offline. Sync will retry when network returns.";
 const RETRY_BASE_DELAY_MS = 5_000;
 const RETRY_MAX_DELAY_MS = 300_000;
 
@@ -45,6 +47,7 @@ interface UseSyncOptions {
   pushLimit?: number;
   pullLimit?: number;
   maxPullPages?: number;
+  locale?: AppLocale;
 }
 
 interface SyncRuntimeProfileInput {
@@ -84,14 +87,8 @@ interface SyncConfigurationDiagnosticsInput {
   validationRejected: boolean;
 }
 
-function getErrorMessage(error: unknown): string {
-  if (error instanceof Error && error.message.trim()) {
-    return error.message;
-  }
-  if (typeof error === "string" && error.trim()) {
-    return error;
-  }
-  return "Sync failed unexpectedly.";
+function getErrorMessage(error: unknown, locale: AppLocale): string {
+  return localizeErrorMessage(error, locale, "sync.error.unexpected");
 }
 
 function isLikelyNetworkError(message: string): boolean {
@@ -327,25 +324,41 @@ export function appendSyncSessionDiagnostics(
   };
 }
 
-function buildConflictMessage(summary: RunSyncCycleSummary): string {
+function buildConflictMessage(
+  summary: RunSyncCycleSummary,
+  locale: AppLocale,
+): string {
   const parts: string[] = [];
   if (summary.failed_outbox_changes > 0) {
-    parts.push(`${summary.failed_outbox_changes} outbox change(s) failed`);
+    parts.push(
+      translate(locale, "sync.conflict.part.outboxFailed", {
+        count: summary.failed_outbox_changes,
+      }),
+    );
   }
   if (summary.pull?.failed && summary.pull.failed > 0) {
-    parts.push(`${summary.pull.failed} incoming change(s) failed`);
+    parts.push(
+      translate(locale, "sync.conflict.part.incomingFailed", {
+        count: summary.pull.failed,
+      }),
+    );
   }
   if (summary.pull?.conflicts && summary.pull.conflicts > 0) {
-    parts.push(`${summary.pull.conflicts} conflict(s) detected`);
+    parts.push(
+      translate(locale, "sync.conflict.part.detected", {
+        count: summary.pull.conflicts,
+      }),
+    );
   }
 
   if (parts.length === 0) {
-    return "Sync requires attention.";
+    return translate(locale, "sync.status.attention");
   }
   return `${parts.join(", ")}.`;
 }
 
 export function useSync(options: UseSyncOptions): UseSyncState {
+  const locale = options.locale ?? "en";
   const isConfigReady = options.configReady ?? true;
   const runtimeProfileNormalization = useMemo(
     () =>
@@ -378,6 +391,7 @@ export function useSync(options: UseSyncOptions): UseSyncState {
             pushUrl: options.pushUrl,
             pullUrl: options.pullUrl,
             timeoutMs: options.timeoutMs,
+            locale,
           })
         : {
             status: "disabled",
@@ -387,6 +401,7 @@ export function useSync(options: UseSyncOptions): UseSyncState {
           },
     [
       isConfigReady,
+      locale,
       options.provider,
       options.providerConfig,
       options.pullUrl,
@@ -505,7 +520,7 @@ export function useSync(options: UseSyncOptions): UseSyncState {
         setStatus("OFFLINE");
         setLastError(
           resolvedTransportConfig.warning ??
-            "Selected sync provider is unavailable.",
+            translate(locale, "sync.warning.providerUnavailable"),
         );
         return;
       }
@@ -515,7 +530,7 @@ export function useSync(options: UseSyncOptions): UseSyncState {
         if (resolvedTransportConfig.status === "invalid_config") {
           setLastError(
             resolvedTransportConfig.warning ??
-              "Sync config is invalid and no last-known-good transport is available.",
+              translate(locale, "sync.warning.invalidConfigNoLastKnownGood"),
           );
         } else {
           setLastError(null);
@@ -525,7 +540,7 @@ export function useSync(options: UseSyncOptions): UseSyncState {
 
       if (!isOnline) {
         setStatus("OFFLINE");
-        setLastError(OFFLINE_SYNC_MESSAGE);
+        setLastError(translate(locale, "sync.offline.retryNetworkReturn"));
         return;
       }
 
@@ -534,9 +549,9 @@ export function useSync(options: UseSyncOptions): UseSyncState {
       setStatus("SYNCING");
       setLastError(
         usesLastKnownGoodTransport
-          ? `Sync config invalid. Using last-known-good transport. ${
-              resolvedTransportConfig.warning ?? ""
-            }`.trim()
+          ? translate(locale, "sync.warning.usingLastKnownGood", {
+              warning: resolvedTransportConfig.warning ?? "",
+            }).trim()
           : null,
       );
       const attemptStartedAt = Date.now();
@@ -555,12 +570,12 @@ export function useSync(options: UseSyncOptions): UseSyncState {
         nextAutoAttemptAtRef.current = 0;
         setStatus(hasConflict ? "CONFLICT" : "SYNCED");
         if (hasConflict) {
-          setLastError(buildConflictMessage(summary));
+          setLastError(buildConflictMessage(summary, locale));
         } else if (usesLastKnownGoodTransport) {
           setLastError(
-            `Sync completed with last-known-good transport. ${
-              resolvedTransportConfig.warning ?? ""
-            }`.trim(),
+            translate(locale, "sync.warning.completedWithLastKnownGood", {
+              warning: resolvedTransportConfig.warning ?? "",
+            }).trim(),
           );
         } else {
           setLastError(null);
@@ -579,7 +594,7 @@ export function useSync(options: UseSyncOptions): UseSyncState {
 
         await queryClient.invalidateQueries();
       } catch (error) {
-        const message = getErrorMessage(error);
+        const message = getErrorMessage(error, locale);
         if (!manual) {
           consecutiveFailuresRef.current += 1;
           const backoffDelay = calculateSyncBackoffMs(
@@ -612,6 +627,7 @@ export function useSync(options: UseSyncOptions): UseSyncState {
       resolvedTransportConfig.status,
       resolvedTransportConfig.warning,
       usesLastKnownGoodTransport,
+      locale,
     ],
   );
 
@@ -661,7 +677,7 @@ export function useSync(options: UseSyncOptions): UseSyncState {
       setStatus("OFFLINE");
       setLastError(
         resolvedTransportConfig.warning ??
-          "Selected sync provider is unavailable.",
+          translate(locale, "sync.warning.providerUnavailable"),
       );
       return;
     }
@@ -671,7 +687,7 @@ export function useSync(options: UseSyncOptions): UseSyncState {
       if (resolvedTransportConfig.status === "invalid_config") {
         setLastError(
           resolvedTransportConfig.warning ??
-            "Sync config is invalid and no fallback transport is available.",
+            translate(locale, "sync.warning.invalidConfigNoLastKnownGood"),
         );
       } else {
         setLastError(null);
@@ -681,7 +697,10 @@ export function useSync(options: UseSyncOptions): UseSyncState {
 
     if (!isOnline) {
       setStatus("OFFLINE");
-      setLastError((previousError) => previousError ?? OFFLINE_SYNC_MESSAGE);
+      setLastError(
+        (previousError) =>
+          previousError ?? translate(locale, "sync.offline.retryNetworkReturn"),
+      );
       return;
     }
 
@@ -690,6 +709,7 @@ export function useSync(options: UseSyncOptions): UseSyncState {
     effectiveTransport,
     isConfigReady,
     isOnline,
+    locale,
     resolvedTransportConfig.status,
     resolvedTransportConfig.warning,
     runSync,

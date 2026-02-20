@@ -1,4 +1,5 @@
 import { RotateCcw } from "lucide-react";
+import { useI18n } from "@/lib/i18n";
 
 interface GlobalUndoBarProps {
   actionLabel: string;
@@ -7,30 +8,31 @@ interface GlobalUndoBarProps {
   onUndo: () => void;
 }
 
-function formatUndoWindowLabel(undoWindowMs: number): string {
-  const seconds = Math.max(1, Math.round(undoWindowMs / 1000));
-  return `${seconds}s`;
-}
-
 export function GlobalUndoBar({
   actionLabel,
   pendingCount,
   undoWindowMs,
   onUndo,
 }: GlobalUndoBarProps) {
+  const { t } = useI18n();
+  const undoSeconds = Math.max(1, Math.round(undoWindowMs / 1000));
+  const undoWindowLabel = t("undo.window.seconds", { count: undoSeconds });
+
   return (
     <>
       <div className="global-undo-bar" role="status" aria-live="polite">
         <div className="global-undo-copy">
-          <strong>Pending action:</strong>
+          <strong>{t("undo.pendingAction")}</strong>
           <span>{actionLabel}</span>
           {pendingCount > 1 && (
-            <span className="global-undo-more">+{pendingCount - 1} more</span>
+            <span className="global-undo-more">
+              {t("undo.more", { count: pendingCount - 1 })}
+            </span>
           )}
         </div>
         <button type="button" className="global-undo-btn" onClick={onUndo}>
           <RotateCcw size={13} />
-          Undo ({formatUndoWindowLabel(undoWindowMs)})
+          {t("undo.button", { time: undoWindowLabel })}
         </button>
       </div>
       <style>{`

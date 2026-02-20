@@ -3,6 +3,7 @@ import { CalendarDays, CalendarRange, Plus } from "lucide-react";
 import { TaskCard } from "./TaskCard";
 import { useMemo } from "react";
 import { useTaskSubtaskStats } from "@/hooks/use-tasks";
+import { translate, useI18n } from "@/lib/i18n";
 
 interface TaskScheduleViewProps {
   view: Extract<ViewMode, "today" | "upcoming">;
@@ -29,6 +30,7 @@ export function TaskScheduleView({
   onDelete,
   onCreateClick,
 }: TaskScheduleViewProps) {
+  const { locale, t } = useI18n();
   const visibleTaskIds = useMemo(() => tasks.map((task) => task.id), [tasks]);
   const { data: subtaskStats = [] } = useTaskSubtaskStats(visibleTaskIds);
   const subtaskProgressByTaskId = useMemo(() => {
@@ -42,12 +44,14 @@ export function TaskScheduleView({
     return progressMap;
   }, [subtaskStats]);
 
-  const sections = buildSections(view, tasks);
+  const sections = buildSections(view, tasks, locale);
   const isTodayView = view === "today";
-  const title = isTodayView ? "Today" : "Upcoming";
+  const title = isTodayView
+    ? t("schedule.title.today")
+    : t("schedule.title.upcoming");
   const subtitle = isTodayView
-    ? `${tasks.length} task${tasks.length !== 1 ? "s" : ""} due now or today`
-    : `${tasks.length} task${tasks.length !== 1 ? "s" : ""} due in the next 7 days`;
+    ? t("schedule.subtitle.today", { count: tasks.length })
+    : t("schedule.subtitle.upcoming", { count: tasks.length });
 
   return (
     <div className="schedule-container">
@@ -68,16 +72,18 @@ export function TaskScheduleView({
             )}
           </div>
           <h3 className="schedule-empty-title">
-            {isTodayView ? "No tasks due today" : "No upcoming tasks"}
+            {isTodayView
+              ? t("schedule.empty.today.title")
+              : t("schedule.empty.upcoming.title")}
           </h3>
           <p className="schedule-empty-desc">
             {isTodayView
-              ? "Plan the next task and set a due time so it appears here."
-              : "Tasks with a due date in the next 7 days will show up here."}
+              ? t("schedule.empty.today.desc")
+              : t("schedule.empty.upcoming.desc")}
           </p>
           <button className="schedule-empty-action" onClick={onCreateClick}>
             <Plus size={14} />
-            Create Task
+            {t("schedule.action.createTask")}
           </button>
         </div>
       ) : (
@@ -246,15 +252,16 @@ export function TaskScheduleView({
 function buildSections(
   view: Extract<ViewMode, "today" | "upcoming">,
   tasks: Task[],
+  locale: "en" | "th",
 ): TaskSection[] {
   const sortedTasks = [...tasks].sort(compareByDueDateAscending);
   if (view === "today") {
-    return buildTodaySections(sortedTasks);
+    return buildTodaySections(sortedTasks, locale);
   }
-  return buildUpcomingSections(sortedTasks);
+  return buildUpcomingSections(sortedTasks, locale);
 }
 
-function buildTodaySections(tasks: Task[]): TaskSection[] {
+function buildTodaySections(tasks: Task[], locale: "en" | "th"): TaskSection[] {
   const todayStart = getStartOfToday();
   const todayEnd = new Date(todayStart);
   todayEnd.setDate(todayEnd.getDate() + 1);
@@ -270,15 +277,26 @@ function buildTodaySections(tasks: Task[]): TaskSection[] {
 
   const sections: TaskSection[] = [];
   if (overdueTasks.length > 0) {
-    sections.push({ id: "overdue", label: "Overdue", tasks: overdueTasks });
+    sections.push({
+      id: "overdue",
+      label: translate(locale, "schedule.section.overdue"),
+      tasks: overdueTasks,
+    });
   }
   if (dueTodayTasks.length > 0) {
-    sections.push({ id: "today", label: "Due Today", tasks: dueTodayTasks });
+    sections.push({
+      id: "today",
+      label: translate(locale, "schedule.section.dueToday"),
+      tasks: dueTodayTasks,
+    });
   }
   return sections;
 }
 
-function buildUpcomingSections(tasks: Task[]): TaskSection[] {
+function buildUpcomingSections(
+  tasks: Task[],
+  locale: "en" | "th",
+): TaskSection[] {
   const grouped = new Map<string, Task[]>();
 
   for (const task of tasks) {
@@ -295,7 +313,7 @@ function buildUpcomingSections(tasks: Task[]): TaskSection[] {
     .sort(([leftKey], [rightKey]) => leftKey.localeCompare(rightKey))
     .map(([key, groupedTasks]) => ({
       id: key,
-      label: formatDayLabel(groupedTasks[0].due_at),
+      label: formatDayLabel(groupedTasks[0].due_at, locale),
       tasks: groupedTasks.sort(compareByDueDateAscending),
     }));
 }
@@ -306,10 +324,10 @@ function getDayKey(date: Date): string {
   return `${date.getFullYear()}-${month}-${day}`;
 }
 
-function formatDayLabel(dueAt: string | null): string {
+function formatDayLabel(dueAt: string | null, locale: "en" | "th"): string {
   const date = parseDueAt(dueAt);
-  if (!date) return "No date";
-  return date.toLocaleDateString("en-US", {
+  if (!date) return translate(locale, "schedule.day.noDate");
+  return date.toLocaleDateString(locale === "th" ? "th-TH" : "en-US", {
     weekday: "short",
     month: "short",
     day: "numeric",

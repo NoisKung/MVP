@@ -127,6 +127,19 @@ export interface AppSettingRecord {
   value: string;
 }
 
+/** Supported UI locales for app chrome/system strings */
+export type AppLocale = "en" | "th";
+
+/** Persisted app locale setting (null means fallback to system locale) */
+export interface AppLocaleSetting {
+  locale: AppLocale | null;
+}
+
+/** Input for updating persisted app locale setting */
+export interface UpdateAppLocaleSettingInput {
+  locale: AppLocale;
+}
+
 /** A project entity from the database */
 export interface Project {
   id: string;

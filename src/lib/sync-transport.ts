@@ -1,19 +1,28 @@
 import { parseSyncApiError } from "./sync-contract";
 import type { SyncTransport } from "./sync-runner";
-import type { SyncProvider } from "./types";
+import { translate } from "./i18n";
+import type { AppLocale, SyncProvider } from "./types";
 
 const DEFAULT_SYNC_TIMEOUT_MS = 15_000;
+export const SYNC_TRANSPORT_ERROR_CODES = {
+  INVALID_JSON: "SYNC_TRANSPORT_INVALID_JSON",
+  TIMEOUT: "SYNC_TRANSPORT_TIMEOUT",
+  REQUIRE_BOTH_URLS: "SYNC_TRANSPORT_REQUIRE_BOTH_URLS",
+  UNEXPECTED: "SYNC_TRANSPORT_UNEXPECTED",
+} as const;
 
 interface HttpTransportOptions {
   pushUrl: string;
   pullUrl: string;
   timeoutMs?: number;
+  locale?: AppLocale;
 }
 
 interface SyncTransportConfigOptions {
   pushUrl: string | null | undefined;
   pullUrl: string | null | undefined;
   timeoutMs?: number;
+  locale?: AppLocale;
 }
 
 export type ResolvedSyncTransportStatus =
@@ -65,12 +74,38 @@ function isManagedProviderAvailable(
   return true;
 }
 
-function getProviderLabel(provider: SyncProvider): string {
-  if (provider === "google_appdata") return "Google AppData";
-  if (provider === "onedrive_approot") return "OneDrive AppRoot";
-  if (provider === "icloud_cloudkit") return "iCloud CloudKit";
-  if (provider === "solostack_cloud_aws") return "SoloStack Cloud (AWS)";
-  return "Provider neutral";
+function getLocalizedProviderLabel(
+  provider: SyncProvider,
+  locale: AppLocale,
+): string {
+  if (provider === "google_appdata") {
+    return translate(
+      locale,
+      "settings.sync.provider.capability.google_appdata.label",
+    );
+  }
+  if (provider === "onedrive_approot") {
+    return translate(
+      locale,
+      "settings.sync.provider.capability.onedrive_approot.label",
+    );
+  }
+  if (provider === "icloud_cloudkit") {
+    return translate(
+      locale,
+      "settings.sync.provider.capability.icloud_cloudkit.label",
+    );
+  }
+  if (provider === "solostack_cloud_aws") {
+    return translate(
+      locale,
+      "settings.sync.provider.capability.solostack_cloud_aws.label",
+    );
+  }
+  return translate(
+    locale,
+    "settings.sync.provider.capability.provider_neutral.label",
+  );
 }
 
 function getErrorMessage(error: unknown): string {
@@ -80,7 +115,7 @@ function getErrorMessage(error: unknown): string {
   if (typeof error === "string" && error.trim()) {
     return error;
   }
-  return "Unexpected sync transport error.";
+  return SYNC_TRANSPORT_ERROR_CODES.UNEXPECTED;
 }
 
 async function parseJsonPayload(response: Response): Promise<unknown> {
@@ -89,7 +124,7 @@ async function parseJsonPayload(response: Response): Promise<unknown> {
   try {
     return JSON.parse(text) as unknown;
   } catch {
-    throw new Error("Sync server returned invalid JSON.");
+    throw new Error(SYNC_TRANSPORT_ERROR_CODES.INVALID_JSON);
   }
 }
 
@@ -97,6 +132,7 @@ async function postJsonWithTimeout(input: {
   url: string;
   payload: unknown;
   timeoutMs: number;
+  locale: AppLocale;
 }): Promise<unknown> {
   const controller = new AbortController();
   const timeoutHandle = window.setTimeout(() => {
@@ -122,7 +158,7 @@ async function postJsonWithTimeout(input: {
     throw new Error(`[${parsedError.code}] ${parsedError.message}`);
   } catch (error) {
     if (error instanceof DOMException && error.name === "AbortError") {
-      throw new Error("Sync request timed out.");
+      throw new Error(SYNC_TRANSPORT_ERROR_CODES.TIMEOUT);
     }
     throw new Error(getErrorMessage(error));
   } finally {
@@ -133,10 +169,11 @@ async function postJsonWithTimeout(input: {
 export function createHttpSyncTransport(
   options: HttpTransportOptions,
 ): SyncTransport {
+  const locale = options.locale ?? "en";
   const pushUrl = normalizeEndpoint(options.pushUrl);
   const pullUrl = normalizeEndpoint(options.pullUrl);
   if (!pushUrl || !pullUrl) {
-    throw new Error("Both pushUrl and pullUrl are required.");
+    throw new Error(SYNC_TRANSPORT_ERROR_CODES.REQUIRE_BOTH_URLS);
   }
 
   const timeoutMs =
@@ -150,12 +187,14 @@ export function createHttpSyncTransport(
         url: pushUrl,
         payload,
         timeoutMs,
+        locale,
       }),
     pull: async (payload: unknown) =>
       postJsonWithTimeout({
         url: pullUrl,
         payload,
         timeoutMs,
+        locale,
       }),
   };
 }
@@ -163,6 +202,7 @@ export function createHttpSyncTransport(
 export function createSyncTransportFromConfig(
   options: SyncTransportConfigOptions,
 ): SyncTransport | null {
+  const locale = options.locale ?? "en";
   const pushUrl = normalizeEndpoint(options.pushUrl);
   const pullUrl = normalizeEndpoint(options.pullUrl);
   if (!pushUrl || !pullUrl) {
@@ -175,12 +215,14 @@ export function createSyncTransportFromConfig(
     pushUrl,
     pullUrl,
     timeoutMs: options.timeoutMs,
+    locale,
   });
 }
 
 export function resolveSyncTransportConfig(
   input: ResolveSyncTransportInput,
 ): ResolvedSyncTransportConfig {
+  const locale = input.locale ?? "en";
   const pushUrl = normalizeEndpoint(input.pushUrl);
   const pullUrl = normalizeEndpoint(input.pullUrl);
   const hasPushUrl = Boolean(pushUrl);
@@ -190,14 +232,16 @@ export function resolveSyncTransportConfig(
   const providerAvailable = providerManaged
     ? isManagedProviderAvailable(input.providerConfig)
     : true;
-  const providerLabel = getProviderLabel(input.provider);
+  const providerLabel = getLocalizedProviderLabel(input.provider, locale);
 
   if (!providerAvailable) {
     return {
       status: "provider_unavailable",
       provider: input.provider,
       transport: null,
-      warning: `${providerLabel} is unavailable on this device/account. Sync switched to offline-safe mode.`,
+      warning: translate(locale, "sync.transport.warning.providerUnavailable", {
+        provider: providerLabel,
+      }),
     };
   }
 
@@ -207,7 +251,11 @@ export function resolveSyncTransportConfig(
         status: "provider_unavailable",
         provider: input.provider,
         transport: null,
-        warning: `${providerLabel} connector is not configured yet. Add endpoints or switch provider.`,
+        warning: translate(
+          locale,
+          "sync.transport.warning.providerNotConfigured",
+          { provider: providerLabel },
+        ),
       };
     }
     return {
@@ -223,7 +271,7 @@ export function resolveSyncTransportConfig(
       status: "invalid_config",
       provider: input.provider,
       transport: null,
-      warning: "Push and Pull URLs must both be set.",
+      warning: translate(locale, "settings.sync.config.error.requireBoth"),
     };
   }
 
@@ -235,7 +283,7 @@ export function resolveSyncTransportConfig(
       status: "invalid_config",
       provider: input.provider,
       transport: null,
-      warning: "Push/Pull URLs must be valid http(s) URLs.",
+      warning: translate(locale, "sync.transport.error.invalidUrls"),
     };
   }
 
@@ -246,6 +294,7 @@ export function resolveSyncTransportConfig(
       pushUrl: resolvedPushUrl,
       pullUrl: resolvedPullUrl,
       timeoutMs: input.timeoutMs,
+      locale,
     }),
     warning: null,
   };

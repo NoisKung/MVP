@@ -1,4 +1,5 @@
 import { useEffect } from "react";
+import { useI18n } from "@/lib/i18n";
 
 interface ShortcutHelpModalProps {
   isOpen: boolean;
@@ -10,17 +11,39 @@ interface ShortcutRow {
   description: string;
 }
 
-const SHORTCUT_ROWS: ShortcutRow[] = [
-  { combo: "Cmd/Ctrl + N", description: "Create a new task" },
-  { combo: "Cmd/Ctrl + K", description: "Open command palette" },
-  { combo: "Cmd/Ctrl + ,", description: "Open Settings" },
-  { combo: "Cmd/Ctrl + Shift + C", description: "Open Conflict Center" },
-  { combo: "Cmd/Ctrl + Shift + S", description: "Run Sync now" },
-  { combo: "?", description: "Open keyboard shortcut help" },
-  { combo: "Esc", description: "Close modal/palette/form" },
-];
-
 export function ShortcutHelpModal({ isOpen, onClose }: ShortcutHelpModalProps) {
+  const { t } = useI18n();
+  const shortcutRows: ShortcutRow[] = [
+    {
+      combo: t("shortcutHelp.combo.newTask"),
+      description: t("shortcutHelp.row.newTask"),
+    },
+    {
+      combo: t("shortcutHelp.combo.commandPalette"),
+      description: t("shortcutHelp.row.commandPalette"),
+    },
+    {
+      combo: t("shortcutHelp.combo.openSettings"),
+      description: t("shortcutHelp.row.openSettings"),
+    },
+    {
+      combo: t("shortcutHelp.combo.openConflictCenter"),
+      description: t("shortcutHelp.row.openConflictCenter"),
+    },
+    {
+      combo: t("shortcutHelp.combo.syncNow"),
+      description: t("shortcutHelp.row.syncNow"),
+    },
+    {
+      combo: t("shortcutHelp.combo.openShortcutHelp"),
+      description: t("shortcutHelp.row.openShortcutHelp"),
+    },
+    {
+      combo: t("shortcutHelp.combo.closeUi"),
+      description: t("shortcutHelp.row.closeUi"),
+    },
+  ];
+
   useEffect(() => {
     if (!isOpen) return;
 
@@ -49,24 +72,22 @@ export function ShortcutHelpModal({ isOpen, onClose }: ShortcutHelpModalProps) {
         className="shortcut-help-panel"
         role="dialog"
         aria-modal="true"
-        aria-label="Keyboard shortcuts"
+        aria-label={t("shortcutHelp.aria")}
       >
         <div className="shortcut-help-head">
-          <h2>Keyboard Shortcuts</h2>
+          <h2>{t("shortcutHelp.title")}</h2>
           <button
             type="button"
             className="shortcut-help-close"
             onClick={onClose}
-            aria-label="Close shortcut help"
+            aria-label={t("shortcutHelp.closeAria")}
           >
-            Close
+            {t("shortcutHelp.close")}
           </button>
         </div>
-        <p className="shortcut-help-subtitle">
-          Power actions for faster daily workflow.
-        </p>
+        <p className="shortcut-help-subtitle">{t("shortcutHelp.subtitle")}</p>
         <div className="shortcut-help-list">
-          {SHORTCUT_ROWS.map((row) => (
+          {shortcutRows.map((row) => (
             <div className="shortcut-help-row" key={row.combo}>
               <kbd>{row.combo}</kbd>
               <span>{row.description}</span>

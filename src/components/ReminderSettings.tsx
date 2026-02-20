@@ -3,6 +3,7 @@ import {
   Bell,
   ShieldCheck,
   HardDrive,
+  Globe2,
   Cloud,
   CloudOff,
   AlertTriangle,
@@ -34,6 +35,7 @@ import {
   normalizeManualMergeText,
 } from "@/lib/manual-merge";
 import type {
+  AppLocale,
   BackupRestorePreflight,
   ResolveSyncConflictInput,
   SyncConflictEventRecord,
@@ -48,11 +50,16 @@ import type {
   UpdateSyncProviderSettingsInput,
   UpdateSyncRuntimeSettingsInput,
 } from "@/lib/types";
+import { translate, useI18n } from "@/lib/i18n";
+import { localizeErrorMessage } from "@/lib/error-message";
 import { ManualMergeEditor } from "./ManualMergeEditor";
 
 interface ReminderSettingsProps {
   remindersEnabled: boolean;
   onRemindersEnabledChange: (enabled: boolean) => void;
+  appLocale: AppLocale;
+  appLocaleSaving: boolean;
+  onSaveAppLocale: (locale: AppLocale) => Promise<void>;
   syncStatus: SyncStatus;
   syncStatusLabel: string;
   syncLastSyncedAt: string | null;
@@ -123,68 +130,143 @@ const MOBILE_RUNTIME_DEFAULTS = {
   max_pull_pages: 3,
 } as const;
 
-const SYNC_RUNTIME_PROFILE_OPTIONS: Array<{
-  value: SyncRuntimeProfileSetting;
-  label: string;
-}> = [
-  { value: "desktop", label: "Desktop" },
-  { value: "mobile_beta", label: "Mobile Beta" },
-  { value: "custom", label: "Custom" },
+const SYNC_RUNTIME_PROFILE_OPTION_VALUES: SyncRuntimeProfileSetting[] = [
+  "desktop",
+  "mobile_beta",
+  "custom",
 ];
 
-const SYNC_PROVIDER_CAPABILITIES: Record<SyncProvider, SyncProviderCapability> =
-  {
+function getSyncProviderCapabilities(
+  locale: AppLocale,
+): Record<SyncProvider, SyncProviderCapability> {
+  return {
     provider_neutral: {
-      label: "Provider Neutral",
-      summary: "Use custom push/pull endpoints you control.",
-      authRequirement: "No provider account required",
+      label: translate(
+        locale,
+        "settings.sync.provider.capability.provider_neutral.label",
+      ),
+      summary: translate(
+        locale,
+        "settings.sync.provider.capability.provider_neutral.summary",
+      ),
+      authRequirement: translate(
+        locale,
+        "settings.sync.provider.capability.provider_neutral.auth",
+      ),
       endpointMode: "custom",
       warnings: [
-        "You must set both Push URL and Pull URL.",
-        "Best fit for self-hosted sync gateways.",
+        translate(
+          locale,
+          "settings.sync.provider.capability.provider_neutral.warning1",
+        ),
+        translate(
+          locale,
+          "settings.sync.provider.capability.provider_neutral.warning2",
+        ),
       ],
     },
     google_appdata: {
-      label: "Google AppData",
-      summary: "Managed Google Drive appDataFolder connector.",
-      authRequirement: "Google OAuth required",
+      label: translate(
+        locale,
+        "settings.sync.provider.capability.google_appdata.label",
+      ),
+      summary: translate(
+        locale,
+        "settings.sync.provider.capability.google_appdata.summary",
+      ),
+      authRequirement: translate(
+        locale,
+        "settings.sync.provider.capability.google_appdata.auth",
+      ),
       endpointMode: "managed",
       warnings: [
-        "Managed connector rollout is in progress; custom URLs are still used now.",
-        "Subject to Google API quota/rate limits.",
+        translate(
+          locale,
+          "settings.sync.provider.capability.google_appdata.warning1",
+        ),
+        translate(
+          locale,
+          "settings.sync.provider.capability.google_appdata.warning2",
+        ),
       ],
     },
     onedrive_approot: {
-      label: "Microsoft OneDrive AppRoot",
-      summary: "Managed OneDrive AppRoot connector.",
-      authRequirement: "Microsoft OAuth required",
+      label: translate(
+        locale,
+        "settings.sync.provider.capability.onedrive_approot.label",
+      ),
+      summary: translate(
+        locale,
+        "settings.sync.provider.capability.onedrive_approot.summary",
+      ),
+      authRequirement: translate(
+        locale,
+        "settings.sync.provider.capability.onedrive_approot.auth",
+      ),
       endpointMode: "managed",
       warnings: [
-        "Managed connector rollout is in progress; custom URLs are still used now.",
-        "Graph API throttling may delay sync retries.",
+        translate(
+          locale,
+          "settings.sync.provider.capability.onedrive_approot.warning1",
+        ),
+        translate(
+          locale,
+          "settings.sync.provider.capability.onedrive_approot.warning2",
+        ),
       ],
     },
     icloud_cloudkit: {
-      label: "Apple iCloud CloudKit",
-      summary: "Managed CloudKit-backed connector.",
-      authRequirement: "Apple ID + iCloud permission required",
+      label: translate(
+        locale,
+        "settings.sync.provider.capability.icloud_cloudkit.label",
+      ),
+      summary: translate(
+        locale,
+        "settings.sync.provider.capability.icloud_cloudkit.summary",
+      ),
+      authRequirement: translate(
+        locale,
+        "settings.sync.provider.capability.icloud_cloudkit.auth",
+      ),
       endpointMode: "managed",
       warnings: [
-        "Managed connector rollout is in progress; custom URLs are still used now.",
-        "Platform/account constraints may apply outside Apple ecosystem.",
+        translate(
+          locale,
+          "settings.sync.provider.capability.icloud_cloudkit.warning1",
+        ),
+        translate(
+          locale,
+          "settings.sync.provider.capability.icloud_cloudkit.warning2",
+        ),
       ],
     },
     solostack_cloud_aws: {
-      label: "SoloStack Cloud (AWS)",
-      summary: "Managed SoloStack-hosted cloud endpoints.",
-      authRequirement: "SoloStack Cloud account required",
+      label: translate(
+        locale,
+        "settings.sync.provider.capability.solostack_cloud_aws.label",
+      ),
+      summary: translate(
+        locale,
+        "settings.sync.provider.capability.solostack_cloud_aws.summary",
+      ),
+      authRequirement: translate(
+        locale,
+        "settings.sync.provider.capability.solostack_cloud_aws.auth",
+      ),
       endpointMode: "managed",
       warnings: [
-        "Availability may vary by region during rollout.",
-        "Network outages fall back to local-only retries.",
+        translate(
+          locale,
+          "settings.sync.provider.capability.solostack_cloud_aws.warning1",
+        ),
+        translate(
+          locale,
+          "settings.sync.provider.capability.solostack_cloud_aws.warning2",
+        ),
       ],
     },
   };
+}
 
 function getRuntimeDefaultsByProfile(
   profile: SyncRuntimeProfileSetting,
@@ -197,20 +279,21 @@ function getRuntimeDefaultsByProfile(
     : DESKTOP_RUNTIME_DEFAULTS;
 }
 
-function getRuntimeProfileLabel(profile: SyncRuntimeProfileSetting): string {
-  if (profile === "mobile_beta") return "Mobile Beta";
-  if (profile === "custom") return "Custom";
-  return "Desktop";
+function getRuntimeProfileLabel(
+  profile: SyncRuntimeProfileSetting,
+  locale: AppLocale,
+): string {
+  if (profile === "mobile_beta") {
+    return translate(locale, "settings.sync.runtime.profile.mobile");
+  }
+  if (profile === "custom") {
+    return translate(locale, "settings.sync.runtime.profile.custom");
+  }
+  return translate(locale, "settings.sync.runtime.profile.desktop");
 }
 
-function getErrorMessage(error: unknown): string {
-  if (error instanceof Error && error.message.trim()) {
-    return error.message;
-  }
-  if (typeof error === "string" && error.trim()) {
-    return error;
-  }
-  return "Unable to complete this request.";
+function getErrorMessage(error: unknown, locale: AppLocale): string {
+  return localizeErrorMessage(error, locale, "common.error.unableRequest");
 }
 
 function renderSyncStatusIcon(status: SyncStatus) {
@@ -229,31 +312,56 @@ function renderSyncStatusIcon(status: SyncStatus) {
   return <CheckCircle2 size={14} />;
 }
 
-function formatSyncDateTime(value: string | null): string {
-  if (!value) return "Never";
+function formatSyncDateTime(value: string | null, locale: AppLocale): string {
+  if (!value) return translate(locale, "common.never");
   const parsedDate = new Date(value);
-  if (Number.isNaN(parsedDate.getTime())) return "Unknown";
+  if (Number.isNaN(parsedDate.getTime())) {
+    return translate(locale, "common.unknown");
+  }
   return new Intl.DateTimeFormat(undefined, {
     dateStyle: "medium",
     timeStyle: "short",
   }).format(parsedDate);
 }
 
-function formatDurationMs(value: number | null): string {
-  if (value === null || !Number.isFinite(value)) return "N/A";
-  if (value < 1000) return `${value} ms`;
-  return `${(value / 1000).toFixed(2)} s`;
+function formatDurationMs(value: number | null, locale: AppLocale): string {
+  if (value === null || !Number.isFinite(value)) {
+    return translate(locale, "settings.sync.duration.na");
+  }
+  if (value < 1000) {
+    return translate(locale, "settings.sync.duration.ms", { value });
+  }
+  return translate(locale, "settings.sync.duration.seconds", {
+    value: (value / 1000).toFixed(2),
+  });
 }
 
-function formatResolutionDurationMs(value: number | null): string {
-  if (value === null || !Number.isFinite(value)) return "N/A";
-  if (value < 1000) return `${value} ms`;
+function formatResolutionDurationMs(
+  value: number | null,
+  locale: AppLocale,
+): string {
+  if (value === null || !Number.isFinite(value)) {
+    return translate(locale, "settings.sync.duration.na");
+  }
+  if (value < 1000) {
+    return translate(locale, "settings.sync.duration.ms", { value });
+  }
   const seconds = value / 1000;
-  if (seconds < 60) return `${seconds.toFixed(1)} s`;
+  if (seconds < 60) {
+    return translate(locale, "settings.sync.duration.seconds", {
+      value: seconds.toFixed(1),
+    });
+  }
   const minutes = seconds / 60;
-  if (minutes < 60) return `${minutes.toFixed(1)} min`;
+  if (minutes < 60) {
+    return translate(locale, "settings.sync.duration.minutes", {
+      value: minutes.toFixed(1),
+    });
+  }
   const hours = minutes / 60;
-  return `${hours.toFixed(1)} h`;
+  return translate(locale, "settings.sync.duration.hours", {
+    value: hours.toFixed(1),
+  });
 }
 
 function normalizeUrlDraft(value: string): string | null {
@@ -280,25 +388,44 @@ function parseIntegerDraft(value: string): number | null {
 
 function formatConflictTypeLabel(
   conflictType: SyncConflictRecord["conflict_type"],
+  locale: AppLocale,
 ) {
-  if (conflictType === "delete_vs_update") return "Delete vs Update";
-  if (conflictType === "notes_collision") return "Notes Collision";
-  if (conflictType === "validation_error") return "Validation Error";
-  return "Field Conflict";
+  if (conflictType === "delete_vs_update") {
+    return translate(locale, "conflictCenter.type.deleteVsUpdate");
+  }
+  if (conflictType === "notes_collision") {
+    return translate(locale, "conflictCenter.type.notesCollision");
+  }
+  if (conflictType === "validation_error") {
+    return translate(locale, "conflictCenter.type.validationError");
+  }
+  return translate(locale, "conflictCenter.type.fieldConflict");
 }
 
 function formatConflictEventLabel(
   eventType: SyncConflictEventRecord["event_type"],
+  locale: AppLocale,
 ) {
-  if (eventType === "detected") return "Detected";
-  if (eventType === "resolved") return "Resolved";
-  if (eventType === "ignored") return "Ignored";
-  if (eventType === "retried") return "Retried";
-  return "Exported";
+  if (eventType === "detected") {
+    return translate(locale, "conflictCenter.event.detected");
+  }
+  if (eventType === "resolved") {
+    return translate(locale, "conflictCenter.event.resolved");
+  }
+  if (eventType === "ignored") {
+    return translate(locale, "conflictCenter.event.ignored");
+  }
+  if (eventType === "retried") {
+    return translate(locale, "conflictCenter.event.retried");
+  }
+  return translate(locale, "conflictCenter.event.exported");
 }
 
-function formatPayloadJson(payloadJson: string | null): string {
-  if (!payloadJson) return "(empty)";
+function formatPayloadJson(
+  payloadJson: string | null,
+  locale: AppLocale,
+): string {
+  if (!payloadJson) return translate(locale, "conflictCenter.payload.empty");
   try {
     const parsed = JSON.parse(payloadJson) as unknown;
     return JSON.stringify(parsed, null, 2);
@@ -307,50 +434,73 @@ function formatPayloadJson(payloadJson: string | null): string {
   }
 }
 
-function buildRestoreConfirmationMessage(preflight: BackupRestorePreflight) {
+function buildRestoreConfirmationMessage(
+  preflight: BackupRestorePreflight,
+  locale: AppLocale,
+) {
   const forceReasonSegments: string[] = [];
   if (preflight.pending_outbox_changes > 0) {
     forceReasonSegments.push(
-      `${preflight.pending_outbox_changes} pending outbox change(s)`,
+      `${preflight.pending_outbox_changes} ${translate(
+        locale,
+        "settings.backup.reason.pendingOutbox",
+      )}`,
     );
   }
   if (preflight.open_conflicts > 0) {
-    forceReasonSegments.push(`${preflight.open_conflicts} open conflict(s)`);
+    forceReasonSegments.push(
+      `${preflight.open_conflicts} ${translate(
+        locale,
+        "settings.backup.reason.openConflicts",
+      )}`,
+    );
   }
 
   if (forceReasonSegments.length === 0) {
-    return "Restore will replace all local data and reset sync state (outbox/conflicts). Continue?";
+    return translate(locale, "settings.backup.confirm.replaceData");
   }
 
   return [
-    `Restore requires force because ${forceReasonSegments.join(" and ")} currently exist.`,
-    "Force restore will discard pending outbox changes and clear open conflicts.",
-    "Continue with force restore?",
+    translate(locale, "settings.backup.confirm.forceReason", {
+      reason: forceReasonSegments.join(
+        ` ${translate(locale, "settings.backup.reason.and")} `,
+      ),
+    }),
+    translate(locale, "settings.backup.confirm.forceDiscard"),
+    translate(locale, "settings.backup.confirm.forceContinue"),
   ].join("\n");
 }
 
 function buildRestoreForceReasonLabel(
   preflight: BackupRestorePreflight,
+  locale: AppLocale,
 ): string {
   const reasonSegments: string[] = [];
   if (preflight.pending_outbox_changes > 0) {
-    reasonSegments.push("pending outbox changes");
+    reasonSegments.push(
+      translate(locale, "settings.backup.reason.pendingOutbox"),
+    );
   }
   if (preflight.open_conflicts > 0) {
-    reasonSegments.push("open conflicts");
+    reasonSegments.push(
+      translate(locale, "settings.backup.reason.openConflicts"),
+    );
   }
   if (reasonSegments.length === 0) {
-    return "active restore guardrails";
+    return translate(locale, "settings.backup.reason.activeGuardrails");
   }
   if (reasonSegments.length === 1) {
     return reasonSegments[0];
   }
-  return `${reasonSegments[0]} and ${reasonSegments[1]}`;
+  return `${reasonSegments[0]} ${translate(locale, "settings.backup.reason.and")} ${reasonSegments[1]}`;
 }
 
 export function ReminderSettings({
   remindersEnabled,
   onRemindersEnabledChange,
+  appLocale,
+  appLocaleSaving,
+  onSaveAppLocale,
   syncStatus,
   syncStatusLabel,
   syncLastSyncedAt,
@@ -388,9 +538,15 @@ export function ReminderSettings({
   onQueueRestoreLatestBackup,
   onQueueImportBackup,
 }: ReminderSettingsProps) {
+  const { locale, t } = useI18n();
   const [permissionState, setPermissionState] =
     useState<NotificationPermissionState>("unknown");
   const [isBusy, setIsBusy] = useState(false);
+  const [appLocaleDraft, setAppLocaleDraft] = useState<AppLocale>("en");
+  const [appLocaleFeedback, setAppLocaleFeedback] = useState<string | null>(
+    null,
+  );
+  const [appLocaleError, setAppLocaleError] = useState<string | null>(null);
   const [permissionFeedback, setPermissionFeedback] = useState<string | null>(
     null,
   );
@@ -452,11 +608,23 @@ export function ReminderSettings({
   const syncConflictObservability = useSyncConflictObservability();
   const conflictObservability = syncConflictObservability.data;
   const backupPreflight = backupRestorePreflight.data;
+  const syncProviderCapabilities = useMemo(
+    () => getSyncProviderCapabilities(locale),
+    [locale],
+  );
   const selectedProviderCapability = useMemo(
     () =>
-      SYNC_PROVIDER_CAPABILITIES[syncProviderDraft] ??
-      SYNC_PROVIDER_CAPABILITIES.provider_neutral,
-    [syncProviderDraft],
+      syncProviderCapabilities[syncProviderDraft] ??
+      syncProviderCapabilities.provider_neutral,
+    [syncProviderCapabilities, syncProviderDraft],
+  );
+  const runtimeProfileOptions = useMemo(
+    () =>
+      SYNC_RUNTIME_PROFILE_OPTION_VALUES.map((value) => ({
+        value,
+        label: getRuntimeProfileLabel(value, locale),
+      })),
+    [locale],
   );
   const runtimeDraftNumbers = useMemo(
     () => ({
@@ -491,28 +659,28 @@ export function ReminderSettings({
       pullLimit === null ||
       maxPullPages === null
     ) {
-      return "All runtime fields must be valid integers.";
+      return t("settings.sync.runtime.validation.invalidInt");
     }
     if (autoSyncIntervalSeconds < 15 || autoSyncIntervalSeconds > 3600) {
-      return "Foreground interval must be between 15 and 3600 seconds.";
+      return t("settings.sync.runtime.validation.foregroundRange");
     }
     if (
       backgroundSyncIntervalSeconds < 30 ||
       backgroundSyncIntervalSeconds > 7200
     ) {
-      return "Background interval must be between 30 and 7200 seconds.";
+      return t("settings.sync.runtime.validation.backgroundRange");
     }
     if (backgroundSyncIntervalSeconds < autoSyncIntervalSeconds) {
-      return "Background interval must be >= foreground interval.";
+      return t("settings.sync.runtime.validation.backgroundGte");
     }
     if (pushLimit < 20 || pushLimit > 500) {
-      return "Push limit must be between 20 and 500.";
+      return t("settings.sync.runtime.validation.pushRange");
     }
     if (pullLimit < 20 || pullLimit > 500) {
-      return "Pull limit must be between 20 and 500.";
+      return t("settings.sync.runtime.validation.pullRange");
     }
     if (maxPullPages < 1 || maxPullPages > 20) {
-      return "Max pull pages must be between 1 and 20.";
+      return t("settings.sync.runtime.validation.maxPullPagesRange");
     }
 
     return null;
@@ -526,20 +694,24 @@ export function ReminderSettings({
         Math.max(1, runtimeDraftNumbers.maxPullPages ?? 5);
 
     if (foreground <= 30 || background <= 120) {
-      return "High battery/network impact: short intervals can drain battery faster.";
+      return t("settings.sync.runtime.impact.highBattery");
     }
     if (loadPerCycle >= 1200) {
-      return "High data load: large push/pull limits can increase transfer cost.";
+      return t("settings.sync.runtime.impact.highData");
     }
     if (foreground <= 60 || background <= 300) {
-      return "Balanced profile: good responsiveness with moderate resource usage.";
+      return t("settings.sync.runtime.impact.balanced");
     }
-    return "Low impact profile: fewer sync cycles with slower propagation.";
-  }, [runtimeDraftNumbers]);
+    return t("settings.sync.runtime.impact.low");
+  }, [runtimeDraftNumbers, t]);
 
   useEffect(() => {
     void refreshPermissionState(setPermissionState);
   }, []);
+
+  useEffect(() => {
+    setAppLocaleDraft(appLocale);
+  }, [appLocale]);
 
   useEffect(() => {
     setSyncProviderDraft(syncProvider);
@@ -614,8 +786,8 @@ export function ReminderSettings({
       setPermissionState(nextState);
       setPermissionFeedback(
         nextState === "granted"
-          ? "Notifications are enabled."
-          : "Permission is not granted. You may need OS settings to allow notifications.",
+          ? t("settings.permission.feedback.enabled")
+          : t("settings.permission.feedback.notGranted"),
       );
     } finally {
       setIsBusy(false);
@@ -628,9 +800,7 @@ export function ReminderSettings({
     try {
       const nextState = await resetReminderPermissionAndHistory();
       setPermissionState(nextState);
-      setPermissionFeedback(
-        "Permission cache and reminder history were reset. Existing reminders can notify again.",
-      );
+      setPermissionFeedback(t("settings.permission.feedback.reset"));
     } finally {
       setIsBusy(false);
     }
@@ -657,11 +827,11 @@ export function ReminderSettings({
   } | null> => {
     const preflight = await loadLatestRestorePreflight();
     if (!preflight) {
-      setBackupError("Restore preflight is unavailable. Please try again.");
+      setBackupError(t("settings.backup.preflight.unavailable"));
       return null;
     }
 
-    const confirmMessage = buildRestoreConfirmationMessage(preflight);
+    const confirmMessage = buildRestoreConfirmationMessage(preflight, locale);
     if (!window.confirm(confirmMessage)) {
       return null;
     }
@@ -690,10 +860,13 @@ export function ReminderSettings({
       window.setTimeout(() => URL.revokeObjectURL(url), 0);
 
       setBackupFeedback(
-        `Backup exported successfully (${payload.data.tasks.length} tasks, ${payload.data.projects.length} projects).`,
+        t("settings.backup.feedback.exported", {
+          tasks: payload.data.tasks.length,
+          projects: payload.data.projects.length,
+        }),
       );
     } catch (error) {
-      setBackupError(getErrorMessage(error));
+      setBackupError(getErrorMessage(error, locale));
     }
   };
 
@@ -715,11 +888,9 @@ export function ReminderSettings({
         force: confirmation.force,
         sourceName: selectedFile.name,
       });
-      setBackupFeedback(
-        "Restore from file queued. Undo is available for 5 seconds.",
-      );
+      setBackupFeedback(t("settings.backup.feedback.restoreFileQueued"));
     } catch (error) {
-      setBackupError(getErrorMessage(error));
+      setBackupError(getErrorMessage(error, locale));
     }
   };
 
@@ -734,11 +905,9 @@ export function ReminderSettings({
       await onQueueRestoreLatestBackup({
         force: confirmation.force,
       });
-      setBackupFeedback(
-        "Restore latest backup queued. Undo is available for 5 seconds.",
-      );
+      setBackupFeedback(t("settings.backup.feedback.restoreLatestQueued"));
     } catch (error) {
-      setBackupError(getErrorMessage(error));
+      setBackupError(getErrorMessage(error, locale));
     }
   };
 
@@ -757,18 +926,16 @@ export function ReminderSettings({
     const hasPullUrl = Boolean(nextPullUrl);
 
     if (hasPushUrl !== hasPullUrl) {
-      setSyncConfigError(
-        "Set both push URL and pull URL, or leave both empty.",
-      );
+      setSyncConfigError(t("settings.sync.config.error.requireBoth"));
       return;
     }
 
     if (nextPushUrl && !isValidHttpUrl(nextPushUrl)) {
-      setSyncConfigError("Push URL must be a valid http(s) URL.");
+      setSyncConfigError(t("settings.sync.config.error.invalidPush"));
       return;
     }
     if (nextPullUrl && !isValidHttpUrl(nextPullUrl)) {
-      setSyncConfigError("Pull URL must be a valid http(s) URL.");
+      setSyncConfigError(t("settings.sync.config.error.invalidPull"));
       return;
     }
 
@@ -779,11 +946,28 @@ export function ReminderSettings({
       });
       setSyncConfigFeedback(
         nextPushUrl
-          ? "Sync endpoints were saved."
-          : "Sync endpoints were cleared. App is now local-only.",
+          ? t("settings.sync.config.feedback.saved")
+          : t("settings.sync.config.feedback.cleared"),
       );
     } catch (error) {
-      setSyncConfigError(getErrorMessage(error));
+      setSyncConfigError(getErrorMessage(error, locale));
+    }
+  };
+
+  const handleSaveAppLocaleDraft = async () => {
+    setAppLocaleFeedback(null);
+    setAppLocaleError(null);
+
+    if (appLocaleDraft === appLocale) {
+      setAppLocaleError(t("settings.language.error.same"));
+      return;
+    }
+
+    try {
+      await onSaveAppLocale(appLocaleDraft);
+      setAppLocaleFeedback(t("settings.language.saved"));
+    } catch (error) {
+      setAppLocaleError(getErrorMessage(error, locale));
     }
   };
 
@@ -806,8 +990,8 @@ export function ReminderSettings({
     setSyncProviderError(null);
 
     const providerCapability =
-      SYNC_PROVIDER_CAPABILITIES[syncProviderDraft] ??
-      SYNC_PROVIDER_CAPABILITIES.provider_neutral;
+      syncProviderCapabilities[syncProviderDraft] ??
+      syncProviderCapabilities.provider_neutral;
     const nextProviderConfig: Record<string, unknown> = {
       ...(syncProviderConfig ?? {}),
       endpoint_mode: providerCapability.endpointMode,
@@ -819,9 +1003,9 @@ export function ReminderSettings({
         provider: syncProviderDraft,
         provider_config: nextProviderConfig,
       });
-      setSyncProviderFeedback("Sync provider was saved.");
+      setSyncProviderFeedback(t("settings.sync.provider.feedback.saved"));
     } catch (error) {
-      setSyncProviderError(getErrorMessage(error));
+      setSyncProviderError(getErrorMessage(error, locale));
     }
   };
 
@@ -838,9 +1022,9 @@ export function ReminderSettings({
       syncRuntimePreset === "mobile" ? "mobile_beta" : "desktop";
     applyRuntimeDefaults(recommendedProfile);
     setSyncRuntimeFeedback(
-      `Runtime reset to recommended ${getRuntimeProfileLabel(
-        recommendedProfile,
-      )} profile.`,
+      t("settings.sync.runtime.feedback.resetRecommended", {
+        profile: getRuntimeProfileLabel(recommendedProfile, locale),
+      }),
     );
   };
 
@@ -867,7 +1051,7 @@ export function ReminderSettings({
       pullLimit === null ||
       maxPullPages === null
     ) {
-      setSyncRuntimeError("Runtime values are incomplete.");
+      setSyncRuntimeError(t("settings.sync.runtime.validation.incomplete"));
       return;
     }
 
@@ -881,12 +1065,12 @@ export function ReminderSettings({
         runtime_profile: syncRuntimeProfileDraft,
       });
       setSyncRuntimeFeedback(
-        `Sync runtime profile (${getRuntimeProfileLabel(
-          syncRuntimeProfileDraft,
-        )}) was saved.`,
+        t("settings.sync.runtime.feedback.saved", {
+          profile: getRuntimeProfileLabel(syncRuntimeProfileDraft, locale),
+        }),
       );
     } catch (error) {
-      setSyncRuntimeError(getErrorMessage(error));
+      setSyncRuntimeError(getErrorMessage(error, locale));
     }
   };
 
@@ -905,22 +1089,18 @@ export function ReminderSettings({
       });
       setConflictFeedback(
         strategy === "retry"
-          ? "Conflict retry queued. Undo is available for 5 seconds."
-          : "Conflict resolution queued. Undo is available for 5 seconds.",
+          ? t("conflictCenter.feedback.retryQueued")
+          : t("conflictCenter.feedback.resolveQueued"),
       );
       return true;
     } catch (error) {
-      setConflictError(getErrorMessage(error));
+      setConflictError(getErrorMessage(error, locale));
       return false;
     }
   };
 
   const handleRetryConflict = async (conflictId: string) => {
-    if (
-      !window.confirm(
-        "Retry will re-queue this conflict in the next sync cycle. Continue?",
-      )
-    ) {
+    if (!window.confirm(t("conflictCenter.confirm.retry"))) {
       return;
     }
 
@@ -944,7 +1124,7 @@ export function ReminderSettings({
 
     const normalizedDraft = normalizeManualMergeText(manualMergeDraft);
     if (!normalizedDraft) {
-      setConflictError("Merged content must not be empty.");
+      setConflictError(t("conflictCenter.error.mergeEmpty"));
       return;
     }
 
@@ -986,21 +1166,80 @@ export function ReminderSettings({
       window.setTimeout(() => URL.revokeObjectURL(url), 0);
 
       setConflictFeedback(
-        `Conflict report exported (${payload.total_conflicts} conflict record(s)).`,
+        t("conflictCenter.feedback.exported", {
+          count: payload.total_conflicts,
+        }),
       );
     } catch (error) {
-      setConflictError(getErrorMessage(error));
+      setConflictError(getErrorMessage(error, locale));
     }
   };
 
   return (
     <div className="settings-wrap">
       <div className="settings-header">
-        <h1 className="settings-title">Settings</h1>
-        <p className="settings-subtitle">
-          Control reminders, notification access, and local data safety
-        </p>
+        <h1 className="settings-title">{t("settings.title")}</h1>
+        <p className="settings-subtitle">{t("settings.subtitle")}</p>
       </div>
+
+      <section className="settings-card">
+        <div className="settings-card-header">
+          <div className="settings-card-icon">
+            <Globe2 size={16} />
+          </div>
+          <div>
+            <h2 className="settings-card-title">
+              {t("settings.language.title")}
+            </h2>
+            <p className="settings-card-desc">{t("settings.language.desc")}</p>
+          </div>
+        </div>
+
+        <div className="settings-row">
+          <label className="settings-field">
+            <span className="settings-field-label">
+              {t("settings.language.field")}
+            </span>
+            <select
+              className="settings-input settings-select"
+              value={appLocaleDraft}
+              onChange={(event) => {
+                setAppLocaleFeedback(null);
+                setAppLocaleError(null);
+                setAppLocaleDraft(event.target.value as AppLocale);
+              }}
+              disabled={appLocaleSaving}
+            >
+              <option value="en">{t("settings.language.option.en")}</option>
+              <option value="th">{t("settings.language.option.th")}</option>
+            </select>
+          </label>
+        </div>
+
+        <div className="settings-actions settings-actions-single">
+          <button
+            type="button"
+            className="settings-btn settings-btn-primary settings-btn-provider"
+            onClick={() => void handleSaveAppLocaleDraft()}
+            disabled={appLocaleSaving}
+          >
+            <span className="settings-btn-label">
+              {appLocaleSaving
+                ? t("settings.language.saving")
+                : t("settings.language.save")}
+            </span>
+          </button>
+        </div>
+
+        {appLocaleFeedback && (
+          <p className="settings-feedback">{appLocaleFeedback}</p>
+        )}
+        {appLocaleError && (
+          <p className="settings-feedback settings-feedback-error">
+            {appLocaleError}
+          </p>
+        )}
+      </section>
 
       <section className="settings-card">
         <div className="settings-card-header">
@@ -1008,19 +1247,20 @@ export function ReminderSettings({
             <Bell size={16} />
           </div>
           <div>
-            <h2 className="settings-card-title">Task Reminders</h2>
-            <p className="settings-card-desc">
-              Turn reminder notifications on or off globally.
-            </p>
+            <h2 className="settings-card-title">
+              {t("settings.reminders.title")}
+            </h2>
+            <p className="settings-card-desc">{t("settings.reminders.desc")}</p>
           </div>
         </div>
 
         <div className="settings-row">
           <div>
-            <p className="settings-row-title">Enable reminders</p>
+            <p className="settings-row-title">
+              {t("settings.reminders.toggle.title")}
+            </p>
             <p className="settings-row-subtitle">
-              When enabled, tasks with due reminders can trigger desktop
-              notifications.
+              {t("settings.reminders.toggle.desc")}
             </p>
           </div>
           <button
@@ -1040,9 +1280,11 @@ export function ReminderSettings({
             <ShieldCheck size={16} />
           </div>
           <div>
-            <h2 className="settings-card-title">Notification Permission</h2>
+            <h2 className="settings-card-title">
+              {t("settings.permission.title")}
+            </h2>
             <p className="settings-card-desc">
-              Check current permission and reset permission cache/history.
+              {t("settings.permission.desc")}
             </p>
           </div>
         </div>
@@ -1051,17 +1293,17 @@ export function ReminderSettings({
           {permissionState === "granted" ? (
             <>
               <CheckCircle2 size={14} />
-              Granted
+              {t("settings.permission.state.granted")}
             </>
           ) : permissionState === "denied" ? (
             <>
               <XCircle size={14} />
-              Denied
+              {t("settings.permission.state.denied")}
             </>
           ) : (
             <>
               <HelpCircle size={14} />
-              Unknown
+              {t("common.unknown")}
             </>
           )}
         </div>
@@ -1074,7 +1316,7 @@ export function ReminderSettings({
             disabled={isBusy}
           >
             <Bell size={14} />
-            Request Permission
+            {t("settings.permission.action.request")}
           </button>
           <button
             type="button"
@@ -1083,7 +1325,7 @@ export function ReminderSettings({
             disabled={isBusy}
           >
             <RefreshCw size={14} />
-            Refresh Status
+            {t("settings.permission.action.refresh")}
           </button>
           <button
             type="button"
@@ -1092,7 +1334,7 @@ export function ReminderSettings({
             disabled={isBusy}
           >
             <RotateCcw size={14} />
-            Reset Permission + History
+            {t("settings.permission.action.reset")}
           </button>
         </div>
 
@@ -1107,10 +1349,8 @@ export function ReminderSettings({
             <Cloud size={16} />
           </div>
           <div>
-            <h2 className="settings-card-title">Sync</h2>
-            <p className="settings-card-desc">
-              Manually sync now and check latest sync health.
-            </p>
+            <h2 className="settings-card-title">{t("settings.sync.title")}</h2>
+            <p className="settings-card-desc">{t("settings.sync.desc")}</p>
           </div>
         </div>
 
@@ -1125,7 +1365,9 @@ export function ReminderSettings({
 
         <div className="sync-meta">
           <p className="settings-row-subtitle">
-            Last synced: {formatSyncDateTime(syncLastSyncedAt)}
+            {t("settings.sync.lastSynced", {
+              time: formatSyncDateTime(syncLastSyncedAt, locale),
+            })}
           </p>
           {syncLastError && (
             <p className="settings-feedback settings-feedback-error">
@@ -1134,20 +1376,19 @@ export function ReminderSettings({
           )}
           {syncStatus === "LOCAL_ONLY" && (
             <p className="settings-feedback">
-              Local-only mode is active. Server is not required for
-              single-device usage.
+              {t("settings.sync.localOnlyHint")}
             </p>
           )}
           {!syncHasTransport && syncStatus !== "LOCAL_ONLY" && (
             <p className="settings-feedback settings-feedback-warn">
-              To sync across devices, set both endpoints below.
+              {t("settings.sync.transportHint")}
             </p>
           )}
         </div>
 
         <div className="sync-conflicts">
           <div className="sync-conflicts-head">
-            <p className="settings-row-title">Conflict Center</p>
+            <p className="settings-row-title">{t("conflictCenter.title")}</p>
             <button
               type="button"
               className="settings-btn"
@@ -1155,31 +1396,40 @@ export function ReminderSettings({
               disabled={exportSyncConflicts.isPending}
             >
               <Download size={14} />
-              {exportSyncConflicts.isPending ? "Exporting..." : "Export Report"}
+              {exportSyncConflicts.isPending
+                ? t("conflictCenter.action.exporting")
+                : t("conflictCenter.action.exportReport")}
             </button>
           </div>
           {syncConflictsLoading ? (
-            <p className="settings-row-subtitle">Loading conflicts...</p>
+            <p className="settings-row-subtitle">
+              {t("conflictCenter.loading")}
+            </p>
           ) : syncConflicts.length === 0 ? (
-            <p className="settings-row-subtitle">No open conflicts.</p>
+            <p className="settings-row-subtitle">
+              {t("conflictCenter.empty.title")}
+            </p>
           ) : (
             <div className="sync-conflict-list">
               {syncConflicts.map((conflict) => (
                 <div className="sync-conflict-item" key={conflict.id}>
                   <div className="sync-conflict-item-head">
                     <span className="sync-conflict-type">
-                      {formatConflictTypeLabel(conflict.conflict_type)}
+                      {formatConflictTypeLabel(conflict.conflict_type, locale)}
                     </span>
                     <span className="sync-conflict-entity">
                       {conflict.entity_type}:{conflict.entity_id}
                     </span>
                     {selectedConflictId === conflict.id && (
-                      <span className="sync-conflict-selected">Selected</span>
+                      <span className="sync-conflict-selected">
+                        {t("conflictCenter.selected")}
+                      </span>
                     )}
                   </div>
                   <p className="sync-conflict-message">{conflict.message}</p>
                   <p className="settings-row-subtitle">
-                    Detected: {formatSyncDateTime(conflict.detected_at)}
+                    {t("conflictCenter.meta.detected")}:{" "}
+                    {formatSyncDateTime(conflict.detected_at, locale)}
                   </p>
                   <div className="settings-actions">
                     <button
@@ -1190,7 +1440,7 @@ export function ReminderSettings({
                       }
                       disabled={syncConflictResolving}
                     >
-                      Keep Local
+                      {t("conflictCenter.action.keepLocal")}
                     </button>
                     <button
                       type="button"
@@ -1200,7 +1450,7 @@ export function ReminderSettings({
                       }
                       disabled={syncConflictResolving}
                     >
-                      Keep Remote
+                      {t("conflictCenter.action.keepRemote")}
                     </button>
                     <button
                       type="button"
@@ -1208,7 +1458,7 @@ export function ReminderSettings({
                       onClick={() => void handleRetryConflict(conflict.id)}
                       disabled={syncConflictResolving}
                     >
-                      Retry
+                      {t("common.retry")}
                     </button>
                     <button
                       type="button"
@@ -1216,14 +1466,14 @@ export function ReminderSettings({
                       onClick={() => handleOpenManualMergeEditor(conflict)}
                       disabled={syncConflictResolving}
                     >
-                      Manual Merge
+                      {t("conflictCenter.action.manualMerge")}
                     </button>
                     <button
                       type="button"
                       className="settings-btn"
                       onClick={() => setSelectedConflictId(conflict.id)}
                     >
-                      Details
+                      {t("conflictCenter.action.details")}
                     </button>
                   </div>
                 </div>
@@ -1233,42 +1483,61 @@ export function ReminderSettings({
 
           {selectedConflict && (
             <div className="sync-conflict-detail">
-              <p className="settings-row-title">Conflict Detail</p>
+              <p className="settings-row-title">
+                {t("conflictCenter.detail.title")}
+              </p>
               <p className="settings-row-subtitle">
                 {selectedConflict.entity_type}:{selectedConflict.entity_id} ·{" "}
-                {formatConflictTypeLabel(selectedConflict.conflict_type)}
+                {formatConflictTypeLabel(
+                  selectedConflict.conflict_type,
+                  locale,
+                )}
               </p>
               <div className="sync-conflict-payload-grid">
                 <div>
-                  <span className="settings-field-label">Local payload</span>
+                  <span className="settings-field-label">
+                    {t("conflictCenter.detail.localPayload")}
+                  </span>
                   <pre className="sync-conflict-payload">
-                    {formatPayloadJson(selectedConflict.local_payload_json)}
+                    {formatPayloadJson(
+                      selectedConflict.local_payload_json,
+                      locale,
+                    )}
                   </pre>
                 </div>
                 <div>
-                  <span className="settings-field-label">Remote payload</span>
+                  <span className="settings-field-label">
+                    {t("conflictCenter.detail.remotePayload")}
+                  </span>
                   <pre className="sync-conflict-payload">
-                    {formatPayloadJson(selectedConflict.remote_payload_json)}
+                    {formatPayloadJson(
+                      selectedConflict.remote_payload_json,
+                      locale,
+                    )}
                   </pre>
                 </div>
               </div>
 
               <p className="settings-row-title sync-conflict-timeline-title">
-                Timeline
+                {t("conflictCenter.detail.timeline")}
               </p>
               {isConflictEventsLoading ? (
-                <p className="settings-row-subtitle">Loading timeline...</p>
+                <p className="settings-row-subtitle">
+                  {t("conflictCenter.detail.loadingTimeline")}
+                </p>
               ) : selectedConflictEvents.length === 0 ? (
-                <p className="settings-row-subtitle">No events yet.</p>
+                <p className="settings-row-subtitle">
+                  {t("conflictCenter.detail.noEvents")}
+                </p>
               ) : (
                 <div className="sync-conflict-timeline">
                   {selectedConflictEvents.map((event) => (
                     <div className="sync-conflict-timeline-item" key={event.id}>
                       <span className="sync-conflict-event-pill">
-                        {formatConflictEventLabel(event.event_type)}
+                        {formatConflictEventLabel(event.event_type, locale)}
                       </span>
                       <span className="settings-row-subtitle">
-                        {formatSyncDateTime(event.created_at)}
+                        {formatSyncDateTime(event.created_at, locale)}
                       </span>
                     </div>
                   ))}
@@ -1300,16 +1569,19 @@ export function ReminderSettings({
 
         <div className="sync-provider-card">
           <div className="sync-provider-head">
-            <p className="settings-row-title">Sync Provider</p>
+            <p className="settings-row-title">
+              {t("settings.sync.provider.title")}
+            </p>
             <p className="settings-row-subtitle">
-              Select provider from UI. Core sync contract remains
-              provider-neutral.
+              {t("settings.sync.provider.desc")}
             </p>
           </div>
 
           <div className="sync-provider-grid">
             <label className="settings-field">
-              <span className="settings-field-label">Provider</span>
+              <span className="settings-field-label">
+                {t("settings.sync.provider.field")}
+              </span>
               <select
                 className="settings-input settings-select"
                 value={syncProviderDraft}
@@ -1320,7 +1592,7 @@ export function ReminderSettings({
                 }}
                 disabled={syncProviderSaving || syncProviderLoading}
               >
-                {Object.entries(SYNC_PROVIDER_CAPABILITIES).map(
+                {Object.entries(syncProviderCapabilities).map(
                   ([providerKey, capability]) => (
                     <option value={providerKey} key={providerKey}>
                       {capability.label}
@@ -1336,13 +1608,17 @@ export function ReminderSettings({
               {selectedProviderCapability.summary}
             </p>
             <p className="settings-row-subtitle">
-              Auth requirement: {selectedProviderCapability.authRequirement}
+              {t("settings.sync.provider.authRequirement", {
+                value: selectedProviderCapability.authRequirement,
+              })}
             </p>
             <p className="settings-row-subtitle">
-              Endpoint mode:{" "}
-              {selectedProviderCapability.endpointMode === "managed"
-                ? "Managed"
-                : "Custom"}
+              {t("settings.sync.provider.endpointMode", {
+                value:
+                  selectedProviderCapability.endpointMode === "managed"
+                    ? t("settings.sync.provider.endpointMode.managed")
+                    : t("settings.sync.provider.endpointMode.custom"),
+              })}
             </p>
             <div className="sync-provider-warning-list">
               {selectedProviderCapability.warnings.map((warning) => (
@@ -1361,7 +1637,9 @@ export function ReminderSettings({
               disabled={syncProviderSaving || syncProviderLoading}
             >
               <span className="settings-btn-label">
-                {syncProviderSaving ? "Saving..." : "Save Provider"}
+                {syncProviderSaving
+                  ? t("settings.sync.action.saving")
+                  : t("settings.sync.provider.save")}
               </span>
             </button>
           </div>
@@ -1377,36 +1655,42 @@ export function ReminderSettings({
         </div>
 
         <p className="settings-row-subtitle">
-          Endpoint mode:{" "}
-          {selectedProviderCapability.endpointMode === "managed"
-            ? "Managed provider selected (custom URLs are still used in current build)."
-            : "Custom endpoints required."}
+          {t("settings.sync.provider.endpointMode", {
+            value:
+              selectedProviderCapability.endpointMode === "managed"
+                ? t("settings.sync.provider.endpointModeHint.managed")
+                : t("settings.sync.provider.endpointModeHint.custom"),
+          })}
         </p>
 
         <div className="sync-endpoint-grid">
           <label className="settings-field">
-            <span className="settings-field-label">Push URL</span>
+            <span className="settings-field-label">
+              {t("settings.sync.provider.pushUrl")}
+            </span>
             <input
               className="settings-input"
               type="url"
               inputMode="url"
               autoComplete="off"
               spellCheck={false}
-              placeholder="https://sync.example.com/v1/sync/push"
+              placeholder={t("settings.sync.provider.pushPlaceholder")}
               value={syncPushUrlDraft}
               onChange={(event) => setSyncPushUrlDraft(event.target.value)}
               disabled={syncConfigSaving || syncProviderLoading}
             />
           </label>
           <label className="settings-field">
-            <span className="settings-field-label">Pull URL</span>
+            <span className="settings-field-label">
+              {t("settings.sync.provider.pullUrl")}
+            </span>
             <input
               className="settings-input"
               type="url"
               inputMode="url"
               autoComplete="off"
               spellCheck={false}
-              placeholder="https://sync.example.com/v1/sync/pull"
+              placeholder={t("settings.sync.provider.pullPlaceholder")}
               value={syncPullUrlDraft}
               onChange={(event) => setSyncPullUrlDraft(event.target.value)}
               disabled={syncConfigSaving || syncProviderLoading}
@@ -1416,14 +1700,18 @@ export function ReminderSettings({
 
         <div className="sync-runtime-card">
           <div className="sync-runtime-head">
-            <p className="settings-row-title">Sync Runtime Profile</p>
+            <p className="settings-row-title">
+              {t("settings.sync.runtime.title")}
+            </p>
             <p className="settings-row-subtitle">
-              Tune sync behavior for desktop/mobile beta workloads.
+              {t("settings.sync.runtime.desc")}
             </p>
           </div>
           <div className="sync-runtime-grid">
             <label className="settings-field">
-              <span className="settings-field-label">Profile</span>
+              <span className="settings-field-label">
+                {t("settings.sync.runtime.field.profile")}
+              </span>
               <select
                 className="settings-input settings-select"
                 value={syncRuntimeProfileDraft}
@@ -1436,7 +1724,7 @@ export function ReminderSettings({
                 }}
                 disabled={syncRuntimeSaving || syncRuntimeProfileLoading}
               >
-                {SYNC_RUNTIME_PROFILE_OPTIONS.map((option) => (
+                {runtimeProfileOptions.map((option) => (
                   <option key={option.value} value={option.value}>
                     {option.label}
                   </option>
@@ -1445,7 +1733,7 @@ export function ReminderSettings({
             </label>
             <label className="settings-field">
               <span className="settings-field-label">
-                Foreground Interval (s)
+                {t("settings.sync.runtime.field.foreground")}
               </span>
               <input
                 className="settings-input"
@@ -1465,7 +1753,7 @@ export function ReminderSettings({
             </label>
             <label className="settings-field">
               <span className="settings-field-label">
-                Background Interval (s)
+                {t("settings.sync.runtime.field.background")}
               </span>
               <input
                 className="settings-input"
@@ -1484,7 +1772,9 @@ export function ReminderSettings({
               />
             </label>
             <label className="settings-field">
-              <span className="settings-field-label">Push Limit</span>
+              <span className="settings-field-label">
+                {t("settings.sync.runtime.field.pushLimit")}
+              </span>
               <input
                 className="settings-input"
                 type="number"
@@ -1502,7 +1792,9 @@ export function ReminderSettings({
               />
             </label>
             <label className="settings-field">
-              <span className="settings-field-label">Pull Limit</span>
+              <span className="settings-field-label">
+                {t("settings.sync.runtime.field.pullLimit")}
+              </span>
               <input
                 className="settings-input"
                 type="number"
@@ -1520,7 +1812,9 @@ export function ReminderSettings({
               />
             </label>
             <label className="settings-field">
-              <span className="settings-field-label">Max Pull Pages</span>
+              <span className="settings-field-label">
+                {t("settings.sync.runtime.field.maxPullPages")}
+              </span>
               <input
                 className="settings-input"
                 type="number"
@@ -1551,7 +1845,7 @@ export function ReminderSettings({
               onClick={handleApplyDesktopSyncPreset}
               disabled={syncRuntimeSaving}
             >
-              Desktop Preset
+              {t("settings.sync.runtime.action.desktopPreset")}
             </button>
             <button
               type="button"
@@ -1559,7 +1853,7 @@ export function ReminderSettings({
               onClick={handleApplyMobileSyncPreset}
               disabled={syncRuntimeSaving}
             >
-              Mobile Beta Preset
+              {t("settings.sync.runtime.action.mobilePreset")}
             </button>
             <button
               type="button"
@@ -1567,7 +1861,7 @@ export function ReminderSettings({
               onClick={handleResetRecommendedRuntime}
               disabled={syncRuntimeSaving}
             >
-              Reset Recommended
+              {t("settings.sync.runtime.action.resetRecommended")}
             </button>
             <button
               type="button"
@@ -1575,7 +1869,9 @@ export function ReminderSettings({
               onClick={() => void handleSaveSyncRuntimeProfile()}
               disabled={syncRuntimeSaving}
             >
-              {syncRuntimeSaving ? "Saving..." : "Save Runtime"}
+              {syncRuntimeSaving
+                ? t("settings.sync.action.saving")
+                : t("settings.sync.runtime.action.save")}
             </button>
           </div>
           {syncRuntimeFeedback && (
@@ -1587,108 +1883,162 @@ export function ReminderSettings({
             </p>
           )}
           <div>
-            <p className="settings-row-title">Sync Diagnostics (Session)</p>
-            <p className="settings-row-subtitle">
-              Runtime preset:{" "}
-              {syncRuntimePreset === "mobile"
-                ? "Mobile Beta (detected)"
-                : "Desktop (detected)"}
+            <p className="settings-row-title">
+              {t("settings.sync.diagnostics.title")}
             </p>
             <p className="settings-row-subtitle">
-              Runtime profile: {getRuntimeProfileLabel(syncRuntimeProfileDraft)}
+              {t("settings.sync.diagnostics.runtimePreset", {
+                preset:
+                  syncRuntimePreset === "mobile"
+                    ? t("settings.sync.runtime.profile.mobile")
+                    : t("settings.sync.runtime.profile.desktop"),
+              })}
             </p>
             <p className="settings-row-subtitle">
-              Provider (sync loop):{" "}
-              {syncDiagnostics.selected_provider
-                ? (SYNC_PROVIDER_CAPABILITIES[syncDiagnostics.selected_provider]
-                    ?.label ?? syncDiagnostics.selected_provider)
-                : "Not selected yet"}
+              {t("settings.sync.diagnostics.runtimeProfile", {
+                profile: getRuntimeProfileLabel(
+                  syncRuntimeProfileDraft,
+                  locale,
+                ),
+              })}
             </p>
             <p className="settings-row-subtitle">
-              Success rate: {syncDiagnostics.success_rate_percent.toFixed(1)}% (
-              {syncDiagnostics.successful_cycles}/{syncDiagnostics.total_cycles}
-              )
+              {t("settings.sync.diagnostics.provider", {
+                provider: syncDiagnostics.selected_provider
+                  ? (syncProviderCapabilities[syncDiagnostics.selected_provider]
+                      ?.label ?? syncDiagnostics.selected_provider)
+                  : t("settings.sync.diagnostics.notSelectedYet"),
+              })}
             </p>
             <p className="settings-row-subtitle">
-              Last cycle duration:{" "}
-              {formatDurationMs(syncDiagnostics.last_cycle_duration_ms)}
+              {t("settings.sync.diagnostics.successRate", {
+                rate: syncDiagnostics.success_rate_percent.toFixed(1),
+                success: syncDiagnostics.successful_cycles,
+                total: syncDiagnostics.total_cycles,
+              })}
             </p>
             <p className="settings-row-subtitle">
-              Average cycle duration:{" "}
-              {formatDurationMs(syncDiagnostics.average_cycle_duration_ms)}
+              {t("settings.sync.diagnostics.lastCycleDuration", {
+                value: formatDurationMs(
+                  syncDiagnostics.last_cycle_duration_ms,
+                  locale,
+                ),
+              })}
             </p>
             <p className="settings-row-subtitle">
-              Failed cycles: {syncDiagnostics.failed_cycles} (streak:{" "}
-              {syncDiagnostics.consecutive_failures})
+              {t("settings.sync.diagnostics.averageCycleDuration", {
+                value: formatDurationMs(
+                  syncDiagnostics.average_cycle_duration_ms,
+                  locale,
+                ),
+              })}
             </p>
             <p className="settings-row-subtitle">
-              Conflict cycles: {syncDiagnostics.conflict_cycles}
+              {t("settings.sync.diagnostics.failedCycles", {
+                failed: syncDiagnostics.failed_cycles,
+                streak: syncDiagnostics.consecutive_failures,
+              })}
             </p>
             <p className="settings-row-subtitle">
-              Provider selected events:{" "}
-              {syncDiagnostics.provider_selected_events}
+              {t("settings.sync.diagnostics.conflictCycles", {
+                count: syncDiagnostics.conflict_cycles,
+              })}
             </p>
             <p className="settings-row-subtitle">
-              Runtime profile change events:{" "}
-              {syncDiagnostics.runtime_profile_changed_events}
+              {t("settings.sync.diagnostics.providerEvents", {
+                count: syncDiagnostics.provider_selected_events,
+              })}
             </p>
             <p className="settings-row-subtitle">
-              Validation rejected events:{" "}
-              {syncDiagnostics.validation_rejected_events}
+              {t("settings.sync.diagnostics.profileChangeEvents", {
+                count: syncDiagnostics.runtime_profile_changed_events,
+              })}
+            </p>
+            <p className="settings-row-subtitle">
+              {t("settings.sync.diagnostics.validationRejectedEvents", {
+                count: syncDiagnostics.validation_rejected_events,
+              })}
             </p>
             {syncDiagnostics.last_warning && (
               <p className="settings-row-subtitle">
-                Last warning: {syncDiagnostics.last_warning}
+                {t("settings.sync.diagnostics.lastWarning", {
+                  value: syncDiagnostics.last_warning,
+                })}
               </p>
             )}
           </div>
           <div className="sync-observability-card">
-            <p className="settings-row-title">Conflict Observability</p>
+            <p className="settings-row-title">
+              {t("settings.sync.observability.title")}
+            </p>
             {syncConflictObservability.isLoading ? (
-              <p className="settings-row-subtitle">Loading counters...</p>
+              <p className="settings-row-subtitle">
+                {t("settings.sync.observability.loading")}
+              </p>
             ) : conflictObservability ? (
               <>
                 <p className="settings-row-subtitle">
-                  Total conflicts: {conflictObservability.total_conflicts}
+                  {t("settings.sync.observability.total", {
+                    count: conflictObservability.total_conflicts,
+                  })}
                 </p>
                 <p className="settings-row-subtitle">
-                  Open/Resolved/Ignored: {conflictObservability.open_conflicts}/
-                  {conflictObservability.resolved_conflicts}/
-                  {conflictObservability.ignored_conflicts}
+                  {t("settings.sync.observability.openResolvedIgnored", {
+                    open: conflictObservability.open_conflicts,
+                    resolved: conflictObservability.resolved_conflicts,
+                    ignored: conflictObservability.ignored_conflicts,
+                  })}
                 </p>
                 <p className="settings-row-subtitle">
-                  Resolution rate:{" "}
-                  {conflictObservability.resolution_rate_percent.toFixed(1)}%
+                  {t("settings.sync.observability.resolutionRate", {
+                    rate: conflictObservability.resolution_rate_percent.toFixed(
+                      1,
+                    ),
+                  })}
                 </p>
                 <p className="settings-row-subtitle">
-                  Median time to resolve:{" "}
-                  {formatResolutionDurationMs(
-                    conflictObservability.median_resolution_time_ms,
-                  )}
+                  {t("settings.sync.observability.medianResolve", {
+                    value: formatResolutionDurationMs(
+                      conflictObservability.median_resolution_time_ms,
+                      locale,
+                    ),
+                  })}
                 </p>
                 <p className="settings-row-subtitle">
-                  Retried events: {conflictObservability.retried_events}
+                  {t("settings.sync.observability.retriedEvents", {
+                    count: conflictObservability.retried_events,
+                  })}
                 </p>
                 <p className="settings-row-subtitle">
-                  Exported events: {conflictObservability.exported_events}
+                  {t("settings.sync.observability.exportedEvents", {
+                    count: conflictObservability.exported_events,
+                  })}
                 </p>
                 <p className="settings-row-subtitle">
-                  Last detected:{" "}
-                  {formatSyncDateTime(conflictObservability.latest_detected_at)}
+                  {t("settings.sync.observability.lastDetected", {
+                    time: formatSyncDateTime(
+                      conflictObservability.latest_detected_at,
+                      locale,
+                    ),
+                  })}
                 </p>
                 <p className="settings-row-subtitle">
-                  Last resolved:{" "}
-                  {formatSyncDateTime(conflictObservability.latest_resolved_at)}
+                  {t("settings.sync.observability.lastResolved", {
+                    time: formatSyncDateTime(
+                      conflictObservability.latest_resolved_at,
+                      locale,
+                    ),
+                  })}
                 </p>
               </>
             ) : (
               <p className="settings-row-subtitle">
-                Conflict observability is unavailable.
+                {t("settings.sync.observability.unavailable")}
               </p>
             )}
             {syncConflictObservability.isError && (
               <p className="settings-feedback settings-feedback-error">
-                Unable to load conflict observability counters.
+                {t("settings.sync.observability.error")}
               </p>
             )}
           </div>
@@ -1702,7 +2052,9 @@ export function ReminderSettings({
             disabled={syncIsRunning || !syncHasTransport}
           >
             <RefreshCw size={14} className={syncIsRunning ? "sync-spin" : ""} />
-            {syncIsRunning ? "Syncing..." : "Sync now"}
+            {syncIsRunning
+              ? t("settings.sync.action.syncing")
+              : t("settings.sync.action.syncNow")}
           </button>
           {syncLastError && (
             <button
@@ -1711,7 +2063,7 @@ export function ReminderSettings({
               onClick={() => void onRetryLastFailedSync()}
               disabled={syncIsRunning || !syncHasTransport}
             >
-              Retry Last Failed Sync
+              {t("settings.sync.action.retryLastFailed")}
             </button>
           )}
           <button
@@ -1720,7 +2072,9 @@ export function ReminderSettings({
             onClick={() => void handleSaveSyncSettings()}
             disabled={syncConfigSaving}
           >
-            {syncConfigSaving ? "Saving..." : "Save Endpoints"}
+            {syncConfigSaving
+              ? t("settings.sync.action.saving")
+              : t("settings.sync.action.saveEndpoints")}
           </button>
         </div>
         {syncConfigFeedback && (
@@ -1739,43 +2093,53 @@ export function ReminderSettings({
             <Database size={16} />
           </div>
           <div>
-            <h2 className="settings-card-title">Data Backup & Restore</h2>
-            <p className="settings-card-desc">
-              Export all local data to JSON and restore it later on this or
-              another machine.
-            </p>
+            <h2 className="settings-card-title">
+              {t("settings.backup.title")}
+            </h2>
+            <p className="settings-card-desc">{t("settings.backup.desc")}</p>
           </div>
         </div>
 
         <p className="settings-row-subtitle settings-danger-text">
-          Restore will replace all current local data.
+          {t("settings.backup.warning.replaceLocal")}
         </p>
 
         {backupRestorePreflight.isLoading ? (
-          <p className="settings-row-subtitle">Checking restore preflight...</p>
+          <p className="settings-row-subtitle">
+            {t("settings.backup.preflight.loading")}
+          </p>
         ) : backupPreflight ? (
           <div className="backup-preflight">
             <p className="settings-row-subtitle">
-              Latest internal backup:{" "}
-              {formatSyncDateTime(backupPreflight.latest_backup_exported_at)}
+              {t("settings.backup.preflight.latestInternal", {
+                time: formatSyncDateTime(
+                  backupPreflight.latest_backup_exported_at,
+                  locale,
+                ),
+              })}
             </p>
             <p className="settings-row-subtitle">
-              Pending outbox changes: {backupPreflight.pending_outbox_changes}
+              {t("settings.backup.preflight.pendingOutbox", {
+                count: backupPreflight.pending_outbox_changes,
+              })}
             </p>
             <p className="settings-row-subtitle">
-              Open conflicts: {backupPreflight.open_conflicts}
+              {t("settings.backup.preflight.openConflicts", {
+                count: backupPreflight.open_conflicts,
+              })}
             </p>
             {backupPreflight.requires_force_restore && (
               <p className="settings-feedback settings-feedback-warn">
-                Restore currently requires force because{" "}
-                {buildRestoreForceReasonLabel(backupPreflight)} are present.
+                {t("settings.backup.preflight.requiresForce", {
+                  reason: buildRestoreForceReasonLabel(backupPreflight, locale),
+                })}
               </p>
             )}
           </div>
         ) : null}
         {backupRestorePreflight.isError && (
           <p className="settings-feedback settings-feedback-error">
-            Unable to load restore preflight details.
+            {t("settings.backup.preflight.error")}
           </p>
         )}
 
@@ -1787,7 +2151,9 @@ export function ReminderSettings({
             disabled={isBackupBusy}
           >
             <Download size={14} />
-            {exportBackup.isPending ? "Exporting..." : "Export Backup"}
+            {exportBackup.isPending
+              ? t("settings.backup.action.exporting")
+              : t("settings.backup.action.export")}
           </button>
           <button
             type="button"
@@ -1797,8 +2163,8 @@ export function ReminderSettings({
           >
             <RotateCcw size={14} />
             {backupRestoreLatestBusy
-              ? "Restore Queued..."
-              : "Restore Latest Backup"}
+              ? t("settings.backup.action.restoreQueued")
+              : t("settings.backup.action.restoreLatest")}
           </button>
           <button
             type="button"
@@ -1807,7 +2173,9 @@ export function ReminderSettings({
             disabled={isBackupBusy}
           >
             <Upload size={14} />
-            {backupImportBusy ? "Restore Queued..." : "Restore from File"}
+            {backupImportBusy
+              ? t("settings.backup.action.restoreQueued")
+              : t("settings.backup.action.restoreFromFile")}
           </button>
           <input
             ref={backupInputRef}

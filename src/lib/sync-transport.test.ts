@@ -2,6 +2,7 @@ import {
   createHttpSyncTransport,
   createSyncTransportFromConfig,
   resolveSyncTransportConfig,
+  SYNC_TRANSPORT_ERROR_CODES,
 } from "@/lib/sync-transport";
 
 describe("sync-transport", () => {
@@ -117,7 +118,7 @@ describe("sync-transport", () => {
     });
 
     await expect(transport.push({ test: true })).rejects.toThrow(
-      "Sync request timed out.",
+      SYNC_TRANSPORT_ERROR_CODES.TIMEOUT,
     );
   });
 

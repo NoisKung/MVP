@@ -48,6 +48,29 @@ Power shortcuts:
   - `Restore from file (import backup)`
 - ถ้ามีหลาย action ต่อเนื่อง แถบจะแสดง action แรกและจำนวนคิวที่เหลือ (`+N more`)
 
+## 1D) Language (P3-8 i18n TH/EN)
+
+- ไปที่ `Settings > Language`
+- เลือกภาษา UI ได้ระหว่าง `English` และ `ไทย (Thai)` แล้วกด `Save Language`
+- การเปลี่ยนภาษามีผลทันที (runtime switch)
+- ค่าภาษาถูกเก็บใน settings key: `app.locale`
+- ถ้ายังไม่เคยตั้งค่า locale:
+  - แอปจะใช้ภาษาระบบจาก browser/runtime (`navigator.language`)
+  - fallback เป็น `en`
+- coverage ปัจจุบัน (TH/EN):
+  - App shell + sidebar/status/autosave
+  - Settings (header + language card)
+  - Board
+  - Today / Upcoming
+  - Calendar
+  - Dashboard
+  - Weekly Review
+  - Conflict Center
+  - Task Filters Bar
+  - Task Card
+  - Command Palette
+  - Shortcut Help
+
 ## 2) MVP CLI Quick Usage
 
 ```bash

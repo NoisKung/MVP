@@ -3,6 +3,8 @@ import type { Task, TaskStatus } from "@/lib/types";
 import { TaskCard } from "./TaskCard";
 import { useTaskSubtaskStats } from "@/hooks/use-tasks";
 import { CalendarDays, ChevronLeft, ChevronRight, Plus } from "lucide-react";
+import { useI18n } from "@/lib/i18n";
+import { localizeErrorMessage } from "@/lib/error-message";
 
 type CalendarMode = "month" | "week";
 
@@ -15,10 +17,16 @@ interface CalendarViewProps {
   onCreateClick: () => void;
 }
 
-const WEEKDAY_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"];
-
 function atStartOfDay(date: Date): Date {
-  return new Date(date.getFullYear(), date.getMonth(), date.getDate(), 0, 0, 0, 0);
+  return new Date(
+    date.getFullYear(),
+    date.getMonth(),
+    date.getDate(),
+    0,
+    0,
+    0,
+    0,
+  );
 }
 
 function atStartOfWeek(date: Date): Date {
@@ -36,38 +44,54 @@ function getDateKey(date: Date): string {
   return `${year}-${month}-${day}`;
 }
 
-function formatHeaderDate(date: Date): string {
-  return date.toLocaleDateString("en-US", {
+function formatHeaderDate(date: Date, locale: "en" | "th"): string {
+  return date.toLocaleDateString(locale === "th" ? "th-TH" : "en-US", {
     month: "long",
     year: "numeric",
   });
 }
 
-function formatDayLabel(dateKey: string): string {
+function formatDayLabel(dateKey: string, locale: "en" | "th"): string {
   const date = new Date(`${dateKey}T00:00:00`);
-  return date.toLocaleDateString("en-US", {
+  return date.toLocaleDateString(locale === "th" ? "th-TH" : "en-US", {
     weekday: "long",
     month: "short",
     day: "numeric",
   });
 }
 
-function formatWeekLabel(anchorDate: Date): string {
+function formatWeekLabel(anchorDate: Date, locale: "en" | "th"): string {
   const weekStart = atStartOfWeek(anchorDate);
   const weekEnd = new Date(weekStart);
   weekEnd.setDate(weekEnd.getDate() + 6);
 
-  const startLabel = weekStart.toLocaleDateString("en-US", {
+  const formatLocale = locale === "th" ? "th-TH" : "en-US";
+  const startLabel = weekStart.toLocaleDateString(formatLocale, {
     month: "short",
     day: "numeric",
   });
-  const endLabel = weekEnd.toLocaleDateString("en-US", {
+  const endLabel = weekEnd.toLocaleDateString(formatLocale, {
     month: "short",
     day: "numeric",
     year: "numeric",
   });
 
   return `${startLabel} - ${endLabel}`;
+}
+
+function getWeekdayLabels(locale: "en" | "th"): string[] {
+  const formatter = new Intl.DateTimeFormat(
+    locale === "th" ? "th-TH" : "en-US",
+    {
+      weekday: "short",
+    },
+  );
+  const monday = new Date(2024, 0, 1); // Monday anchor for Monday-first headers
+  return Array.from({ length: 7 }, (_, index) => {
+    const day = new Date(monday);
+    day.setDate(monday.getDate() + index);
+    return formatter.format(day);
+  });
 }
 
 function buildVisibleDays(anchorDate: Date, mode: CalendarMode): Date[] {
@@ -80,7 +104,11 @@ function buildVisibleDays(anchorDate: Date, mode: CalendarMode): Date[] {
     });
   }
 
-  const monthStart = new Date(anchorDate.getFullYear(), anchorDate.getMonth(), 1);
+  const monthStart = new Date(
+    anchorDate.getFullYear(),
+    anchorDate.getMonth(),
+    1,
+  );
   const gridStart = atStartOfWeek(monthStart);
 
   return Array.from({ length: 42 }, (_, index) => {
@@ -90,14 +118,8 @@ function buildVisibleDays(anchorDate: Date, mode: CalendarMode): Date[] {
   });
 }
 
-function getErrorMessage(error: unknown): string {
-  if (error instanceof Error && error.message.trim()) {
-    return error.message;
-  }
-  if (typeof error === "string" && error.trim()) {
-    return error;
-  }
-  return "Unable to load calendar data.";
+function getErrorMessage(error: unknown, locale: "en" | "th"): string {
+  return localizeErrorMessage(error, locale, "calendar.error.unableLoadData");
 }
 
 export function CalendarView({
@@ -108,6 +130,7 @@ export function CalendarView({
   onDelete,
   onCreateClick,
 }: CalendarViewProps) {
+  const { locale, t } = useI18n();
   const [mode, setMode] = useState<CalendarMode>("month");
   const [anchorDate, setAnchorDate] = useState(new Date());
   const [selectedDateKey, setSelectedDateKey] = useState(() =>
@@ -167,8 +190,11 @@ export function CalendarView({
     () => selectedDateTasks.map((task) => task.id),
     [selectedDateTasks],
   );
-  const { data: subtaskStats = [], isError: isSubtaskStatsError, error: subtaskStatsError } =
-    useTaskSubtaskStats(selectedTaskIds, selectedTaskIds.length > 0);
+  const {
+    data: subtaskStats = [],
+    isError: isSubtaskStatsError,
+    error: subtaskStatsError,
+  } = useTaskSubtaskStats(selectedTaskIds, selectedTaskIds.length > 0);
   const subtaskProgressByTaskId = useMemo(() => {
     const progressMap = new Map<string, { done: number; total: number }>();
     for (const stats of subtaskStats) {
@@ -212,33 +238,47 @@ export function CalendarView({
 
   const currentMonth = anchorDate.getMonth();
   const todayKey = getDateKey(new Date());
-  const headerLabel = mode === "month" ? formatHeaderDate(anchorDate) : formatWeekLabel(anchorDate);
+  const headerLabel =
+    mode === "month"
+      ? formatHeaderDate(anchorDate, locale)
+      : formatWeekLabel(anchorDate, locale);
+  const weekdayLabels = useMemo(() => getWeekdayLabels(locale), [locale]);
 
   return (
     <div className="calendar-root">
       <div className="calendar-header">
         <div>
-          <h1 className="calendar-title">Calendar</h1>
+          <h1 className="calendar-title">{t("calendar.title")}</h1>
           <p className="calendar-subtitle">
-            {dueTasks.length} task{dueTasks.length !== 1 ? "s" : ""} with due dates
+            {t("calendar.subtitle.withDueTasks", {
+              count: dueTasks.length,
+            })}
           </p>
         </div>
         <button className="calendar-primary-btn" onClick={onCreateClick}>
           <Plus size={14} />
-          New Task
+          {t("shell.createTask")}
         </button>
       </div>
 
       <div className="calendar-toolbar">
         <div className="calendar-nav-group">
-          <button className="calendar-icon-btn" onClick={handlePrev} title="Previous">
+          <button
+            className="calendar-icon-btn"
+            onClick={handlePrev}
+            title={t("calendar.action.previous")}
+          >
             <ChevronLeft size={14} />
           </button>
-          <button className="calendar-icon-btn" onClick={handleNext} title="Next">
+          <button
+            className="calendar-icon-btn"
+            onClick={handleNext}
+            title={t("calendar.action.next")}
+          >
             <ChevronRight size={14} />
           </button>
           <button className="calendar-ghost-btn" onClick={handleToday}>
-            Today
+            {t("calendar.action.today")}
           </button>
         </div>
         <span className="calendar-range-label">{headerLabel}</span>
@@ -247,13 +287,13 @@ export function CalendarView({
             className={`calendar-mode-btn${mode === "month" ? " active" : ""}`}
             onClick={() => setMode("month")}
           >
-            Month
+            {t("calendar.mode.month")}
           </button>
           <button
             className={`calendar-mode-btn${mode === "week" ? " active" : ""}`}
             onClick={() => setMode("week")}
           >
-            Week
+            {t("calendar.mode.week")}
           </button>
         </div>
       </div>
@@ -261,7 +301,7 @@ export function CalendarView({
       <div className="calendar-layout">
         <section className="calendar-grid-panel">
           <div className="calendar-weekdays">
-            {WEEKDAY_LABELS.map((label) => (
+            {weekdayLabels.map((label) => (
               <div key={label} className="calendar-weekday-cell">
                 {label}
               </div>
@@ -273,7 +313,8 @@ export function CalendarView({
               const dayTasks = tasksByDateKey.get(key) ?? [];
               const isToday = key === todayKey;
               const isSelected = key === normalizedSelectedDateKey;
-              const isOutsideCurrentMonth = mode === "month" && day.getMonth() !== currentMonth;
+              const isOutsideCurrentMonth =
+                mode === "month" && day.getMonth() !== currentMonth;
 
               return (
                 <button
@@ -284,7 +325,9 @@ export function CalendarView({
                   <div className="calendar-day-top">
                     <span className="calendar-day-number">{day.getDate()}</span>
                     {dayTasks.length > 0 && (
-                      <span className="calendar-day-count">{dayTasks.length}</span>
+                      <span className="calendar-day-count">
+                        {dayTasks.length}
+                      </span>
                     )}
                   </div>
                   <div className="calendar-day-dots">
@@ -301,21 +344,25 @@ export function CalendarView({
         <aside className="calendar-day-panel">
           <div className="calendar-day-panel-header">
             <CalendarDays size={14} />
-            <span>{formatDayLabel(normalizedSelectedDateKey)}</span>
+            <span>{formatDayLabel(normalizedSelectedDateKey, locale)}</span>
           </div>
           {selectedDateTasks.length === 0 ? (
             <div className="calendar-day-empty">
-              <p>No due tasks on this day.</p>
+              <p>{t("calendar.empty.noDueTasksOnDay")}</p>
             </div>
           ) : isSubtaskStatsError ? (
-            <p className="calendar-day-error">{getErrorMessage(subtaskStatsError)}</p>
+            <p className="calendar-day-error">
+              {getErrorMessage(subtaskStatsError, locale)}
+            </p>
           ) : (
             <div className="calendar-day-task-list">
               {selectedDateTasks.map((task) => (
                 <TaskCard
                   key={task.id}
                   task={task}
-                  projectName={task.project_id ? projectNameById[task.project_id] : null}
+                  projectName={
+                    task.project_id ? projectNameById[task.project_id] : null
+                  }
                   onEdit={onEdit}
                   onStatusChange={onStatusChange}
                   onDelete={onDelete}

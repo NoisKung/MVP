@@ -1,6 +1,7 @@
 import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import type { Task, TaskStatus, ViewMode } from "@/lib/types";
 import { Search } from "lucide-react";
+import { translate, useI18n } from "@/lib/i18n";
 
 interface CommandPaletteProps {
   isOpen: boolean;
@@ -24,16 +25,16 @@ interface PaletteCommand {
   onSelect: () => void;
 }
 
-const VIEW_COMMANDS: Array<{ view: ViewMode; label: string }> = [
-  { view: "board", label: "Board" },
-  { view: "projects", label: "Projects" },
-  { view: "calendar", label: "Calendar" },
-  { view: "today", label: "Today" },
-  { view: "upcoming", label: "Upcoming" },
-  { view: "conflicts", label: "Conflict Center" },
-  { view: "review", label: "Weekly Review" },
-  { view: "dashboard", label: "Dashboard" },
-  { view: "settings", label: "Settings" },
+const VIEW_COMMANDS: Array<{ view: ViewMode }> = [
+  { view: "board" },
+  { view: "projects" },
+  { view: "calendar" },
+  { view: "today" },
+  { view: "upcoming" },
+  { view: "conflicts" },
+  { view: "review" },
+  { view: "dashboard" },
+  { view: "settings" },
 ];
 
 const MAX_MATCHED_TASKS = 6;
@@ -54,19 +55,23 @@ function truncateText(value: string, maxLength = 54): string {
   return `${value.slice(0, maxLength - 3)}...`;
 }
 
-function getTaskStatusLabel(status: TaskStatus): string {
-  if (status === "TODO") return "To Do";
-  if (status === "DOING") return "In Progress";
-  if (status === "DONE") return "Done";
-  return "Archived";
+function getTaskStatusLabel(status: TaskStatus, locale: "en" | "th"): string {
+  if (status === "TODO") return translate(locale, "taskForm.status.todo");
+  if (status === "DOING") return translate(locale, "taskForm.status.doing");
+  if (status === "DONE") return translate(locale, "taskForm.status.done");
+  return translate(locale, "taskForm.status.archived");
 }
 
-function isTaskSearchMatch(task: Task, searchValue: string): boolean {
+function isTaskSearchMatch(
+  task: Task,
+  searchValue: string,
+  locale: "en" | "th",
+): boolean {
   const haystack = [
     task.title,
     task.description ?? "",
     task.priority,
-    getTaskStatusLabel(task.status),
+    getTaskStatusLabel(task.status, locale),
   ].join(" ");
   return includesAllTerms(haystack, searchValue);
 }
@@ -82,6 +87,25 @@ export function CommandPalette({
   onChangeTaskStatus,
   onChangeView,
 }: CommandPaletteProps) {
+  const { locale, t } = useI18n();
+  const isTh = locale === "th";
+  const groupActionsLabel = t("commandPalette.group.actions");
+  const groupNavigationLabel = t("commandPalette.group.navigation");
+  const groupTasksLabel = t("commandPalette.group.tasks");
+  const viewLabelById: Record<ViewMode, string> = {
+    board: t("shell.nav.board"),
+    projects: t("shell.nav.projects"),
+    calendar: t("shell.nav.calendar"),
+    today: t("shell.nav.today"),
+    upcoming: t("shell.nav.upcoming"),
+    conflicts: t("shell.nav.conflicts"),
+    review: t("shell.nav.review"),
+    dashboard: t("shell.nav.dashboard"),
+    settings: t("shell.nav.settings"),
+  };
+  const commandInputPlaceholder = t("commandPalette.input.placeholder");
+  const emptyCommandsLabel = t("commandPalette.empty");
+  const footerHint = t("commandPalette.footerHint");
   const [query, setQuery] = useState("");
   const [selectedIndex, setSelectedIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement | null>(null);
@@ -91,26 +115,35 @@ export function CommandPalette({
     const staticCommands: PaletteCommand[] = [
       {
         id: "action-new-task",
-        group: "Actions",
-        label: "Create new task",
-        shortcut: "Cmd/Ctrl + N",
-        keywords: "new task create add",
+        group: groupActionsLabel,
+        label: t("commandPalette.action.createTask"),
+        shortcut: t("shell.createTask.shortcut"),
+        keywords: isTh ? "งาน สร้าง เพิ่ม ใหม่" : "new task create add",
         onSelect: onOpenCreate,
       },
       {
         id: "action-quick-capture",
-        group: "Actions",
-        label: "Open quick capture",
-        shortcut: "Cmd/Ctrl + Shift + N",
-        keywords: "quick capture capture inbox",
+        group: groupActionsLabel,
+        label: t("commandPalette.action.quickCapture"),
+        shortcut: t("commandPalette.shortcut.quickCapture"),
+        keywords: isTh
+          ? "บันทึก ด่วน quick capture inbox"
+          : "quick capture capture inbox",
         onSelect: onOpenQuickCapture,
       },
       ...VIEW_COMMANDS.map((viewCommand) => ({
         id: `view-${viewCommand.view}`,
-        group: "Navigation",
-        label: `Go to ${viewCommand.label}`,
-        meta: activeView === viewCommand.view ? "Current" : undefined,
-        keywords: `go view page ${viewCommand.label}`,
+        group: groupNavigationLabel,
+        label: t("commandPalette.nav.goTo", {
+          view: viewLabelById[viewCommand.view],
+        }),
+        meta:
+          activeView === viewCommand.view
+            ? t("commandPalette.meta.current")
+            : undefined,
+        keywords: isTh
+          ? `ไป หน้า มุมมอง ${viewLabelById[viewCommand.view]}`
+          : `go view page ${viewLabelById[viewCommand.view]}`,
         onSelect: () => onChangeView(viewCommand.view),
       })),
     ];
@@ -128,7 +161,7 @@ export function CommandPalette({
     if (normalizedQuery.length > 0) {
       const matchedTasks = tasks
         .filter((task) => task.status !== "ARCHIVED")
-        .filter((task) => isTaskSearchMatch(task, normalizedQuery))
+        .filter((task) => isTaskSearchMatch(task, normalizedQuery, locale))
         .sort(
           (leftTask, rightTask) =>
             new Date(rightTask.updated_at).getTime() -
@@ -139,37 +172,53 @@ export function CommandPalette({
       for (const task of matchedTasks) {
         taskCommands.push({
           id: `task-edit-${task.id}`,
-          group: "Tasks",
-          label: `Edit task: ${truncateText(task.title)}`,
-          meta: getTaskStatusLabel(task.status),
-          keywords: `edit task open ${task.title}`,
+          group: groupTasksLabel,
+          label: t("commandPalette.task.edit", {
+            title: truncateText(task.title),
+          }),
+          meta: getTaskStatusLabel(task.status, locale),
+          keywords: isTh
+            ? `แก้ไข งาน เปิด ${task.title}`
+            : `edit task open ${task.title}`,
           onSelect: () => onEditTask(task),
         });
 
         if (task.status !== "TODO") {
           taskCommands.push({
             id: `task-status-todo-${task.id}`,
-            group: "Tasks",
-            label: `Set To Do: ${truncateText(task.title, 44)}`,
-            keywords: `status todo ${task.title}`,
+            group: groupTasksLabel,
+            label: t("commandPalette.task.setTodo", {
+              title: truncateText(task.title, 44),
+            }),
+            keywords: isTh
+              ? `สถานะ ต้องทำ ${task.title}`
+              : `status todo ${task.title}`,
             onSelect: () => onChangeTaskStatus(task.id, "TODO"),
           });
         }
         if (task.status !== "DOING") {
           taskCommands.push({
             id: `task-status-doing-${task.id}`,
-            group: "Tasks",
-            label: `Set In Progress: ${truncateText(task.title, 40)}`,
-            keywords: `status doing in progress ${task.title}`,
+            group: groupTasksLabel,
+            label: t("commandPalette.task.setDoing", {
+              title: truncateText(task.title, 40),
+            }),
+            keywords: isTh
+              ? `สถานะ กำลังทำ ${task.title}`
+              : `status doing in progress ${task.title}`,
             onSelect: () => onChangeTaskStatus(task.id, "DOING"),
           });
         }
         if (task.status !== "DONE") {
           taskCommands.push({
             id: `task-status-done-${task.id}`,
-            group: "Tasks",
-            label: `Set Done: ${truncateText(task.title, 46)}`,
-            keywords: `status done complete ${task.title}`,
+            group: groupTasksLabel,
+            label: t("commandPalette.task.setDone", {
+              title: truncateText(task.title, 46),
+            }),
+            keywords: isTh
+              ? `สถานะ เสร็จแล้ว ${task.title}`
+              : `status done complete ${task.title}`,
             onSelect: () => onChangeTaskStatus(task.id, "DONE"),
           });
         }
@@ -186,6 +235,13 @@ export function CommandPalette({
     onEditTask,
     onOpenCreate,
     onOpenQuickCapture,
+    locale,
+    groupActionsLabel,
+    groupNavigationLabel,
+    groupTasksLabel,
+    isTh,
+    t,
+    viewLabelById,
   ]);
 
   useEffect(() => {
@@ -268,7 +324,7 @@ export function CommandPalette({
           <input
             ref={inputRef}
             className="command-input"
-            placeholder="Type a command..."
+            placeholder={commandInputPlaceholder}
             value={query}
             onChange={(event) => setQuery(event.target.value)}
           />
@@ -276,7 +332,7 @@ export function CommandPalette({
 
         <div className="command-list">
           {commands.length === 0 ? (
-            <div className="command-empty">No matching commands.</div>
+            <div className="command-empty">{emptyCommandsLabel}</div>
           ) : (
             commands.map((command, index) => {
               const previousCommand = commands[index - 1];
@@ -314,9 +370,7 @@ export function CommandPalette({
           )}
         </div>
 
-        <p className="command-footer">
-          Enter to run • Arrow keys to navigate • Esc to close
-        </p>
+        <p className="command-footer">{footerHint}</p>
       </div>
 
       <style>{`

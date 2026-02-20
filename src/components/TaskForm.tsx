@@ -1,4 +1,6 @@
 import { useState, useEffect, useMemo } from "react";
+import { translate, useI18n } from "@/lib/i18n";
+import { localizeErrorMessage } from "@/lib/error-message";
 import type {
   Task,
   TaskTemplate,
@@ -38,137 +40,182 @@ import {
 import { parseNaturalDueDate } from "@/lib/natural-date";
 import { renderMarkdownToHtml } from "@/lib/markdown";
 
-const PRIORITIES: {
+const PRIORITY_OPTIONS: {
   value: TaskPriority;
-  label: string;
   icon: React.ReactNode;
   color: string;
 }[] = [
   {
     value: "URGENT",
-    label: "Urgent",
     icon: <AlertTriangle size={13} />,
     color: "var(--danger)",
   },
   {
     value: "NORMAL",
-    label: "Normal",
     icon: <Minus size={13} />,
     color: "var(--accent)",
   },
   {
     value: "LOW",
-    label: "Low",
     icon: <ArrowDown size={13} />,
     color: "var(--text-muted)",
   },
 ];
 
-const STATUS_LABELS: Record<TaskStatus, string> = {
-  TODO: "To Do",
-  DOING: "In Progress",
-  DONE: "Done",
-  ARCHIVED: "Archived",
-};
+const RECURRENCE_OPTIONS: TaskRecurrence[] = [
+  "NONE",
+  "DAILY",
+  "WEEKLY",
+  "MONTHLY",
+];
 
-const PRIORITY_LABELS: Record<TaskPriority, string> = {
-  URGENT: "Urgent",
-  NORMAL: "Normal",
-  LOW: "Low",
-};
+function getPriorityLabel(priority: TaskPriority, locale: "en" | "th"): string {
+  if (priority === "URGENT")
+    return translate(locale, "taskForm.priority.urgent");
+  if (priority === "LOW") return translate(locale, "taskForm.priority.low");
+  return translate(locale, "taskForm.priority.normal");
+}
 
-const RECURRENCE_LABELS: Record<TaskRecurrence, string> = {
-  NONE: "Does not repeat",
-  DAILY: "Daily",
-  WEEKLY: "Weekly",
-  MONTHLY: "Monthly",
-};
+function getStatusLabel(status: TaskStatus, locale: "en" | "th"): string {
+  if (status === "TODO") return translate(locale, "taskForm.status.todo");
+  if (status === "DOING") return translate(locale, "taskForm.status.doing");
+  if (status === "ARCHIVED")
+    return translate(locale, "taskForm.status.archived");
+  return translate(locale, "taskForm.status.done");
+}
 
-function getErrorMessage(error: unknown): string {
-  if (error instanceof Error && error.message.trim()) {
-    return error.message;
-  }
-  if (typeof error === "string" && error.trim()) {
-    return error;
-  }
-  return "Unable to complete the request.";
+function getRecurrenceLabel(
+  recurrence: TaskRecurrence,
+  locale: "en" | "th",
+): string {
+  if (recurrence === "DAILY")
+    return translate(locale, "taskForm.recurrence.daily");
+  if (recurrence === "WEEKLY")
+    return translate(locale, "taskForm.recurrence.weekly");
+  if (recurrence === "MONTHLY")
+    return translate(locale, "taskForm.recurrence.monthly");
+  return translate(locale, "taskForm.recurrence.none");
+}
+
+function getErrorMessage(error: unknown, locale: "en" | "th"): string {
+  return localizeErrorMessage(error, locale, "common.error.unableRequest");
+}
+
+function getChangelogFieldLabel(
+  fieldName: string | null,
+  locale: "en" | "th",
+): string {
+  if (fieldName === "status")
+    return translate(locale, "taskForm.changelog.field.status");
+  if (fieldName === "priority")
+    return translate(locale, "taskForm.changelog.field.priority");
+  if (fieldName === "title")
+    return translate(locale, "taskForm.changelog.field.title");
+  if (fieldName === "description")
+    return translate(locale, "taskForm.changelog.field.description");
+  if (fieldName === "notes_markdown")
+    return translate(locale, "taskForm.changelog.field.notes");
+  if (fieldName === "is_important")
+    return translate(locale, "taskForm.changelog.field.importance");
+  if (fieldName === "due_at")
+    return translate(locale, "taskForm.changelog.field.dueAt");
+  if (fieldName === "remind_at")
+    return translate(locale, "taskForm.changelog.field.reminder");
+  if (fieldName === "recurrence")
+    return translate(locale, "taskForm.changelog.field.recurrence");
+  if (fieldName === "project_id")
+    return translate(locale, "taskForm.changelog.field.project");
+  return translate(locale, "taskForm.changelog.field.task");
 }
 
 function formatChangelogValue(
   fieldName: string | null,
   value: string | null,
+  locale: "en" | "th",
 ): string {
   if (fieldName === "project_id") {
-    return value ? `Project (${value.slice(0, 8)})` : "No project";
+    if (value) {
+      return translate(locale, "taskForm.changelog.projectShort", {
+        id: value.slice(0, 8),
+      });
+    }
+    return translate(locale, "taskForm.changelog.noProject");
   }
 
-  if (!value) return "Empty";
+  if (!value) return translate(locale, "taskForm.changelog.emptyValue");
 
   if (fieldName === "notes_markdown") {
     const collapsedValue = value.replace(/\s+/g, " ").trim();
-    if (!collapsedValue) return "Empty";
+    if (!collapsedValue)
+      return translate(locale, "taskForm.changelog.emptyValue");
     if (collapsedValue.length <= 56) return collapsedValue;
     return `${collapsedValue.slice(0, 53)}...`;
   }
 
-  if (fieldName === "status" && value in STATUS_LABELS) {
-    return STATUS_LABELS[value as TaskStatus];
+  if (
+    fieldName === "status" &&
+    (value === "TODO" ||
+      value === "DOING" ||
+      value === "DONE" ||
+      value === "ARCHIVED")
+  ) {
+    return getStatusLabel(value as TaskStatus, locale);
   }
 
-  if (fieldName === "priority" && value in PRIORITY_LABELS) {
-    return PRIORITY_LABELS[value as TaskPriority];
+  if (
+    fieldName === "priority" &&
+    (value === "URGENT" || value === "NORMAL" || value === "LOW")
+  ) {
+    return getPriorityLabel(value as TaskPriority, locale);
   }
 
   if (fieldName === "is_important") {
-    return value === "true" ? "Important" : "Not important";
+    if (value === "true")
+      return translate(locale, "taskForm.changelog.important");
+    return translate(locale, "taskForm.changelog.notImportant");
   }
 
   if (
     (fieldName === "due_at" || fieldName === "remind_at") &&
     !Number.isNaN(new Date(value).getTime())
   ) {
-    return formatDateTimeForDisplay(value);
+    return formatDateTimeForDisplay(value, locale);
   }
 
-  if (fieldName === "recurrence" && value in RECURRENCE_LABELS) {
-    return RECURRENCE_LABELS[value as TaskRecurrence];
+  if (
+    fieldName === "recurrence" &&
+    (value === "NONE" ||
+      value === "DAILY" ||
+      value === "WEEKLY" ||
+      value === "MONTHLY")
+  ) {
+    return getRecurrenceLabel(value as TaskRecurrence, locale);
   }
 
   return value;
 }
 
-function formatChangelogMessage(log: TaskChangelog): string {
+function formatChangelogMessage(
+  log: TaskChangelog,
+  locale: "en" | "th",
+): string {
   if (log.action === "CREATED") {
-    return `Task created: ${formatChangelogValue(null, log.new_value)}`;
+    return translate(locale, "taskForm.changelog.created", {
+      value: formatChangelogValue(null, log.new_value, locale),
+    });
   }
 
-  const fieldLabel =
-    log.field_name === "status"
-      ? "Status"
-      : log.field_name === "priority"
-        ? "Priority"
-        : log.field_name === "title"
-          ? "Title"
-          : log.field_name === "description"
-            ? "Description"
-            : log.field_name === "notes_markdown"
-              ? "Notes"
-              : log.field_name === "is_important"
-                ? "Importance"
-                : log.field_name === "due_at"
-                  ? "Due date"
-                  : log.field_name === "remind_at"
-                    ? "Reminder"
-                    : log.field_name === "recurrence"
-                      ? "Repeat"
-                      : log.field_name === "project_id"
-                        ? "Project"
-                        : "Task";
-
-  return `${fieldLabel} changed from ${formatChangelogValue(log.field_name, log.old_value)} to ${formatChangelogValue(log.field_name, log.new_value)}`;
+  const fieldLabel = getChangelogFieldLabel(log.field_name, locale);
+  const oldValue = formatChangelogValue(log.field_name, log.old_value, locale);
+  const newValue = formatChangelogValue(log.field_name, log.new_value, locale);
+  return translate(locale, "taskForm.changelog.changed", {
+    field: fieldLabel,
+    from: oldValue,
+    to: newValue,
+  });
 }
 
-function formatRelativeDate(dateStr: string): string {
+function formatRelativeDate(dateStr: string, locale: "en" | "th"): string {
   const date = new Date(dateStr);
   const now = new Date();
   const diffMs = now.getTime() - date.getTime();
@@ -176,17 +223,33 @@ function formatRelativeDate(dateStr: string): string {
   const diffHours = Math.floor(diffMins / 60);
   const diffDays = Math.floor(diffHours / 24);
 
-  if (diffMins < 1) return "Just now";
-  if (diffMins < 60) return `${diffMins}m ago`;
-  if (diffHours < 24) return `${diffHours}h ago`;
-  if (diffDays < 7) return `${diffDays}d ago`;
-  return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  if (diffMins < 1) return translate(locale, "taskForm.relative.justNow");
+  if (diffMins < 60) {
+    return translate(locale, "taskForm.relative.minutesAgo", {
+      count: diffMins,
+    });
+  }
+  if (diffHours < 24) {
+    return translate(locale, "taskForm.relative.hoursAgo", {
+      count: diffHours,
+    });
+  }
+  if (diffDays < 7) {
+    return translate(locale, "taskForm.relative.daysAgo", { count: diffDays });
+  }
+  return date.toLocaleDateString(locale === "th" ? "th-TH" : "en-US", {
+    month: "short",
+    day: "numeric",
+  });
 }
 
-function formatDateTimeForDisplay(dateStr: string): string {
+function formatDateTimeForDisplay(
+  dateStr: string,
+  locale: "en" | "th",
+): string {
   const date = new Date(dateStr);
   if (Number.isNaN(date.getTime())) return dateStr;
-  return date.toLocaleString("en-US", {
+  return date.toLocaleString(locale === "th" ? "th-TH" : "en-US", {
     month: "short",
     day: "numeric",
     hour: "numeric",
@@ -261,6 +324,7 @@ export function TaskForm({
   onSubmit,
   onClose,
 }: TaskFormProps) {
+  const { locale, t } = useI18n();
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [notesMarkdown, setNotesMarkdown] = useState("");
@@ -381,19 +445,19 @@ export function TaskForm({
     const normalizedNotesMarkdown = normalizeNotesMarkdownInput(notesMarkdown);
 
     if (dueAt && !dueAtIso) {
-      setTimeError("Due date format is invalid.");
+      setTimeError(t("taskForm.error.invalidDueFormat"));
       return;
     }
     if (remindAt && !remindAtIso) {
-      setTimeError("Reminder format is invalid.");
+      setTimeError(t("taskForm.error.invalidReminderFormat"));
       return;
     }
     if (dueAtIso && remindAtIso && remindAtIso > dueAtIso) {
-      setTimeError("Reminder must be set before the due date.");
+      setTimeError(t("taskForm.error.reminderAfterDue"));
       return;
     }
     if (recurrence !== "NONE" && !dueAtIso) {
-      setTimeError("Recurring tasks require a due date.");
+      setTimeError(t("taskForm.error.recurringNeedsDue"));
       return;
     }
     setTimeError(null);
@@ -458,8 +522,13 @@ export function TaskForm({
 
     const suggestedName =
       selectedTemplate?.name ??
-      (title.trim() ? `${title.trim().slice(0, 40)} Template` : "My Template");
-    const inputName = window.prompt("Template name", suggestedName);
+      (title.trim()
+        ? `${title.trim().slice(0, 40)} ${t("taskForm.template.word")}`
+        : t("taskForm.template.defaultName"));
+    const inputName = window.prompt(
+      t("taskForm.template.promptName"),
+      suggestedName,
+    );
     if (!inputName) return;
 
     const normalizedName = inputName.trim();
@@ -469,19 +538,19 @@ export function TaskForm({
     const remindAtIso = toIsoDateTime(remindAt);
 
     if (dueAt && !dueAtIso) {
-      setTemplateError("Due date format is invalid.");
+      setTemplateError(t("taskForm.error.invalidDueFormat"));
       return;
     }
     if (remindAt && !remindAtIso) {
-      setTemplateError("Reminder format is invalid.");
+      setTemplateError(t("taskForm.error.invalidReminderFormat"));
       return;
     }
     if (dueAtIso && remindAtIso && remindAtIso > dueAtIso) {
-      setTemplateError("Reminder must be set before the due date.");
+      setTemplateError(t("taskForm.error.reminderAfterDue"));
       return;
     }
     if (recurrence !== "NONE" && !dueAtIso) {
-      setTemplateError("Recurring templates require a due date.");
+      setTemplateError(t("taskForm.error.recurringTemplateNeedsDue"));
       return;
     }
 
@@ -511,14 +580,16 @@ export function TaskForm({
       setSelectedTemplateId(savedTemplate.id);
       setTemplateError(null);
     } catch (error) {
-      setTemplateError(getErrorMessage(error));
+      setTemplateError(getErrorMessage(error, locale));
     }
   };
 
   const handleDeleteTemplate = async () => {
     if (!selectedTemplate) return;
     if (
-      !window.confirm(`Delete template "${selectedTemplate.name}" permanently?`)
+      !window.confirm(
+        t("taskForm.template.deleteConfirm", { name: selectedTemplate.name }),
+      )
     ) {
       return;
     }
@@ -528,14 +599,19 @@ export function TaskForm({
       setSelectedTemplateId("");
       setTemplateError(null);
     } catch (error) {
-      setTemplateError(getErrorMessage(error));
+      setTemplateError(getErrorMessage(error, locale));
     }
   };
 
   const handleCreateProject = async () => {
     const suggestedName =
-      title.trim().length > 0 ? `${title.trim().slice(0, 40)} Project` : "";
-    const inputName = window.prompt("Project name", suggestedName);
+      title.trim().length > 0
+        ? `${title.trim().slice(0, 40)} ${t("taskForm.project.word")}`
+        : "";
+    const inputName = window.prompt(
+      t("taskForm.project.promptName"),
+      suggestedName,
+    );
     if (!inputName) return;
 
     const normalizedName = inputName.trim();
@@ -548,7 +624,7 @@ export function TaskForm({
       setProjectId(project.id);
       setProjectError(null);
     } catch (error) {
-      setProjectError(getErrorMessage(error));
+      setProjectError(getErrorMessage(error, locale));
     }
   };
 
@@ -566,7 +642,7 @@ export function TaskForm({
         setNewSubtaskTitle("");
         setSubtaskError(null);
       } catch (error) {
-        setSubtaskError(getErrorMessage(error));
+        setSubtaskError(getErrorMessage(error, locale));
       }
       return;
     }
@@ -592,7 +668,7 @@ export function TaskForm({
         });
         setSubtaskError(null);
       } catch (error) {
-        setSubtaskError(getErrorMessage(error));
+        setSubtaskError(getErrorMessage(error, locale));
       }
       return;
     }
@@ -612,7 +688,7 @@ export function TaskForm({
         await deleteTaskSubtask.mutateAsync({ id: subtaskId, taskId: task.id });
         setSubtaskError(null);
       } catch (error) {
-        setSubtaskError(getErrorMessage(error));
+        setSubtaskError(getErrorMessage(error, locale));
       }
       return;
     }
@@ -628,9 +704,7 @@ export function TaskForm({
 
     const parsedDueDate = parseNaturalDueDate(normalizedInput, new Date());
     if (!parsedDueDate) {
-      setTimeError(
-        "Could not parse due date. Try phrases like 'tomorrow 9am' or 'next monday'.",
-      );
+      setTimeError(t("taskForm.error.naturalParseFailed"));
       return;
     }
 
@@ -648,9 +722,13 @@ export function TaskForm({
         {/* Header */}
         <div className="modal-header">
           <h2 className="modal-title">
-            {isEditing ? "Edit Task" : "New Task"}
+            {isEditing ? t("taskForm.title.edit") : t("taskForm.title.new")}
           </h2>
-          <button className="modal-close" onClick={onClose}>
+          <button
+            className="modal-close"
+            onClick={onClose}
+            aria-label={t("taskForm.closeAria")}
+          >
             <X size={16} />
           </button>
         </div>
@@ -659,7 +737,7 @@ export function TaskForm({
           {/* Title */}
           <div className="field">
             <label className="field-label" htmlFor="task-title">
-              Title
+              {t("taskForm.field.title")}
             </label>
             <input
               id="task-title"
@@ -667,7 +745,7 @@ export function TaskForm({
               className="input"
               value={title}
               onChange={(e) => setTitle(e.target.value)}
-              placeholder="What needs to be done?"
+              placeholder={t("taskForm.placeholder.title")}
               autoFocus
               required
             />
@@ -676,14 +754,15 @@ export function TaskForm({
           {/* Description */}
           <div className="field">
             <label className="field-label" htmlFor="task-desc">
-              Description <span className="optional">(optional)</span>
+              {t("taskForm.field.description")}{" "}
+              <span className="optional">({t("taskForm.optional")})</span>
             </label>
             <textarea
               id="task-desc"
               className="input textarea"
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              placeholder="Add details..."
+              placeholder={t("taskForm.placeholder.description")}
               rows={3}
             />
           </div>
@@ -691,7 +770,10 @@ export function TaskForm({
           <div className="field notes-section">
             <div className="notes-header">
               <label className="field-label" htmlFor="task-notes-markdown">
-                Notes <span className="optional">(Markdown)</span>
+                {t("taskForm.field.notes")}{" "}
+                <span className="optional">
+                  ({t("taskForm.badge.markdown")})
+                </span>
               </label>
               <div className="notes-mode-row">
                 <button
@@ -699,14 +781,14 @@ export function TaskForm({
                   className={`notes-mode-btn${notesMode === "edit" ? " active" : ""}`}
                   onClick={() => setNotesMode("edit")}
                 >
-                  Edit
+                  {t("taskForm.mode.edit")}
                 </button>
                 <button
                   type="button"
                   className={`notes-mode-btn${notesMode === "preview" ? " active" : ""}`}
                   onClick={() => setNotesMode("preview")}
                 >
-                  Preview
+                  {t("taskForm.mode.preview")}
                 </button>
               </div>
             </div>
@@ -717,7 +799,7 @@ export function TaskForm({
                 className="input textarea notes-textarea"
                 value={notesMarkdown}
                 onChange={(event) => setNotesMarkdown(event.target.value)}
-                placeholder="Use markdown: # heading, - list, **bold**, [link](https://...)"
+                placeholder={t("taskForm.placeholder.notesMarkdown")}
                 rows={8}
               />
             ) : notesPreviewHtml ? (
@@ -727,7 +809,7 @@ export function TaskForm({
               />
             ) : (
               <p className="notes-preview-empty">
-                Nothing to preview yet. Add markdown in Edit mode.
+                {t("taskForm.preview.empty")}
               </p>
             )}
           </div>
@@ -735,7 +817,7 @@ export function TaskForm({
           {!isEditing && (
             <div className="template-section">
               <label className="field-label" htmlFor="task-template">
-                Template
+                {t("taskForm.field.template")}
               </label>
               <div className="template-row">
                 <select
@@ -746,7 +828,7 @@ export function TaskForm({
                     setSelectedTemplateId(event.target.value)
                   }
                 >
-                  <option value="">Select a template...</option>
+                  <option value="">{t("taskForm.template.select")}</option>
                   {taskTemplates.map((template) => (
                     <option key={template.id} value={template.id}>
                       {template.name}
@@ -759,7 +841,7 @@ export function TaskForm({
                   onClick={handleApplyTemplate}
                   disabled={!selectedTemplate || isLoadingTaskTemplates}
                 >
-                  Apply
+                  {t("taskForm.template.apply")}
                 </button>
               </div>
               <div className="template-actions">
@@ -770,7 +852,9 @@ export function TaskForm({
                   disabled={upsertTaskTemplate.isPending}
                 >
                   <BookmarkPlus size={12} />
-                  {upsertTaskTemplate.isPending ? "Saving..." : "Save Template"}
+                  {upsertTaskTemplate.isPending
+                    ? t("taskForm.template.saving")
+                    : t("taskForm.template.save")}
                 </button>
                 <button
                   type="button"
@@ -779,7 +863,9 @@ export function TaskForm({
                   disabled={!selectedTemplate || deleteTaskTemplate.isPending}
                 >
                   <Trash2 size={12} />
-                  {deleteTaskTemplate.isPending ? "Deleting..." : "Delete"}
+                  {deleteTaskTemplate.isPending
+                    ? t("taskForm.template.deleting")
+                    : t("taskForm.template.delete")}
                 </button>
               </div>
             </div>
@@ -787,7 +873,8 @@ export function TaskForm({
 
           <div className="field">
             <label className="field-label" htmlFor="task-project">
-              Project <span className="optional">(optional)</span>
+              {t("taskForm.field.project")}{" "}
+              <span className="optional">({t("taskForm.optional")})</span>
             </label>
             <div className="project-row">
               <select
@@ -800,7 +887,7 @@ export function TaskForm({
                 }}
                 disabled={isLoadingProjects}
               >
-                <option value="">No project</option>
+                <option value="">{t("taskForm.project.none")}</option>
                 {projects.map((project) => (
                   <option key={project.id} value={project.id}>
                     {project.name}
@@ -814,7 +901,9 @@ export function TaskForm({
                 disabled={createProject.isPending}
               >
                 <Plus size={12} />
-                {createProject.isPending ? "Creating..." : "New"}
+                {createProject.isPending
+                  ? t("taskForm.project.creating")
+                  : t("taskForm.project.new")}
               </button>
             </div>
           </div>
@@ -825,10 +914,11 @@ export function TaskForm({
                 className="field-label checklist-label"
                 htmlFor="new-subtask"
               >
-                Checklist
+                {t("taskForm.field.checklist")}
               </label>
               <span className="checklist-progress">
-                {completedSubtaskCount} / {checklistItems.length} done
+                {completedSubtaskCount} / {checklistItems.length}{" "}
+                {t("taskForm.checklist.doneSuffix")}
               </span>
             </div>
 
@@ -846,7 +936,7 @@ export function TaskForm({
                   event.preventDefault();
                   void handleAddSubtask();
                 }}
-                placeholder="Add checklist item..."
+                placeholder={t("taskForm.checklist.placeholder")}
                 disabled={isSubtaskMutating}
               />
               <button
@@ -856,14 +946,16 @@ export function TaskForm({
                 disabled={!newSubtaskTitle.trim() || isSubtaskMutating}
               >
                 <Plus size={12} />
-                Add
+                {t("taskForm.checklist.add")}
               </button>
             </div>
 
             {isEditing && isLoadingSubtasks ? (
-              <p className="checklist-empty">Loading checklist...</p>
+              <p className="checklist-empty">
+                {t("taskForm.checklist.loading")}
+              </p>
             ) : checklistItems.length === 0 ? (
-              <p className="checklist-empty">No checklist items yet.</p>
+              <p className="checklist-empty">{t("taskForm.checklist.empty")}</p>
             ) : (
               <div className="checklist-list">
                 {checklistItems.map((subtask) => (
@@ -901,7 +993,7 @@ export function TaskForm({
             <div className="field" style={{ flex: 1 }}>
               <label className="field-label" htmlFor="task-due-at">
                 <CalendarClock size={12} />
-                Due date & time
+                {t("taskForm.field.dueAt")}
               </label>
               <input
                 id="task-due-at"
@@ -918,7 +1010,7 @@ export function TaskForm({
             <div className="field" style={{ flex: 1 }}>
               <label className="field-label" htmlFor="task-remind-at">
                 <Bell size={12} />
-                Reminder
+                {t("taskForm.field.reminder")}
               </label>
               <input
                 id="task-remind-at"
@@ -935,7 +1027,8 @@ export function TaskForm({
 
           <div className="field">
             <label className="field-label" htmlFor="task-natural-due">
-              Smart due input <span className="optional">(beta)</span>
+              {t("taskForm.field.smartDue")}{" "}
+              <span className="optional">({t("taskForm.badge.beta")})</span>
             </label>
             <div className="natural-due-row">
               <input
@@ -952,7 +1045,7 @@ export function TaskForm({
                   event.preventDefault();
                   handleApplyNaturalDueDate();
                 }}
-                placeholder="tomorrow 9am, next monday, in 3 days..."
+                placeholder={t("taskForm.smartDue.placeholder")}
               />
               <button
                 type="button"
@@ -960,18 +1053,16 @@ export function TaskForm({
                 onClick={handleApplyNaturalDueDate}
                 disabled={!naturalDueText.trim()}
               >
-                Apply
+                {t("taskForm.smartDue.apply")}
               </button>
             </div>
-            <p className="field-help">
-              Examples: tomorrow 9am, next monday, in 3 days, 2026-03-01 14:30
-            </p>
+            <p className="field-help">{t("taskForm.smartDue.examples")}</p>
           </div>
 
           <div className="field">
             <label className="field-label" htmlFor="task-recurrence">
               <Repeat2 size={12} />
-              Repeat
+              {t("taskForm.field.repeat")}
             </label>
             <select
               id="task-recurrence"
@@ -981,19 +1072,22 @@ export function TaskForm({
                 setRecurrence(event.target.value as TaskRecurrence)
               }
             >
-              <option value="NONE">Does not repeat</option>
-              <option value="DAILY">Daily</option>
-              <option value="WEEKLY">Weekly</option>
-              <option value="MONTHLY">Monthly</option>
+              {RECURRENCE_OPTIONS.map((optionValue) => (
+                <option key={optionValue} value={optionValue}>
+                  {getRecurrenceLabel(optionValue, locale)}
+                </option>
+              ))}
             </select>
           </div>
 
           {/* Priority & Important */}
           <div className="field-row">
             <div className="field" style={{ flex: 1 }}>
-              <label className="field-label">Priority</label>
+              <label className="field-label">
+                {t("taskForm.field.priority")}
+              </label>
               <div className="priority-group">
-                {PRIORITIES.map((p) => (
+                {PRIORITY_OPTIONS.map((p) => (
                   <button
                     key={p.value}
                     type="button"
@@ -1005,14 +1099,16 @@ export function TaskForm({
                     }}
                   >
                     {p.icon}
-                    {p.label}
+                    {getPriorityLabel(p.value, locale)}
                   </button>
                 ))}
               </div>
             </div>
 
             <div className="field">
-              <label className="field-label">Importance</label>
+              <label className="field-label">
+                {t("taskForm.field.importance")}
+              </label>
               <button
                 type="button"
                 className={`important-toggle ${isImportant ? "active" : ""}`}
@@ -1023,7 +1119,9 @@ export function TaskForm({
                   fill={isImportant ? "var(--warning)" : "none"}
                   color={isImportant ? "var(--warning)" : "var(--text-muted)"}
                 />
-                {isImportant ? "Important" : "Mark important"}
+                {isImportant
+                  ? t("taskForm.importance.on")
+                  : t("taskForm.importance.mark")}
               </button>
             </div>
           </div>
@@ -1035,24 +1133,30 @@ export function TaskForm({
 
           {isEditing && (
             <div className="changelog-section">
-              <h3 className="changelog-title">Recent Changes</h3>
+              <h3 className="changelog-title">
+                {t("taskForm.changelog.title")}
+              </h3>
               {isLoadingChangelog ? (
-                <p className="changelog-state">Loading changelog...</p>
+                <p className="changelog-state">
+                  {t("taskForm.changelog.loading")}
+                </p>
               ) : isChangelogError ? (
                 <p className="changelog-state changelog-state-error">
-                  {getErrorMessage(changelogError)}
+                  {getErrorMessage(changelogError, locale)}
                 </p>
               ) : changelogs.length === 0 ? (
-                <p className="changelog-state">No changes recorded yet.</p>
+                <p className="changelog-state">
+                  {t("taskForm.changelog.empty")}
+                </p>
               ) : (
                 <div className="changelog-list">
                   {changelogs.map((log) => (
                     <div key={log.id} className="changelog-item">
                       <p className="changelog-message">
-                        {formatChangelogMessage(log)}
+                        {formatChangelogMessage(log, locale)}
                       </p>
                       <span className="changelog-date">
-                        {formatRelativeDate(log.created_at)}
+                        {formatRelativeDate(log.created_at, locale)}
                       </span>
                     </div>
                   ))}
@@ -1064,14 +1168,16 @@ export function TaskForm({
           {/* Actions */}
           <div className="modal-actions">
             <button type="button" className="btn-cancel" onClick={onClose}>
-              Cancel
+              {t("taskForm.action.cancel")}
             </button>
             <button
               type="submit"
               className="btn-submit"
               disabled={!title.trim()}
             >
-              {isEditing ? "Save Changes" : "Create Task"}
+              {isEditing
+                ? t("taskForm.action.saveChanges")
+                : t("taskForm.action.createTask")}
             </button>
           </div>
         </form>

@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
+  getAppLocaleSetting,
   getAllTasks,
   getProjects,
   getTodayTasks,
@@ -29,6 +30,7 @@ import {
   listSyncConflicts,
   listSyncConflictEvents,
   restoreLatestBackupPayload,
+  updateAppLocaleSetting,
   getSyncEndpointSettings,
   getSyncProviderSettings,
   getSyncRuntimeProfileSettings,
@@ -39,6 +41,7 @@ import {
   updateSyncRuntimeSettings,
 } from "@/lib/database";
 import type {
+  AppLocaleSetting,
   BackupRestorePreflight,
   BackupPayload,
   CreateProjectInput,
@@ -50,6 +53,7 @@ import type {
   SyncConflictReportPayload,
   SyncConflictStatus,
   UpdateSyncEndpointSettingsInput,
+  UpdateAppLocaleSettingInput,
   UpdateSyncProviderSettingsInput,
   SyncRuntimeProfilePreset,
   UpdateSyncRuntimeSettingsInput,
@@ -71,6 +75,7 @@ const TASK_SUBTASKS_KEY = ["task-subtasks"] as const;
 const TASK_SUBTASK_STATS_KEY = ["task-subtask-stats"] as const;
 const TASK_TEMPLATES_KEY = ["task-templates"] as const;
 const PROJECTS_KEY = ["projects"] as const;
+const APP_LOCALE_SETTING_KEY = ["app-locale-setting"] as const;
 const SYNC_SETTINGS_KEY = ["sync-settings"] as const;
 const SYNC_PROVIDER_SETTINGS_KEY = ["sync-provider-settings"] as const;
 const SYNC_RUNTIME_SETTINGS_KEY = ["sync-runtime-settings"] as const;
@@ -347,6 +352,27 @@ export function useSyncSettings() {
   return useQuery({
     queryKey: SYNC_SETTINGS_KEY,
     queryFn: getSyncEndpointSettings,
+  });
+}
+
+/** Read persisted app locale setting */
+export function useAppLocaleSetting() {
+  return useQuery({
+    queryKey: APP_LOCALE_SETTING_KEY,
+    queryFn: getAppLocaleSetting,
+  });
+}
+
+/** Update persisted app locale setting */
+export function useUpdateAppLocaleSetting() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (input: UpdateAppLocaleSettingInput) =>
+      updateAppLocaleSetting(input),
+    onSuccess: (_result: AppLocaleSetting) => {
+      queryClient.invalidateQueries({ queryKey: APP_LOCALE_SETTING_KEY });
+    },
   });
 }
 
