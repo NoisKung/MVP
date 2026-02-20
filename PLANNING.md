@@ -741,7 +741,7 @@ Validation Evidence:
 7. `npm run build` passed
 8. `npm run test -- --run src/lib/i18n.catalog.test.ts` passed
 9. `npm run build` passed
-10. `npm run test -- --run src/components/AppShell.test.tsx src/lib/database.sessions.test.ts src/lib/i18n.catalog.test.ts` passed
+10. `npm run test -- --run src/components/TaskCard.test.tsx src/components/AppShell.test.tsx src/lib/database.sessions.test.ts` passed
 11. `npm run build` passed
 
 Next pending item to pull:

@@ -614,6 +614,7 @@
     - เพิ่ม global focus indicator + stop control ใน sidebar footer เพื่อหยุด session ได้จากทุกหน้า
     - บันทึก focus session ลง `sessions` เมื่อ stop
     - harden การลบ task: clear `sessions.task_id` เป็น `NULL` ก่อน delete เพื่อกัน FK fail
+    - เพิ่ม UI coverage test สำหรับ focus controls (`TaskCard` start/stop/disabled states)
 - Next:
   - QoL Sprint C ปิดครบทุกหัวข้อแล้ว; ดึงงานถัดไปจาก `P3-8 i18n` / rollout backlog
 
