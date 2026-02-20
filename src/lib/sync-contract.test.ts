@@ -10,6 +10,7 @@ import {
   parseSyncApiError,
   parseSyncPullResponse,
   parseSyncPushResponse,
+  SYNC_ERROR_CODES,
 } from "@/lib/sync-contract";
 import type { SyncPushChange } from "@/lib/types";
 
@@ -41,7 +42,9 @@ describe("sync-contract", () => {
     expect(createSyncIdempotencyKey(" Device-A ", " Change-1 ")).toBe(
       "device-a:change-1",
     );
-    expect(() => createSyncIdempotencyKey("", "x")).toThrow(/idempotency key/i);
+    expect(() => createSyncIdempotencyKey("", "x")).toThrow(
+      SYNC_ERROR_CODES.IDEMPOTENCY_KEY_REQUIRES_IDS,
+    );
   });
 
   it("builds normalized push requests", () => {
@@ -177,7 +180,7 @@ describe("sync-contract", () => {
         server_cursor: "",
         server_time: "",
       }),
-    ).toThrow(/metadata/i);
+    ).toThrow(SYNC_ERROR_CODES.PULL_RESPONSE_METADATA_INVALID);
   });
 
   it("parses push response metadata and rejected list", () => {

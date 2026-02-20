@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useI18n } from "@/lib/i18n";
+import { localizeErrorMessage } from "@/lib/error-message";
 import type { Task, TaskStatus } from "@/lib/types";
 import {
   useCreateProject,
@@ -47,29 +49,16 @@ interface ProjectMetrics {
 type ProjectStatusFilter = "ALL" | "ACTIVE" | "COMPLETED";
 type TaskSectionFilter = "ALL" | TaskStatus;
 
-const STATUS_SECTIONS: Array<{ status: TaskStatus; label: string }> = [
-  { status: "TODO", label: "To Do" },
-  { status: "DOING", label: "In Progress" },
-  { status: "DONE", label: "Done" },
-];
-const PROJECT_STATUS_FILTERS: Array<{
-  value: ProjectStatusFilter;
-  label: string;
-}> = [
-  { value: "ALL", label: "All" },
-  { value: "ACTIVE", label: "Active" },
-  { value: "COMPLETED", label: "Completed" },
+const STATUS_SECTIONS: TaskStatus[] = ["TODO", "DOING", "DONE"];
+const PROJECT_STATUS_FILTERS: ProjectStatusFilter[] = [
+  "ALL",
+  "ACTIVE",
+  "COMPLETED",
 ];
 const DEFAULT_PROJECT_COLOR = "#3B82F6";
 
-function getErrorMessage(error: unknown): string {
-  if (error instanceof Error && error.message.trim()) {
-    return error.message;
-  }
-  if (typeof error === "string" && error.trim()) {
-    return error;
-  }
-  return "Unable to complete the request.";
+function getErrorMessage(error: unknown, locale: "en" | "th"): string {
+  return localizeErrorMessage(error, locale, "common.error.unableRequest");
 }
 
 function getProjectMetrics(tasks: Task[], now = new Date()): ProjectMetrics {
@@ -140,6 +129,17 @@ export function ProjectView({
   isDeleteProjectPending,
   pendingDeleteProjectIds,
 }: ProjectViewProps) {
+  const { locale, t } = useI18n();
+  const getStatusSectionLabel = (status: TaskStatus): string => {
+    if (status === "TODO") return t("taskForm.status.todo");
+    if (status === "DOING") return t("taskForm.status.doing");
+    return t("taskForm.status.done");
+  };
+  const getProjectStatusFilterLabel = (value: ProjectStatusFilter): string => {
+    if (value === "ALL") return t("projectView.statusFilter.all");
+    if (value === "ACTIVE") return t("projectView.statusFilter.active");
+    return t("projectView.statusFilter.completed");
+  };
   const {
     data: projects = [],
     isLoading: isLoadingProjects,
@@ -294,9 +294,7 @@ export function ProjectView({
   }, [selectedProjectTasks]);
   const visibleTaskSections = useMemo(() => {
     if (taskSectionFilter === "ALL") return STATUS_SECTIONS;
-    return STATUS_SECTIONS.filter(
-      (section) => section.status === taskSectionFilter,
-    );
+    return STATUS_SECTIONS.filter((status) => status === taskSectionFilter);
   }, [taskSectionFilter]);
 
   const selectedTaskIds = useMemo(
@@ -335,7 +333,7 @@ export function ProjectView({
   const handleCreateProject = async () => {
     const normalizedName = createName.trim();
     if (!normalizedName) {
-      setActionError("Project name is required.");
+      setActionError(t("projectView.error.projectNameRequired"));
       return;
     }
     const normalizedDescription = createDescription.trim() || null;
@@ -358,7 +356,7 @@ export function ProjectView({
       setCreateDescription("");
       setCreateColor(DEFAULT_PROJECT_COLOR);
     } catch (error) {
-      setActionError(getErrorMessage(error));
+      setActionError(getErrorMessage(error, locale));
     }
   };
 
@@ -389,7 +387,7 @@ export function ProjectView({
     if (!selectedProject) return;
     const normalizedName = editName.trim();
     if (!normalizedName) {
-      setActionError("Project name is required.");
+      setActionError(t("projectView.error.projectNameRequired"));
       return;
     }
     const normalizedDescription = editDescription.trim() || null;
@@ -407,7 +405,7 @@ export function ProjectView({
       });
       setIsEditingDetails(false);
     } catch (error) {
-      setActionError(getErrorMessage(error));
+      setActionError(getErrorMessage(error, locale));
     }
   };
 
@@ -425,7 +423,7 @@ export function ProjectView({
         status: nextStatus,
       });
     } catch (error) {
-      setActionError(getErrorMessage(error));
+      setActionError(getErrorMessage(error, locale));
     }
   };
 
@@ -435,7 +433,7 @@ export function ProjectView({
       setDeleteConfirmProjectId(selectedProject.id);
       setActionError(null);
       setActionNotice(
-        `Click "Confirm Delete" to queue deleting "${selectedProject.name}". You can undo from the Undo bar for a few seconds.`,
+        t("projectView.notice.deleteArm", { name: selectedProject.name }),
       );
       return;
     }
@@ -451,14 +449,14 @@ export function ProjectView({
       if (result.queued) {
         const undoSeconds = Math.max(1, Math.round(result.undoWindowMs / 1000));
         setActionNotice(
-          `Delete queued. This project will be removed in ${undoSeconds}s unless you click Undo.`,
+          t("projectView.notice.deleteQueued", { seconds: undoSeconds }),
         );
       } else {
         setDeleteConfirmProjectId(selectedProject.id);
-        setActionError("This project already has a pending undo action.");
+        setActionError(t("projectView.error.deletePending"));
       }
     } catch (error) {
-      setActionError(getErrorMessage(error));
+      setActionError(getErrorMessage(error, locale));
     }
   };
 
@@ -470,7 +468,7 @@ export function ProjectView({
   if (isLoadingProjects) {
     return (
       <div className="project-view-state">
-        <p>Loading projects...</p>
+        <p>{t("projectView.loadingProjects")}</p>
       </div>
     );
   }
@@ -478,7 +476,7 @@ export function ProjectView({
   if (isProjectsError) {
     return (
       <div className="project-view-state project-view-state-error">
-        <p>{getErrorMessage(projectsError)}</p>
+        <p>{getErrorMessage(projectsError, locale)}</p>
       </div>
     );
   }
@@ -488,22 +486,22 @@ export function ProjectView({
       <>
         <div className="project-view-empty">
           <FolderKanban size={30} />
-          <h2>No projects yet</h2>
-          <p>Create your first project to group tasks and track progress.</p>
+          <h2>{t("projectView.empty.title")}</h2>
+          <p>{t("projectView.empty.subtitle")}</p>
           <div className="project-editor-card project-empty-editor">
             <div className="project-editor-grid">
               <label className="project-editor-field">
-                <span>Name</span>
+                <span>{t("projectView.field.name")}</span>
                 <input
                   className="project-editor-input"
                   value={createName}
                   onChange={(event) => setCreateName(event.target.value)}
-                  placeholder="Project name"
+                  placeholder={t("projectView.placeholder.name")}
                   autoFocus
                 />
               </label>
               <label className="project-editor-field">
-                <span>Color</span>
+                <span>{t("projectView.field.color")}</span>
                 <div className="project-color-input-row">
                   <input
                     type="color"
@@ -521,12 +519,12 @@ export function ProjectView({
               </label>
             </div>
             <label className="project-editor-field">
-              <span>Description</span>
+              <span>{t("projectView.field.description")}</span>
               <textarea
                 className="project-editor-textarea"
                 value={createDescription}
                 onChange={(event) => setCreateDescription(event.target.value)}
-                placeholder="What is this project for?"
+                placeholder={t("projectView.placeholder.description")}
                 rows={2}
               />
             </label>
@@ -537,7 +535,9 @@ export function ProjectView({
                 disabled={!createName.trim() || createProject.isPending}
               >
                 <Plus size={14} />
-                {createProject.isPending ? "Creating..." : "Create Project"}
+                {createProject.isPending
+                  ? t("projectView.action.creating")
+                  : t("projectView.action.createProject")}
               </button>
             </div>
           </div>
@@ -674,11 +674,16 @@ export function ProjectView({
     <div className="project-view-root">
       <div className="project-view-header">
         <div>
-          <h1 className="project-view-title">Projects</h1>
+          <h1 className="project-view-title">
+            {t("projectView.header.title")}
+          </h1>
           <p className="project-view-subtitle">
             {isProjectFilterActive
-              ? `${filteredProjects.length} of ${projects.length} project${projects.length !== 1 ? "s" : ""} shown`
-              : `${projects.length} project${projects.length !== 1 ? "s" : ""} tracked`}
+              ? t("projectView.subtitle.filtered", {
+                  shown: filteredProjects.length,
+                  total: projects.length,
+                })
+              : t("projectView.subtitle.tracked", { count: projects.length })}
           </p>
         </div>
         <div className="project-view-header-actions">
@@ -696,7 +701,7 @@ export function ProjectView({
               disabled={createProject.isPending || updateProject.isPending}
             >
               <X size={12} />
-              Clear Filters
+              {t("projectView.action.clearFilters")}
             </button>
           )}
           <button
@@ -718,7 +723,9 @@ export function ProjectView({
             disabled={createProject.isPending || updateProject.isPending}
           >
             <Plus size={14} />
-            {isCreateFormOpen ? "Close" : "New Project"}
+            {isCreateFormOpen
+              ? t("projectView.action.close")
+              : t("projectView.action.newProject")}
           </button>
         </div>
       </div>
@@ -732,17 +739,17 @@ export function ProjectView({
         <div className="project-editor-card">
           <div className="project-editor-grid">
             <label className="project-editor-field">
-              <span>Name</span>
+              <span>{t("projectView.field.name")}</span>
               <input
                 className="project-editor-input"
                 value={createName}
                 onChange={(event) => setCreateName(event.target.value)}
-                placeholder="Project name"
+                placeholder={t("projectView.placeholder.name")}
                 autoFocus
               />
             </label>
             <label className="project-editor-field">
-              <span>Color</span>
+              <span>{t("projectView.field.color")}</span>
               <div className="project-color-input-row">
                 <input
                   type="color"
@@ -760,12 +767,12 @@ export function ProjectView({
             </label>
           </div>
           <label className="project-editor-field">
-            <span>Description</span>
+            <span>{t("projectView.field.description")}</span>
             <textarea
               className="project-editor-textarea"
               value={createDescription}
               onChange={(event) => setCreateDescription(event.target.value)}
-              placeholder="What is this project for?"
+              placeholder={t("projectView.placeholder.description")}
               rows={2}
             />
           </label>
@@ -782,7 +789,7 @@ export function ProjectView({
               disabled={createProject.isPending}
             >
               <X size={12} />
-              Cancel
+              {t("projectView.action.cancel")}
             </button>
             <button
               type="button"
@@ -791,7 +798,9 @@ export function ProjectView({
               disabled={!createName.trim() || createProject.isPending}
             >
               <Check size={12} />
-              {createProject.isPending ? "Creating..." : "Create"}
+              {createProject.isPending
+                ? t("projectView.action.creating")
+                : t("projectView.action.create")}
             </button>
           </div>
         </div>
@@ -820,7 +829,7 @@ export function ProjectView({
                     projectSearchInputRef.current?.blur();
                   }
                 }}
-                placeholder="Search project..."
+                placeholder={t("projectView.search.placeholder")}
               />
               {projectSearch ? (
                 <button
@@ -830,8 +839,8 @@ export function ProjectView({
                     setProjectSearch("");
                     projectSearchInputRef.current?.focus();
                   }}
-                  aria-label="Clear project search"
-                  title="Clear project search"
+                  aria-label={t("projectView.search.clear")}
+                  title={t("projectView.search.clear")}
                 >
                   <X size={11} />
                 </button>
@@ -841,16 +850,16 @@ export function ProjectView({
             </label>
             <div className="project-status-filter-row">
               {PROJECT_STATUS_FILTERS.map((filterOption) => {
-                const count = projectStatusCounts[filterOption.value];
-                const isActive = projectStatusFilter === filterOption.value;
+                const count = projectStatusCounts[filterOption];
+                const isActive = projectStatusFilter === filterOption;
                 return (
                   <button
-                    key={filterOption.value}
+                    key={filterOption}
                     type="button"
                     className={`project-status-filter-chip${isActive ? " active" : ""}`}
-                    onClick={() => setProjectStatusFilter(filterOption.value)}
+                    onClick={() => setProjectStatusFilter(filterOption)}
                   >
-                    <span>{filterOption.label}</span>
+                    <span>{getProjectStatusFilterLabel(filterOption)}</span>
                     <strong>{count}</strong>
                   </button>
                 );
@@ -860,7 +869,7 @@ export function ProjectView({
           <div className="project-list">
             {filteredProjects.length === 0 ? (
               <p className="project-list-empty">
-                No projects match current filters.
+                {t("projectView.empty.filtered")}
               </p>
             ) : (
               filteredProjects.map((project) => {
@@ -891,8 +900,8 @@ export function ProjectView({
                         className={`project-status-badge${project.status === "COMPLETED" ? " completed" : ""}`}
                       >
                         {project.status === "COMPLETED"
-                          ? "Completed"
-                          : "Active"}
+                          ? t("projectView.status.completed")
+                          : t("projectView.status.active")}
                       </span>
                     </div>
                     <div className="project-progress-track">
@@ -903,9 +912,12 @@ export function ProjectView({
                     </div>
                     <div className="project-list-metrics">
                       <span>
-                        {metrics.done}/{metrics.total} done
+                        {metrics.done}/{metrics.total}{" "}
+                        {t("projectView.metric.done")}
                       </span>
-                      <span>{metrics.overdue} overdue</span>
+                      <span>
+                        {metrics.overdue} {t("projectView.metric.overdue")}
+                      </span>
                     </div>
                   </button>
                 );
@@ -923,18 +935,18 @@ export function ProjectView({
                     <div className="project-editor-card">
                       <div className="project-editor-grid">
                         <label className="project-editor-field">
-                          <span>Name</span>
+                          <span>{t("projectView.field.name")}</span>
                           <input
                             className="project-editor-input"
                             value={editName}
                             onChange={(event) =>
                               setEditName(event.target.value)
                             }
-                            placeholder="Project name"
+                            placeholder={t("projectView.placeholder.name")}
                           />
                         </label>
                         <label className="project-editor-field">
-                          <span>Color</span>
+                          <span>{t("projectView.field.color")}</span>
                           <div className="project-color-input-row">
                             <input
                               type="color"
@@ -956,14 +968,14 @@ export function ProjectView({
                         </label>
                       </div>
                       <label className="project-editor-field">
-                        <span>Description</span>
+                        <span>{t("projectView.field.description")}</span>
                         <textarea
                           className="project-editor-textarea"
                           value={editDescription}
                           onChange={(event) =>
                             setEditDescription(event.target.value)
                           }
-                          placeholder="What is this project for?"
+                          placeholder={t("projectView.placeholder.description")}
                           rows={2}
                         />
                       </label>
@@ -975,7 +987,7 @@ export function ProjectView({
                           disabled={updateProject.isPending}
                         >
                           <X size={12} />
-                          Cancel
+                          {t("projectView.action.cancel")}
                         </button>
                         <button
                           type="button"
@@ -986,7 +998,9 @@ export function ProjectView({
                           disabled={!editName.trim() || updateProject.isPending}
                         >
                           <Check size={12} />
-                          {updateProject.isPending ? "Saving..." : "Save"}
+                          {updateProject.isPending
+                            ? t("projectView.action.saving")
+                            : t("projectView.action.save")}
                         </button>
                       </div>
                     </div>
@@ -1004,13 +1018,15 @@ export function ProjectView({
                           className={`project-status-badge project-status-badge-detail${selectedProject.status === "COMPLETED" ? " completed" : ""}`}
                         >
                           {selectedProject.status === "COMPLETED"
-                            ? "Completed"
-                            : "Active"}
+                            ? t("projectView.status.completed")
+                            : t("projectView.status.active")}
                         </span>
                       </div>
                       <h2>{selectedProject.name}</h2>
                       <p>
-                        {selectedProjectTasks.length} task(s) in this project
+                        {t("projectView.detail.taskCount", {
+                          count: selectedProjectTasks.length,
+                        })}
                       </p>
                       {selectedProject.description && (
                         <p className="project-detail-description">
@@ -1028,7 +1044,9 @@ export function ProjectView({
                     disabled={updateProject.isPending || isEditingDetails}
                   >
                     <Pencil size={12} />
-                    {isEditingDetails ? "Editing..." : "Edit"}
+                    {isEditingDetails
+                      ? t("projectView.action.editing")
+                      : t("projectView.action.edit")}
                   </button>
                   <button
                     type="button"
@@ -1038,8 +1056,8 @@ export function ProjectView({
                   >
                     <CheckCircle2 size={12} />
                     {selectedProject.status === "COMPLETED"
-                      ? "Mark Active"
-                      : "Mark Completed"}
+                      ? t("projectView.action.markActive")
+                      : t("projectView.action.markCompleted")}
                   </button>
                   {isDeleteConfirmArmed &&
                   !isDeleteProjectActionPending &&
@@ -1050,7 +1068,7 @@ export function ProjectView({
                       onClick={handleCancelDeleteSelectedProject}
                     >
                       <X size={12} />
-                      Cancel
+                      {t("projectView.action.cancel")}
                     </button>
                   ) : null}
                   <button
@@ -1061,12 +1079,12 @@ export function ProjectView({
                   >
                     <Trash2 size={12} />
                     {isDeleteProjectPending
-                      ? "Deleting..."
+                      ? t("projectView.action.deleting")
                       : isSelectedProjectDeleteQueued
-                        ? "Queued..."
+                        ? t("projectView.action.queued")
                         : isDeleteConfirmArmed
-                          ? "Confirm Delete"
-                          : "Delete"}
+                          ? t("projectView.action.confirmDelete")
+                          : t("projectView.action.delete")}
                   </button>
                   <button
                     className="project-primary-btn"
@@ -1074,33 +1092,33 @@ export function ProjectView({
                     disabled={isEditingDetails}
                   >
                     <Plus size={14} />
-                    New Task
+                    {t("projectView.action.newTask")}
                   </button>
                 </div>
               </div>
 
               <div className="project-kpis">
                 <div className="project-kpi-card">
-                  <span>Progress</span>
+                  <span>{t("projectView.kpi.progress")}</span>
                   <strong>{selectedProjectMetrics.progressPercent}%</strong>
                 </div>
                 <div className="project-kpi-card">
-                  <span>Total</span>
+                  <span>{t("projectView.kpi.total")}</span>
                   <strong>{selectedProjectMetrics.total}</strong>
                 </div>
                 <div className="project-kpi-card">
-                  <span>Open</span>
+                  <span>{t("projectView.kpi.open")}</span>
                   <strong>{selectedProjectMetrics.open}</strong>
                 </div>
                 <div className="project-kpi-card">
-                  <span>Overdue</span>
+                  <span>{t("projectView.kpi.overdue")}</span>
                   <strong>{selectedProjectMetrics.overdue}</strong>
                 </div>
               </div>
 
               <div className="project-progress-hero">
                 <div className="project-progress-hero-top">
-                  <span>Delivery Progress</span>
+                  <span>{t("projectView.deliveryProgress")}</span>
                   <strong>{selectedProjectMetrics.progressPercent}%</strong>
                 </div>
                 <div className="project-progress-hero-track">
@@ -1112,9 +1130,10 @@ export function ProjectView({
                   />
                 </div>
                 <p>
-                  {selectedProjectMetrics.done} done •{" "}
-                  {selectedProjectMetrics.open} open •{" "}
-                  {selectedProjectMetrics.overdue} overdue
+                  {selectedProjectMetrics.done} {t("projectView.metric.done")} •{" "}
+                  {selectedProjectMetrics.open} {t("projectView.metric.open")} •{" "}
+                  {selectedProjectMetrics.overdue}{" "}
+                  {t("projectView.metric.overdue")}
                 </p>
               </div>
 
@@ -1125,18 +1144,21 @@ export function ProjectView({
                     className={`project-task-filter-chip${taskSectionFilter === "ALL" ? " active" : ""}`}
                     onClick={() => setTaskSectionFilter("ALL")}
                   >
-                    All <strong>{selectedProjectTaskCounts.ALL}</strong>
+                    {t("projectView.statusFilter.all")}{" "}
+                    <strong>{selectedProjectTaskCounts.ALL}</strong>
                   </button>
-                  {STATUS_SECTIONS.map((section) => (
+                  {STATUS_SECTIONS.map((sectionStatus) => (
                     <button
-                      key={section.status}
+                      key={sectionStatus}
                       type="button"
-                      className={`project-task-filter-chip${taskSectionFilter === section.status ? " active" : ""}`}
-                      onClick={() => setTaskSectionFilter(section.status)}
+                      className={`project-task-filter-chip${
+                        taskSectionFilter === sectionStatus ? " active" : ""
+                      }`}
+                      onClick={() => setTaskSectionFilter(sectionStatus)}
                     >
-                      {section.label}{" "}
+                      {getStatusSectionLabel(sectionStatus)}{" "}
                       <strong>
-                        {selectedProjectTaskCounts[section.status]}
+                        {selectedProjectTaskCounts[sectionStatus]}
                       </strong>
                     </button>
                   ))}
@@ -1144,39 +1166,40 @@ export function ProjectView({
               )}
 
               {isLoadingTasks ? (
-                <p className="project-view-inline-state">Loading tasks...</p>
+                <p className="project-view-inline-state">
+                  {t("projectView.loadingTasks")}
+                </p>
               ) : isTasksError ? (
                 <p className="project-view-inline-state project-view-inline-state-error">
-                  {getErrorMessage(tasksError)}
+                  {getErrorMessage(tasksError, locale)}
                 </p>
               ) : selectedProjectTasks.length === 0 ? (
                 <div className="project-view-inline-empty">
-                  <p>No tasks in this project yet.</p>
+                  <p>{t("projectView.empty.tasksInProject")}</p>
                   <button
                     className="project-primary-btn"
                     onClick={() => onCreateClick(selectedProject.id)}
                   >
                     <Plus size={14} />
-                    Add First Task
+                    {t("projectView.action.addFirstTask")}
                   </button>
                 </div>
               ) : (
                 <div className="project-task-sections">
-                  {visibleTaskSections.map((section) => {
+                  {visibleTaskSections.map((sectionStatus) => {
                     const sectionTasks = selectedProjectTasks.filter(
-                      (task) => task.status === section.status,
+                      (task) => task.status === sectionStatus,
                     );
                     return (
-                      <div
-                        key={section.status}
-                        className="project-task-section"
-                      >
+                      <div key={sectionStatus} className="project-task-section">
                         <div className="project-task-section-header">
-                          <h3>{section.label}</h3>
+                          <h3>{getStatusSectionLabel(sectionStatus)}</h3>
                           <span>{sectionTasks.length}</span>
                         </div>
                         {sectionTasks.length === 0 ? (
-                          <p className="project-task-empty">No tasks</p>
+                          <p className="project-task-empty">
+                            {t("projectView.empty.tasksInSection")}
+                          </p>
                         ) : (
                           <div className="project-task-cards">
                             {sectionTasks.map((task) => (
@@ -1206,11 +1229,11 @@ export function ProjectView({
             </>
           ) : filteredProjects.length === 0 ? (
             <p className="project-view-inline-state">
-              No projects match current filters.
+              {t("projectView.empty.filtered")}
             </p>
           ) : (
             <p className="project-view-inline-state">
-              Select a project to see details.
+              {t("projectView.empty.selectProject")}
             </p>
           )}
         </section>

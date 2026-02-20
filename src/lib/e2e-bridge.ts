@@ -8,6 +8,10 @@ export interface SoloStackE2EBridge {
   seedTaskFieldConflict: () => Promise<SeededConflictInfo>;
   listOpenConflictIds: () => Promise<string[]>;
   setSyncFailureBudget: (count: number) => Promise<void>;
+  setMigrationSyncWriteBlocked: (
+    blocked: boolean,
+    reason?: string | null,
+  ) => Promise<void>;
 }
 
 export interface InstallE2EBridgeInput {
@@ -18,6 +22,10 @@ export interface InstallE2EBridgeInput {
     | SeededConflictInfo;
   onListOpenConflictIds: () => Promise<string[]> | string[];
   onSetSyncFailureBudget: (count: number) => Promise<void> | void;
+  onSetMigrationSyncWriteBlocked: (
+    blocked: boolean,
+    reason?: string | null,
+  ) => Promise<void> | void;
 }
 
 declare global {

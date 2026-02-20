@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, type ReactNode } from "react";
 import { useAppStore } from "@/store/app-store";
 import type { ViewMode } from "@/lib/types";
 import { openUrl } from "@tauri-apps/plugin-opener";
+import { useI18n, type TranslationKey } from "@/lib/i18n";
 import {
   LayoutDashboard,
   FolderKanban,
@@ -26,34 +27,54 @@ import type { SyncStatus } from "@/lib/types";
 
 interface NavItem {
   view: ViewMode;
-  label: string;
+  labelKey: TranslationKey;
   icon: React.ReactNode;
 }
 
 const NAV_ITEMS: NavItem[] = [
-  { view: "board", label: "Board", icon: <KanbanSquare size={18} /> },
-  { view: "projects", label: "Projects", icon: <FolderKanban size={18} /> },
-  { view: "calendar", label: "Calendar", icon: <CalendarRange size={18} /> },
-  { view: "today", label: "Today", icon: <CalendarCheck2 size={18} /> },
-  { view: "upcoming", label: "Upcoming", icon: <CalendarDays size={18} /> },
+  {
+    view: "board",
+    labelKey: "shell.nav.board",
+    icon: <KanbanSquare size={18} />,
+  },
+  {
+    view: "projects",
+    labelKey: "shell.nav.projects",
+    icon: <FolderKanban size={18} />,
+  },
+  {
+    view: "calendar",
+    labelKey: "shell.nav.calendar",
+    icon: <CalendarRange size={18} />,
+  },
+  {
+    view: "today",
+    labelKey: "shell.nav.today",
+    icon: <CalendarCheck2 size={18} />,
+  },
+  {
+    view: "upcoming",
+    labelKey: "shell.nav.upcoming",
+    icon: <CalendarDays size={18} />,
+  },
   {
     view: "conflicts",
-    label: "Conflicts",
+    labelKey: "shell.nav.conflicts",
     icon: <AlertTriangle size={18} />,
   },
   {
     view: "review",
-    label: "Weekly Review",
+    labelKey: "shell.nav.review",
     icon: <ClipboardCheck size={18} />,
   },
   {
     view: "dashboard",
-    label: "Dashboard",
+    labelKey: "shell.nav.dashboard",
     icon: <LayoutDashboard size={18} />,
   },
   {
     view: "settings",
-    label: "Settings",
+    labelKey: "shell.nav.settings",
     icon: <Settings2 size={18} />,
   },
 ];
@@ -97,7 +118,9 @@ export function AppShell({
   onOpenConflictCenter,
   onOpenShortcutHelp,
 }: AppShellProps) {
+  const { t } = useI18n();
   const { activeView, setActiveView } = useAppStore();
+  const appVersion = import.meta.env.VITE_APP_VERSION ?? "0.1.0";
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
 
@@ -137,7 +160,7 @@ export function AppShell({
         <button
           className="hamburger-btn"
           onClick={() => setSidebarOpen(true)}
-          aria-label="Open menu"
+          aria-label={t("shell.menu.open")}
         >
           <Menu size={20} />
         </button>
@@ -156,12 +179,12 @@ export function AppShell({
           <div className="brand-icon">
             <Zap size={18} strokeWidth={2.5} />
           </div>
-          <span className="brand-text">SoloStack</span>
+          <span className="brand-text">{t("shell.brand")}</span>
           {isMobile && (
             <button
               className="sidebar-close-btn"
               onClick={closeSidebar}
-              aria-label="Close menu"
+              aria-label={t("shell.menu.close")}
             >
               <X size={18} />
             </button>
@@ -171,13 +194,13 @@ export function AppShell({
         {/* Create button */}
         <button className="btn-create" onClick={handleCreateClick}>
           <Plus size={16} strokeWidth={2.5} />
-          <span>New Task</span>
-          <kbd className="shortcut">⌘N</kbd>
+          <span>{t("shell.createTask")}</span>
+          <kbd className="shortcut">{t("shell.createTask.shortcut")}</kbd>
         </button>
 
         {/* Navigation */}
         <nav className="sidebar-nav">
-          <div className="nav-section-label">Workspace</div>
+          <div className="nav-section-label">{t("shell.workspace")}</div>
           {NAV_ITEMS.map((item) => (
             <button
               key={item.view}
@@ -185,7 +208,7 @@ export function AppShell({
               onClick={() => handleNavClick(item.view)}
             >
               <span className="nav-icon">{item.icon}</span>
-              <span className="nav-label">{item.label}</span>
+              <span className="nav-label">{t(item.labelKey)}</span>
             </button>
           ))}
         </nav>
@@ -198,7 +221,7 @@ export function AppShell({
                 type="button"
                 className={`footer-status footer-status-btn footer-status-${syncStatus.toLowerCase()}`}
                 onClick={handleOpenConflictCenter}
-                title="Open Conflict Center"
+                title={t("shell.sync.openConflictCenter")}
               >
                 {renderSyncStatusIcon(syncStatus)}
                 <span>{syncStatusLabel}</span>
@@ -211,7 +234,9 @@ export function AppShell({
                 <span>{syncStatusLabel}</span>
               </div>
             )}
-            <span className="footer-version">v0.1.0</span>
+            <span className="footer-version">
+              {t("shell.version", { version: appVersion })}
+            </span>
           </div>
           <div className="footer-row">
             <div
@@ -227,9 +252,9 @@ export function AppShell({
               type="button"
               className="footer-shortcuts"
               onClick={onOpenShortcutHelp}
-              title="Open keyboard shortcut help"
+              title={t("shell.shortcuts.openHelp")}
             >
-              Shortcuts ?
+              {t("shell.shortcuts.button")}
             </button>
           </div>
         </div>
@@ -241,8 +266,8 @@ export function AppShell({
       <button
         className="kofi-btn"
         onClick={() => openUrl("https://ko-fi.com/Y8Y71U8RJO")}
-        title="Support me on Ko-fi"
-        aria-label="Support me on Ko-fi"
+        title={t("shell.kofi.support")}
+        aria-label={t("shell.kofi.support")}
       >
         <Heart size={16} />
       </button>

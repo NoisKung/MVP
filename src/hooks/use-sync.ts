@@ -2,16 +2,23 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { getSyncCheckpoint } from "@/lib/database";
 import { runLocalSyncCycle } from "@/lib/sync-service";
-import { createSyncTransportFromConfig } from "@/lib/sync-transport";
+import { resolveSyncTransportConfig } from "@/lib/sync-transport";
+import { translate } from "@/lib/i18n";
+import { localizeErrorMessage } from "@/lib/error-message";
 import type { RunSyncCycleSummary } from "@/lib/sync-runner";
-import type { SyncSessionDiagnostics, SyncStatus } from "@/lib/types";
+import type {
+  AppLocale,
+  SyncProvider,
+  SyncRuntimeProfileSetting,
+  SyncSessionDiagnostics,
+  SyncStatus,
+} from "@/lib/types";
 
 const DEFAULT_AUTO_SYNC_INTERVAL_MS = 60_000;
 const DEFAULT_BACKGROUND_SYNC_INTERVAL_MS = 300_000;
 const DEFAULT_SYNC_PUSH_LIMIT = 200;
 const DEFAULT_SYNC_PULL_LIMIT = 200;
 const DEFAULT_SYNC_MAX_PULL_PAGES = 5;
-const OFFLINE_SYNC_MESSAGE = "Offline. Sync will retry when network returns.";
 const RETRY_BASE_DELAY_MS = 5_000;
 const RETRY_MAX_DELAY_MS = 300_000;
 
@@ -30,6 +37,9 @@ interface UseSyncState {
 interface UseSyncOptions {
   pushUrl: string | null;
   pullUrl: string | null;
+  provider: SyncProvider;
+  providerConfig?: Record<string, unknown> | null;
+  runtimeProfile: SyncRuntimeProfileSetting;
   timeoutMs?: number;
   configReady?: boolean;
   autoSyncIntervalMs?: number;
@@ -37,6 +47,7 @@ interface UseSyncOptions {
   pushLimit?: number;
   pullLimit?: number;
   maxPullPages?: number;
+  locale?: AppLocale;
 }
 
 interface SyncRuntimeProfileInput {
@@ -45,6 +56,11 @@ interface SyncRuntimeProfileInput {
   pushLimit?: number;
   pullLimit?: number;
   maxPullPages?: number;
+}
+
+interface NormalizedSyncRuntimeProfileResult {
+  profile: SyncRuntimeProfile;
+  validationRejected: boolean;
 }
 
 export interface SyncRuntimeProfile {
@@ -62,14 +78,17 @@ interface SyncSessionDiagnosticsUpdateInput {
   hasConflict?: boolean;
 }
 
-function getErrorMessage(error: unknown): string {
-  if (error instanceof Error && error.message.trim()) {
-    return error.message;
-  }
-  if (typeof error === "string" && error.trim()) {
-    return error;
-  }
-  return "Sync failed unexpectedly.";
+interface SyncConfigurationDiagnosticsInput {
+  provider: SyncProvider;
+  runtimeProfile: SyncRuntimeProfileSetting;
+  warning: string | null;
+  providerChanged: boolean;
+  runtimeProfileChanged: boolean;
+  validationRejected: boolean;
+}
+
+function getErrorMessage(error: unknown, locale: AppLocale): string {
+  return localizeErrorMessage(error, locale, "sync.error.unexpected");
 }
 
 function isLikelyNetworkError(message: string): boolean {
@@ -100,6 +119,13 @@ function normalizeNumberWithinRange(
 export function normalizeSyncRuntimeProfile(
   input: SyncRuntimeProfileInput,
 ): SyncRuntimeProfile {
+  return normalizeSyncRuntimeProfileWithValidation(input).profile;
+}
+
+export function normalizeSyncRuntimeProfileWithValidation(
+  input: SyncRuntimeProfileInput,
+): NormalizedSyncRuntimeProfileResult {
+  let validationRejected = false;
   const autoSyncIntervalMs = normalizeNumberWithinRange(
     input.autoSyncIntervalMs,
     {
@@ -108,36 +134,81 @@ export function normalizeSyncRuntimeProfile(
       fallback: DEFAULT_AUTO_SYNC_INTERVAL_MS,
     },
   );
-  const backgroundSyncIntervalMs = Math.max(
-    autoSyncIntervalMs,
-    normalizeNumberWithinRange(input.backgroundSyncIntervalMs, {
+  if (
+    Number.isFinite(input.autoSyncIntervalMs) &&
+    Math.floor(input.autoSyncIntervalMs as number) !== autoSyncIntervalMs
+  ) {
+    validationRejected = true;
+  }
+
+  const normalizedBackgroundSyncIntervalMs = normalizeNumberWithinRange(
+    input.backgroundSyncIntervalMs,
+    {
       min: 30_000,
       max: 7_200_000,
       fallback: DEFAULT_BACKGROUND_SYNC_INTERVAL_MS,
-    }),
+    },
   );
+  if (
+    Number.isFinite(input.backgroundSyncIntervalMs) &&
+    Math.floor(input.backgroundSyncIntervalMs as number) !==
+      normalizedBackgroundSyncIntervalMs
+  ) {
+    validationRejected = true;
+  }
+  const backgroundSyncIntervalMs = Math.max(
+    autoSyncIntervalMs,
+    normalizedBackgroundSyncIntervalMs,
+  );
+  if (backgroundSyncIntervalMs !== normalizedBackgroundSyncIntervalMs) {
+    validationRejected = true;
+  }
+
   const pushLimit = normalizeNumberWithinRange(input.pushLimit, {
     min: 20,
     max: 500,
     fallback: DEFAULT_SYNC_PUSH_LIMIT,
   });
+  if (
+    Number.isFinite(input.pushLimit) &&
+    Math.floor(input.pushLimit as number) !== pushLimit
+  ) {
+    validationRejected = true;
+  }
+
   const pullLimit = normalizeNumberWithinRange(input.pullLimit, {
     min: 20,
     max: 500,
     fallback: DEFAULT_SYNC_PULL_LIMIT,
   });
+  if (
+    Number.isFinite(input.pullLimit) &&
+    Math.floor(input.pullLimit as number) !== pullLimit
+  ) {
+    validationRejected = true;
+  }
+
   const maxPullPages = normalizeNumberWithinRange(input.maxPullPages, {
     min: 1,
     max: 20,
     fallback: DEFAULT_SYNC_MAX_PULL_PAGES,
   });
+  if (
+    Number.isFinite(input.maxPullPages) &&
+    Math.floor(input.maxPullPages as number) !== maxPullPages
+  ) {
+    validationRejected = true;
+  }
 
   return {
-    autoSyncIntervalMs,
-    backgroundSyncIntervalMs,
-    pushLimit,
-    pullLimit,
-    maxPullPages,
+    profile: {
+      autoSyncIntervalMs,
+      backgroundSyncIntervalMs,
+      pushLimit,
+      pullLimit,
+      maxPullPages,
+    },
+    validationRejected,
   };
 }
 
@@ -181,6 +252,31 @@ export function createInitialSyncSessionDiagnostics(): SyncSessionDiagnostics {
     average_cycle_duration_ms: null,
     last_attempt_at: null,
     last_success_at: null,
+    selected_provider: null,
+    runtime_profile: null,
+    provider_selected_events: 0,
+    runtime_profile_changed_events: 0,
+    validation_rejected_events: 0,
+    last_warning: null,
+  };
+}
+
+export function applySyncConfigurationDiagnostics(
+  previous: SyncSessionDiagnostics,
+  input: SyncConfigurationDiagnosticsInput,
+): SyncSessionDiagnostics {
+  return {
+    ...previous,
+    selected_provider: input.provider,
+    runtime_profile: input.runtimeProfile,
+    provider_selected_events:
+      previous.provider_selected_events + (input.providerChanged ? 1 : 0),
+    runtime_profile_changed_events:
+      previous.runtime_profile_changed_events +
+      (input.runtimeProfileChanged ? 1 : 0),
+    validation_rejected_events:
+      previous.validation_rejected_events + (input.validationRejected ? 1 : 0),
+    last_warning: input.warning,
   };
 }
 
@@ -208,6 +304,7 @@ export function appendSyncSessionDiagnostics(
       : null;
 
   return {
+    ...previous,
     total_cycles: nextTotalCycles,
     successful_cycles: nextSuccessfulCycles,
     failed_cycles: nextFailedCycles,
@@ -227,29 +324,45 @@ export function appendSyncSessionDiagnostics(
   };
 }
 
-function buildConflictMessage(summary: RunSyncCycleSummary): string {
+function buildConflictMessage(
+  summary: RunSyncCycleSummary,
+  locale: AppLocale,
+): string {
   const parts: string[] = [];
   if (summary.failed_outbox_changes > 0) {
-    parts.push(`${summary.failed_outbox_changes} outbox change(s) failed`);
+    parts.push(
+      translate(locale, "sync.conflict.part.outboxFailed", {
+        count: summary.failed_outbox_changes,
+      }),
+    );
   }
   if (summary.pull?.failed && summary.pull.failed > 0) {
-    parts.push(`${summary.pull.failed} incoming change(s) failed`);
+    parts.push(
+      translate(locale, "sync.conflict.part.incomingFailed", {
+        count: summary.pull.failed,
+      }),
+    );
   }
   if (summary.pull?.conflicts && summary.pull.conflicts > 0) {
-    parts.push(`${summary.pull.conflicts} conflict(s) detected`);
+    parts.push(
+      translate(locale, "sync.conflict.part.detected", {
+        count: summary.pull.conflicts,
+      }),
+    );
   }
 
   if (parts.length === 0) {
-    return "Sync requires attention.";
+    return translate(locale, "sync.status.attention");
   }
   return `${parts.join(", ")}.`;
 }
 
 export function useSync(options: UseSyncOptions): UseSyncState {
+  const locale = options.locale ?? "en";
   const isConfigReady = options.configReady ?? true;
-  const runtimeProfile = useMemo(
+  const runtimeProfileNormalization = useMemo(
     () =>
-      normalizeSyncRuntimeProfile({
+      normalizeSyncRuntimeProfileWithValidation({
         autoSyncIntervalMs: options.autoSyncIntervalMs,
         backgroundSyncIntervalMs: options.backgroundSyncIntervalMs,
         pushLimit: options.pushLimit,
@@ -264,19 +377,49 @@ export function useSync(options: UseSyncOptions): UseSyncState {
       options.pushLimit,
     ],
   );
+  const runtimeProfile = runtimeProfileNormalization.profile;
+  const runtimeValidationRejected =
+    runtimeProfileNormalization.validationRejected;
   const { pushLimit, pullLimit, maxPullPages } = runtimeProfile;
   const queryClient = useQueryClient();
-  const transport = useMemo(
+  const resolvedTransportConfig = useMemo(
     () =>
       isConfigReady
-        ? createSyncTransportFromConfig({
+        ? resolveSyncTransportConfig({
+            provider: options.provider,
+            providerConfig: options.providerConfig,
             pushUrl: options.pushUrl,
             pullUrl: options.pullUrl,
             timeoutMs: options.timeoutMs,
+            locale,
           })
-        : null,
-    [isConfigReady, options.pullUrl, options.pushUrl, options.timeoutMs],
+        : {
+            status: "disabled",
+            provider: options.provider,
+            transport: null,
+            warning: null,
+          },
+    [
+      isConfigReady,
+      locale,
+      options.provider,
+      options.providerConfig,
+      options.pullUrl,
+      options.pushUrl,
+      options.timeoutMs,
+    ],
   );
+  const [lastKnownGoodTransport, setLastKnownGoodTransport] =
+    useState<ReturnType<typeof resolveSyncTransportConfig>["transport"]>(null);
+  const effectiveTransport =
+    resolvedTransportConfig.status === "ready"
+      ? resolvedTransportConfig.transport
+      : resolvedTransportConfig.status === "invalid_config"
+        ? lastKnownGoodTransport
+        : null;
+  const usesLastKnownGoodTransport =
+    resolvedTransportConfig.status === "invalid_config" &&
+    Boolean(lastKnownGoodTransport);
   const [isOnline, setIsOnline] = useState<boolean>(() => {
     if (typeof navigator === "undefined") return true;
     return navigator.onLine;
@@ -287,7 +430,10 @@ export function useSync(options: UseSyncOptions): UseSyncState {
   });
   const [status, setStatus] = useState<SyncStatus>(() => {
     if (!isConfigReady) return "OFFLINE";
-    if (!transport) return "LOCAL_ONLY";
+    if (resolvedTransportConfig.status === "provider_unavailable") {
+      return "OFFLINE";
+    }
+    if (!effectiveTransport) return "LOCAL_ONLY";
     if (!isOnline) return "OFFLINE";
     return "SYNCED";
   });
@@ -300,6 +446,58 @@ export function useSync(options: UseSyncOptions): UseSyncState {
   const inFlightRef = useRef(false);
   const consecutiveFailuresRef = useRef(0);
   const nextAutoAttemptAtRef = useRef(0);
+  const lastProviderRef = useRef<SyncProvider | null>(null);
+  const lastRuntimeProfileRef = useRef<SyncRuntimeProfileSetting | null>(null);
+  const lastValidationEventKeyRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    if (resolvedTransportConfig.status !== "ready") return;
+    if (!resolvedTransportConfig.transport) return;
+    setLastKnownGoodTransport(resolvedTransportConfig.transport);
+  }, [resolvedTransportConfig.status, resolvedTransportConfig.transport]);
+
+  useEffect(() => {
+    const providerChanged = lastProviderRef.current !== options.provider;
+    const runtimeProfileChanged =
+      lastRuntimeProfileRef.current !== options.runtimeProfile;
+    const warning = resolvedTransportConfig.warning;
+    const validationRejected =
+      runtimeValidationRejected ||
+      resolvedTransportConfig.status === "invalid_config";
+    const nextValidationEventKey = validationRejected
+      ? [
+          options.provider,
+          options.runtimeProfile,
+          resolvedTransportConfig.status,
+          warning ?? "",
+        ].join("|")
+      : null;
+    const shouldIncrementValidationRejected =
+      validationRejected &&
+      nextValidationEventKey !== null &&
+      nextValidationEventKey !== lastValidationEventKeyRef.current;
+
+    setDiagnostics((previous) =>
+      applySyncConfigurationDiagnostics(previous, {
+        provider: options.provider,
+        runtimeProfile: options.runtimeProfile,
+        warning,
+        providerChanged,
+        runtimeProfileChanged,
+        validationRejected: shouldIncrementValidationRejected,
+      }),
+    );
+
+    lastProviderRef.current = options.provider;
+    lastRuntimeProfileRef.current = options.runtimeProfile;
+    lastValidationEventKeyRef.current = nextValidationEventKey;
+  }, [
+    options.provider,
+    options.runtimeProfile,
+    resolvedTransportConfig.status,
+    resolvedTransportConfig.warning,
+    runtimeValidationRejected,
+  ]);
 
   const runSync = useCallback(
     async (manual: boolean) => {
@@ -318,26 +516,48 @@ export function useSync(options: UseSyncOptions): UseSyncState {
         return;
       }
 
-      if (!transport) {
+      if (resolvedTransportConfig.status === "provider_unavailable") {
+        setStatus("OFFLINE");
+        setLastError(
+          resolvedTransportConfig.warning ??
+            translate(locale, "sync.warning.providerUnavailable"),
+        );
+        return;
+      }
+
+      if (!effectiveTransport) {
         setStatus("LOCAL_ONLY");
-        setLastError(null);
+        if (resolvedTransportConfig.status === "invalid_config") {
+          setLastError(
+            resolvedTransportConfig.warning ??
+              translate(locale, "sync.warning.invalidConfigNoLastKnownGood"),
+          );
+        } else {
+          setLastError(null);
+        }
         return;
       }
 
       if (!isOnline) {
         setStatus("OFFLINE");
-        setLastError(OFFLINE_SYNC_MESSAGE);
+        setLastError(translate(locale, "sync.offline.retryNetworkReturn"));
         return;
       }
 
       inFlightRef.current = true;
       setIsSyncing(true);
       setStatus("SYNCING");
-      setLastError(null);
+      setLastError(
+        usesLastKnownGoodTransport
+          ? translate(locale, "sync.warning.usingLastKnownGood", {
+              warning: resolvedTransportConfig.warning ?? "",
+            }).trim()
+          : null,
+      );
       const attemptStartedAt = Date.now();
 
       try {
-        const summary = await runLocalSyncCycle(transport, {
+        const summary = await runLocalSyncCycle(effectiveTransport, {
           pushLimit,
           pullLimit,
           maxPullPages,
@@ -349,7 +569,17 @@ export function useSync(options: UseSyncOptions): UseSyncState {
         consecutiveFailuresRef.current = 0;
         nextAutoAttemptAtRef.current = 0;
         setStatus(hasConflict ? "CONFLICT" : "SYNCED");
-        setLastError(hasConflict ? buildConflictMessage(summary) : null);
+        if (hasConflict) {
+          setLastError(buildConflictMessage(summary, locale));
+        } else if (usesLastKnownGoodTransport) {
+          setLastError(
+            translate(locale, "sync.warning.completedWithLastKnownGood", {
+              warning: resolvedTransportConfig.warning ?? "",
+            }).trim(),
+          );
+        } else {
+          setLastError(null);
+        }
 
         const checkpoint = await getSyncCheckpoint();
         setLastSyncedAt(checkpoint.last_synced_at ?? new Date().toISOString());
@@ -364,7 +594,7 @@ export function useSync(options: UseSyncOptions): UseSyncState {
 
         await queryClient.invalidateQueries();
       } catch (error) {
-        const message = getErrorMessage(error);
+        const message = getErrorMessage(error, locale);
         if (!manual) {
           consecutiveFailuresRef.current += 1;
           const backoffDelay = calculateSyncBackoffMs(
@@ -387,13 +617,17 @@ export function useSync(options: UseSyncOptions): UseSyncState {
       }
     },
     [
+      effectiveTransport,
       isConfigReady,
       isOnline,
       maxPullPages,
       pullLimit,
       pushLimit,
       queryClient,
-      transport,
+      resolvedTransportConfig.status,
+      resolvedTransportConfig.warning,
+      usesLastKnownGoodTransport,
+      locale,
     ],
   );
 
@@ -439,23 +673,51 @@ export function useSync(options: UseSyncOptions): UseSyncState {
       return;
     }
 
-    if (!transport) {
+    if (resolvedTransportConfig.status === "provider_unavailable") {
+      setStatus("OFFLINE");
+      setLastError(
+        resolvedTransportConfig.warning ??
+          translate(locale, "sync.warning.providerUnavailable"),
+      );
+      return;
+    }
+
+    if (!effectiveTransport) {
       setStatus("LOCAL_ONLY");
-      setLastError(null);
+      if (resolvedTransportConfig.status === "invalid_config") {
+        setLastError(
+          resolvedTransportConfig.warning ??
+            translate(locale, "sync.warning.invalidConfigNoLastKnownGood"),
+        );
+      } else {
+        setLastError(null);
+      }
       return;
     }
 
     if (!isOnline) {
       setStatus("OFFLINE");
-      setLastError((previousError) => previousError ?? OFFLINE_SYNC_MESSAGE);
+      setLastError(
+        (previousError) =>
+          previousError ?? translate(locale, "sync.offline.retryNetworkReturn"),
+      );
       return;
     }
 
     void runSync(false);
-  }, [isConfigReady, isOnline, runSync, transport]);
+  }, [
+    effectiveTransport,
+    isConfigReady,
+    isOnline,
+    locale,
+    resolvedTransportConfig.status,
+    resolvedTransportConfig.warning,
+    runSync,
+  ]);
 
   useEffect(() => {
-    if (!isConfigReady || !transport) return;
+    if (!isConfigReady || !effectiveTransport) return;
+    if (resolvedTransportConfig.status === "provider_unavailable") return;
 
     const activeIntervalMs = getAutoSyncIntervalMsForVisibility(
       isDocumentVisible,
@@ -466,19 +728,34 @@ export function useSync(options: UseSyncOptions): UseSyncState {
     }, activeIntervalMs);
 
     return () => window.clearInterval(intervalId);
-  }, [isConfigReady, isDocumentVisible, runSync, runtimeProfile, transport]);
+  }, [
+    effectiveTransport,
+    isConfigReady,
+    isDocumentVisible,
+    resolvedTransportConfig.status,
+    runSync,
+    runtimeProfile,
+  ]);
 
   useEffect(() => {
     if (!isDocumentVisible) return;
-    if (!isConfigReady || !transport || !isOnline) return;
+    if (!isConfigReady || !effectiveTransport || !isOnline) return;
+    if (resolvedTransportConfig.status === "provider_unavailable") return;
     void runSync(false);
-  }, [isConfigReady, isDocumentVisible, isOnline, runSync, transport]);
+  }, [
+    effectiveTransport,
+    isConfigReady,
+    isDocumentVisible,
+    isOnline,
+    resolvedTransportConfig.status,
+    runSync,
+  ]);
 
   return {
     status,
     isSyncing,
     isOnline,
-    hasTransport: Boolean(transport),
+    hasTransport: Boolean(effectiveTransport),
     lastSyncedAt,
     lastError,
     diagnostics,

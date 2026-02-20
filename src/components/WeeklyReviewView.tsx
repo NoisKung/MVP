@@ -1,5 +1,7 @@
 import { useMemo } from "react";
 import { useWeeklyReview } from "@/hooks/use-tasks";
+import { translate, useI18n } from "@/lib/i18n";
+import { localizeErrorMessage } from "@/lib/error-message";
 import type { Task, TaskStatus, WeeklyReviewSnapshot } from "@/lib/types";
 import {
   AlertTriangle,
@@ -26,14 +28,8 @@ interface StatCard {
   subtitle: string;
 }
 
-function getErrorMessage(error: unknown): string {
-  if (error instanceof Error && error.message.trim()) {
-    return error.message;
-  }
-  if (typeof error === "string" && error.trim()) {
-    return error;
-  }
-  return "Unable to load weekly review.";
+function getErrorMessage(error: unknown, locale: "en" | "th"): string {
+  return localizeErrorMessage(error, locale, "weeklyReview.error.unableLoad");
 }
 
 function getPluralLabel(
@@ -44,22 +40,27 @@ function getPluralLabel(
   return count === 1 ? singular : plural;
 }
 
-function formatWeekRange(weekStart: string, weekEnd: string): string {
+function formatWeekRange(
+  weekStart: string,
+  weekEnd: string,
+  locale: "en" | "th",
+): string {
   const startDate = new Date(weekStart);
   const endDateExclusive = new Date(weekEnd);
   if (
     Number.isNaN(startDate.getTime()) ||
     Number.isNaN(endDateExclusive.getTime())
   ) {
-    return "This week";
+    return translate(locale, "weeklyReview.range.thisWeek");
   }
 
   const endDate = new Date(endDateExclusive.getTime() - 1);
-  const startLabel = startDate.toLocaleDateString("en-US", {
+  const formatLocale = locale === "th" ? "th-TH" : "en-US";
+  const startLabel = startDate.toLocaleDateString(formatLocale, {
     month: "short",
     day: "numeric",
   });
-  const endLabel = endDate.toLocaleDateString("en-US", {
+  const endLabel = endDate.toLocaleDateString(formatLocale, {
     month: "short",
     day: "numeric",
     year: "numeric",
@@ -68,10 +69,12 @@ function formatWeekRange(weekStart: string, weekEnd: string): string {
   return `${startLabel} - ${endLabel}`;
 }
 
-function formatDateTime(value: string): string {
+function formatDateTime(value: string, locale: "en" | "th"): string {
   const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "Unknown";
-  return date.toLocaleString("en-US", {
+  if (Number.isNaN(date.getTime())) {
+    return translate(locale, "weeklyReview.date.unknown");
+  }
+  return date.toLocaleString(locale === "th" ? "th-TH" : "en-US", {
     month: "short",
     day: "numeric",
     hour: "numeric",
@@ -79,11 +82,13 @@ function formatDateTime(value: string): string {
   });
 }
 
-function formatDueLabel(dueAt: string | null): string {
-  if (!dueAt) return "No due date";
+function formatDueLabel(dueAt: string | null, locale: "en" | "th"): string {
+  if (!dueAt) return translate(locale, "weeklyReview.date.noDue");
   const dueDate = new Date(dueAt);
-  if (Number.isNaN(dueDate.getTime())) return "Invalid due date";
-  return dueDate.toLocaleString("en-US", {
+  if (Number.isNaN(dueDate.getTime())) {
+    return translate(locale, "weeklyReview.date.invalidDue");
+  }
+  return dueDate.toLocaleString(locale === "th" ? "th-TH" : "en-US", {
     month: "short",
     day: "numeric",
     hour: "numeric",
@@ -91,59 +96,108 @@ function formatDueLabel(dueAt: string | null): string {
   });
 }
 
-function getReviewHeadline(snapshot: WeeklyReviewSnapshot): string {
+function getReviewHeadline(
+  snapshot: WeeklyReviewSnapshot,
+  locale: "en" | "th",
+): string {
+  if (locale === "th") {
+    if (snapshot.overdueCount > 0) {
+      return translate(locale, "weeklyReview.headline.overdue", {
+        count: snapshot.overdueCount,
+      });
+    }
+
+    const backlogDelta = snapshot.completedCount - snapshot.createdCount;
+    if (backlogDelta > 0) {
+      return translate(locale, "weeklyReview.headline.momentum", {
+        count: backlogDelta,
+      });
+    }
+    if (backlogDelta === 0) {
+      return translate(locale, "weeklyReview.headline.balanced");
+    }
+    const growth = Math.abs(backlogDelta);
+    return translate(locale, "weeklyReview.headline.backlogGrowth", {
+      count: growth,
+    });
+  }
+
+  const overdueWord = getPluralLabel(
+    snapshot.overdueCount,
+    translate(locale, "weeklyReview.word.task"),
+    translate(locale, "weeklyReview.word.tasks"),
+  );
   if (snapshot.overdueCount > 0) {
-    return `${snapshot.overdueCount} overdue ${getPluralLabel(snapshot.overdueCount, "task")} need recovery attention.`;
+    return translate(locale, "weeklyReview.headline.overdue", {
+      count: snapshot.overdueCount,
+      taskWord: overdueWord,
+    });
   }
 
   const backlogDelta = snapshot.completedCount - snapshot.createdCount;
+  const deltaWord = getPluralLabel(
+    Math.abs(backlogDelta),
+    translate(locale, "weeklyReview.word.task"),
+    translate(locale, "weeklyReview.word.tasks"),
+  );
   if (backlogDelta > 0) {
-    return `Great momentum: you closed ${backlogDelta} more ${getPluralLabel(backlogDelta, "task")} than you created this week.`;
+    return translate(locale, "weeklyReview.headline.momentum", {
+      count: backlogDelta,
+      taskWord: deltaWord,
+    });
   }
   if (backlogDelta === 0) {
-    return "Balanced week: completions and new tasks are currently in sync.";
+    return translate(locale, "weeklyReview.headline.balanced");
   }
   const growth = Math.abs(backlogDelta);
-  return `Backlog grew by ${growth} ${getPluralLabel(growth, "task")} this week. Focus on priority items next.`;
+  return translate(locale, "weeklyReview.headline.backlogGrowth", {
+    count: growth,
+    taskWord: deltaWord,
+  });
 }
 
-function buildStatCards(snapshot: WeeklyReviewSnapshot): StatCard[] {
+function buildStatCards(
+  snapshot: WeeklyReviewSnapshot,
+  locale: "en" | "th",
+): StatCard[] {
   return [
     {
       id: "completed",
-      label: "Completed",
+      label: translate(locale, "weeklyReview.stat.completed.label"),
       value: snapshot.completedCount,
       tone: "success",
-      subtitle: "Moved to Done this week",
+      subtitle: translate(locale, "weeklyReview.stat.completed.subtitle"),
     },
     {
       id: "pending",
-      label: "Pending",
+      label: translate(locale, "weeklyReview.stat.pending.label"),
       value: snapshot.pendingCount,
       tone: "accent",
-      subtitle: "Open and not overdue",
+      subtitle: translate(locale, "weeklyReview.stat.pending.subtitle"),
     },
     {
       id: "overdue",
-      label: "Overdue",
+      label: translate(locale, "weeklyReview.stat.overdue.label"),
       value: snapshot.overdueCount,
       tone: "danger",
-      subtitle: "Need immediate recovery",
+      subtitle: translate(locale, "weeklyReview.stat.overdue.subtitle"),
     },
     {
       id: "created",
-      label: "Created",
+      label: translate(locale, "weeklyReview.stat.created.label"),
       value: snapshot.createdCount,
       tone: "warning",
-      subtitle: "New tasks added this week",
+      subtitle: translate(locale, "weeklyReview.stat.created.subtitle"),
     },
   ];
 }
 
-function getPriorityLabel(task: Task): string {
-  if (task.priority === "URGENT") return "Urgent";
-  if (task.priority === "LOW") return "Low";
-  return "Normal";
+function getPriorityLabel(task: Task, locale: "en" | "th"): string {
+  if (task.priority === "URGENT")
+    return translate(locale, "taskForm.priority.urgent");
+  if (task.priority === "LOW")
+    return translate(locale, "taskForm.priority.low");
+  return translate(locale, "taskForm.priority.normal");
 }
 
 function getTaskTone(task: Task): "urgent" | "normal" | "low" {
@@ -158,12 +212,14 @@ function TaskItemRow({
   rightMeta,
   actions,
   onEdit,
+  locale,
 }: {
   task: Task;
   projectNameById: Record<string, string>;
   rightMeta: string;
   actions?: React.ReactNode;
   onEdit: (task: Task) => void;
+  locale: "en" | "th";
 }) {
   const projectName = task.project_id ? projectNameById[task.project_id] : null;
   const tone = getTaskTone(task);
@@ -181,11 +237,11 @@ function TaskItemRow({
             </span>
           )}
           <span className="weekly-badge weekly-badge-priority">
-            {getPriorityLabel(task)}
+            {getPriorityLabel(task, locale)}
           </span>
           {task.is_important ? (
             <span className="weekly-badge weekly-badge-important">
-              Important
+              {translate(locale, "taskForm.importance.on")}
             </span>
           ) : null}
           <span className="weekly-task-date">{rightMeta}</span>
@@ -202,6 +258,7 @@ export function WeeklyReviewView({
   onStatusChange,
   onCreateClick,
 }: WeeklyReviewViewProps) {
+  const { locale, t } = useI18n();
   const {
     data: snapshot,
     isLoading,
@@ -220,8 +277,8 @@ export function WeeklyReviewView({
   }, [snapshot]);
 
   const statCards = useMemo(
-    () => (snapshot ? buildStatCards(snapshot) : []),
-    [snapshot],
+    () => (snapshot ? buildStatCards(snapshot, locale) : []),
+    [locale, snapshot],
   );
 
   if (isLoading) {
@@ -237,37 +294,43 @@ export function WeeklyReviewView({
       <div className="weekly-review">
         <div className="weekly-review-error-card">
           <h2 className="weekly-review-error-title">
-            Failed to load weekly review
+            {t("weeklyReview.error.title")}
           </h2>
           <p className="weekly-review-error-description">
-            {getErrorMessage(error)}
+            {getErrorMessage(error, locale)}
           </p>
           <button
             type="button"
             className="weekly-secondary-button"
             onClick={() => void refetch()}
           >
-            Retry
+            {t("common.retry")}
           </button>
         </div>
       </div>
     );
   }
 
-  const headline = getReviewHeadline(snapshot);
-  const lastUpdatedLabel = formatDateTime(snapshot.periodEnd);
-  const weekLabel = formatWeekRange(snapshot.weekStart, snapshot.weekEnd);
+  const headline = getReviewHeadline(snapshot, locale);
+  const lastUpdatedLabel = formatDateTime(snapshot.periodEnd, locale);
+  const weekLabel = formatWeekRange(
+    snapshot.weekStart,
+    snapshot.weekEnd,
+    locale,
+  );
 
   return (
     <div className="weekly-review">
       <div className="weekly-review-header">
         <div>
-          <h1 className="weekly-review-title">Weekly Review</h1>
+          <h1 className="weekly-review-title">{t("weeklyReview.title")}</h1>
           <p className="weekly-review-subtitle">
             <CalendarRange size={14} />
             <span>{weekLabel}</span>
             <span className="weekly-dot">•</span>
-            <span>Updated {lastUpdatedLabel}</span>
+            <span>
+              {t("weeklyReview.updatedAt", { time: lastUpdatedLabel })}
+            </span>
           </p>
         </div>
         <button
@@ -277,7 +340,9 @@ export function WeeklyReviewView({
           disabled={isRefetching}
         >
           <RefreshCw size={14} className={isRefetching ? "is-spinning" : ""} />
-          {isRefetching ? "Refreshing..." : "Refresh"}
+          {isRefetching
+            ? t("weeklyReview.action.refreshing")
+            : t("weeklyReview.action.refresh")}
         </button>
       </div>
 
@@ -301,7 +366,7 @@ export function WeeklyReviewView({
 
       <section className="weekly-review-progress-card">
         <div className="weekly-review-progress-header">
-          <span>Completion ratio</span>
+          <span>{t("weeklyReview.progress.completionRatio")}</span>
           <strong>{completionRate}%</strong>
         </div>
         <div className="weekly-review-progress-track">
@@ -311,9 +376,15 @@ export function WeeklyReviewView({
           />
         </div>
         <div className="weekly-review-progress-meta">
-          <span>{snapshot.carryOverCount} carry-over open</span>
           <span>
-            {snapshot.dueThisWeekOpenCount} due this week and still open
+            {t("weeklyReview.progress.carryOverOpen", {
+              count: snapshot.carryOverCount,
+            })}
+          </span>
+          <span>
+            {t("weeklyReview.progress.dueThisWeekOpen", {
+              count: snapshot.dueThisWeekOpenCount,
+            })}
           </span>
         </div>
       </section>
@@ -323,14 +394,18 @@ export function WeeklyReviewView({
           <header className="weekly-section-header">
             <div className="weekly-section-title-wrap">
               <CheckCircle2 size={15} />
-              <h2>Completed This Week</h2>
+              <h2>{t("weeklyReview.section.completed.title")}</h2>
             </div>
-            <span>{snapshot.completedTasks.length} shown</span>
+            <span>
+              {t("weeklyReview.section.completed.shown", {
+                count: snapshot.completedTasks.length,
+              })}
+            </span>
           </header>
           <div className="weekly-section-body">
             {snapshot.completedTasks.length === 0 ? (
               <p className="weekly-empty-text">
-                No completed tasks yet in this week.
+                {t("weeklyReview.section.completed.empty")}
               </p>
             ) : (
               snapshot.completedTasks.map((entry) => (
@@ -338,8 +413,11 @@ export function WeeklyReviewView({
                   key={`completed-${entry.task.id}`}
                   task={entry.task}
                   projectNameById={projectNameById}
-                  rightMeta={`Done ${formatDateTime(entry.completedAt)}`}
+                  rightMeta={t("weeklyReview.section.completed.doneAt", {
+                    time: formatDateTime(entry.completedAt, locale),
+                  })}
                   onEdit={onEdit}
+                  locale={locale}
                 />
               ))
             )}
@@ -350,14 +428,18 @@ export function WeeklyReviewView({
           <header className="weekly-section-header">
             <div className="weekly-section-title-wrap">
               <AlertTriangle size={15} />
-              <h2>Overdue</h2>
+              <h2>{t("weeklyReview.section.overdue.title")}</h2>
             </div>
-            <span>{snapshot.overdueCount} total</span>
+            <span>
+              {t("weeklyReview.section.overdue.total", {
+                count: snapshot.overdueCount,
+              })}
+            </span>
           </header>
           <div className="weekly-section-body">
             {snapshot.overdueTasks.length === 0 ? (
               <p className="weekly-empty-text">
-                No overdue tasks. Keep this trend.
+                {t("weeklyReview.section.overdue.empty")}
               </p>
             ) : (
               snapshot.overdueTasks.map((task) => (
@@ -365,8 +447,11 @@ export function WeeklyReviewView({
                   key={`overdue-${task.id}`}
                   task={task}
                   projectNameById={projectNameById}
-                  rightMeta={`Due ${formatDueLabel(task.due_at)}`}
+                  rightMeta={t("weeklyReview.section.overdue.dueAt", {
+                    time: formatDueLabel(task.due_at, locale),
+                  })}
                   onEdit={onEdit}
+                  locale={locale}
                   actions={
                     <>
                       {task.status !== "DOING" ? (
@@ -375,7 +460,7 @@ export function WeeklyReviewView({
                           className="weekly-inline-action"
                           onClick={() => onStatusChange(task.id, "DOING")}
                         >
-                          Start
+                          {t("weeklyReview.action.start")}
                         </button>
                       ) : null}
                       {task.status !== "DONE" ? (
@@ -384,7 +469,7 @@ export function WeeklyReviewView({
                           className="weekly-inline-action weekly-inline-action-primary"
                           onClick={() => onStatusChange(task.id, "DONE")}
                         >
-                          Done
+                          {t("taskForm.status.done")}
                         </button>
                       ) : null}
                     </>
@@ -399,15 +484,19 @@ export function WeeklyReviewView({
           <header className="weekly-section-header">
             <div className="weekly-section-title-wrap">
               <ClipboardList size={15} />
-              <h2>Pending Focus</h2>
+              <h2>{t("weeklyReview.section.pending.title")}</h2>
             </div>
-            <span>{snapshot.pendingCount} total</span>
+            <span>
+              {t("weeklyReview.section.pending.total", {
+                count: snapshot.pendingCount,
+              })}
+            </span>
           </header>
           <div className="weekly-section-body">
             {snapshot.pendingTasks.length === 0 ? (
               <div className="weekly-empty-panel">
                 <p className="weekly-empty-text">
-                  No pending tasks in the queue.
+                  {t("weeklyReview.section.pending.empty")}
                 </p>
                 <button
                   type="button"
@@ -415,7 +504,7 @@ export function WeeklyReviewView({
                   onClick={onCreateClick}
                 >
                   <Plus size={14} />
-                  Create task
+                  {t("weeklyReview.section.pending.createTask")}
                 </button>
               </div>
             ) : (
@@ -424,8 +513,11 @@ export function WeeklyReviewView({
                   key={`pending-${task.id}`}
                   task={task}
                   projectNameById={projectNameById}
-                  rightMeta={`Due ${formatDueLabel(task.due_at)}`}
+                  rightMeta={t("weeklyReview.section.overdue.dueAt", {
+                    time: formatDueLabel(task.due_at, locale),
+                  })}
                   onEdit={onEdit}
+                  locale={locale}
                   actions={
                     <>
                       {task.status !== "DOING" ? (
@@ -434,7 +526,7 @@ export function WeeklyReviewView({
                           className="weekly-inline-action weekly-inline-action-primary"
                           onClick={() => onStatusChange(task.id, "DOING")}
                         >
-                          Start
+                          {t("weeklyReview.action.start")}
                         </button>
                       ) : (
                         <button
@@ -442,7 +534,7 @@ export function WeeklyReviewView({
                           className="weekly-inline-action"
                           onClick={() => onStatusChange(task.id, "TODO")}
                         >
-                          Pause
+                          {t("weeklyReview.action.pause")}
                         </button>
                       )}
                     </>

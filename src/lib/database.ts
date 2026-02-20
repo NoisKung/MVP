@@ -1,5 +1,7 @@
 import Database from "@tauri-apps/plugin-sql";
 import type {
+  AppLocale,
+  AppLocaleSetting,
   AppSettingRecord,
   BackupImportOptions,
   BackupImportResult,
@@ -20,11 +22,15 @@ import type {
   SyncConflictStatus,
   SyncConflictType,
   SyncEndpointSettings,
+  SyncProvider,
+  SyncProviderSettings,
   SyncEntityType,
   SyncOperation,
   SyncOutboxRecord,
   SyncPushChange,
   SyncRuntimeProfilePreset,
+  SyncRuntimeProfileSetting,
+  SyncRuntimeProfileSettings,
   SyncRuntimeSettings,
   TaskStatus,
   TaskPriority,
@@ -42,8 +48,10 @@ import type {
   CreateTaskSubtaskInput,
   CreateTaskInput,
   UpdateProjectInput,
+  UpdateSyncProviderSettingsInput,
   UpdateTaskSubtaskInput,
   UpdateSyncEndpointSettingsInput,
+  UpdateAppLocaleSettingInput,
   UpdateSyncRuntimeSettingsInput,
   UpsertTaskTemplateInput,
   UpdateTaskInput,
@@ -139,9 +147,57 @@ const SYNC_CONFLICT_EVENT_TYPES: SyncConflictEventType[] = [
   "retried",
   "exported",
 ];
+const SYNC_PROVIDERS: SyncProvider[] = [
+  "provider_neutral",
+  "google_appdata",
+  "onedrive_approot",
+  "icloud_cloudkit",
+  "solostack_cloud_aws",
+];
+const SYNC_RUNTIME_PROFILE_SETTINGS: SyncRuntimeProfileSetting[] = [
+  "desktop",
+  "mobile_beta",
+  "custom",
+];
+const DB_ERROR_CODES = {
+  UNSUPPORTED_SYNC_ENTITY_TYPE: "DB_UNSUPPORTED_SYNC_ENTITY_TYPE",
+  UNSUPPORTED_SYNC_OPERATION: "DB_UNSUPPORTED_SYNC_OPERATION",
+  UNSUPPORTED_SYNC_CONFLICT_EVENT_TYPE:
+    "DB_UNSUPPORTED_SYNC_CONFLICT_EVENT_TYPE",
+  SELECTED_PROJECT_MISSING: "DB_SELECTED_PROJECT_MISSING",
+  UNSUPPORTED_APP_LOCALE: "DB_UNSUPPORTED_APP_LOCALE",
+  SYNC_ENDPOINTS_REQUIRE_BOTH: "DB_SYNC_ENDPOINTS_REQUIRE_BOTH",
+  SYNC_ENDPOINTS_INVALID_URLS: "DB_SYNC_ENDPOINTS_INVALID_URLS",
+  CONFLICT_ID_REQUIRED: "DB_CONFLICT_ID_REQUIRED",
+  CONFLICT_NOT_FOUND: "DB_CONFLICT_NOT_FOUND",
+  CONFLICT_STRATEGY_INVALID: "DB_CONFLICT_STRATEGY_INVALID",
+  MANUAL_MERGE_PAYLOAD_REQUIRED: "DB_MANUAL_MERGE_PAYLOAD_REQUIRED",
+  PROJECT_NAME_REQUIRED: "DB_PROJECT_NAME_REQUIRED",
+  PROJECT_NAME_EXISTS: "DB_PROJECT_NAME_EXISTS",
+  PROJECT_NOT_FOUND: "DB_PROJECT_NOT_FOUND",
+  TASK_NOT_FOUND: "DB_TASK_NOT_FOUND",
+  SUBTASK_TITLE_REQUIRED: "DB_SUBTASK_TITLE_REQUIRED",
+  SUBTASK_NOT_FOUND: "DB_SUBTASK_NOT_FOUND",
+  TEMPLATE_NAME_REQUIRED: "DB_TEMPLATE_NAME_REQUIRED",
+  RECURRING_TEMPLATE_DUE_OFFSET_REQUIRED:
+    "DB_RECURRING_TEMPLATE_DUE_OFFSET_REQUIRED",
+  REMINDER_OFFSET_MUST_BE_EARLIER: "DB_REMINDER_OFFSET_MUST_BE_EARLIER",
+  TEMPLATE_NAME_EXISTS: "DB_TEMPLATE_NAME_EXISTS",
+  BACKUP_PAYLOAD_INVALID: "DB_BACKUP_PAYLOAD_INVALID",
+  BACKUP_VERSION_UNSUPPORTED: "DB_BACKUP_VERSION_UNSUPPORTED",
+  BACKUP_PAYLOAD_MISSING_DATA: "DB_BACKUP_PAYLOAD_MISSING_DATA",
+  RESTORE_BLOCKED: "DB_RESTORE_BLOCKED",
+  LATEST_BACKUP_NOT_FOUND: "DB_LATEST_BACKUP_NOT_FOUND",
+  LATEST_BACKUP_CORRUPTED: "DB_LATEST_BACKUP_CORRUPTED",
+} as const;
 const SYNC_SETTINGS_DEVICE_ID_KEY = "sync.device_id";
+const APP_LOCALE_KEY = "app.locale";
+const APP_LOCALES: AppLocale[] = ["en", "th"];
 const SYNC_SETTINGS_PUSH_URL_KEY = "local.sync.push_url";
 const SYNC_SETTINGS_PULL_URL_KEY = "local.sync.pull_url";
+const SYNC_SETTINGS_PROVIDER_KEY = "local.sync.provider";
+const SYNC_SETTINGS_PROVIDER_CONFIG_KEY = "local.sync.provider_config";
+const SYNC_SETTINGS_RUNTIME_PROFILE_KEY = "local.sync.runtime_profile";
 const SYNC_SETTINGS_AUTO_INTERVAL_SECONDS_KEY =
   "local.sync.auto_interval_seconds";
 const SYNC_SETTINGS_BACKGROUND_INTERVAL_SECONDS_KEY =
@@ -149,6 +205,13 @@ const SYNC_SETTINGS_BACKGROUND_INTERVAL_SECONDS_KEY =
 const SYNC_SETTINGS_PUSH_LIMIT_KEY = "local.sync.push_limit";
 const SYNC_SETTINGS_PULL_LIMIT_KEY = "local.sync.pull_limit";
 const SYNC_SETTINGS_MAX_PULL_PAGES_KEY = "local.sync.max_pull_pages";
+const SYNC_RUNTIME_SETTINGS_KEYS = [
+  SYNC_SETTINGS_AUTO_INTERVAL_SECONDS_KEY,
+  SYNC_SETTINGS_BACKGROUND_INTERVAL_SECONDS_KEY,
+  SYNC_SETTINGS_PUSH_LIMIT_KEY,
+  SYNC_SETTINGS_PULL_LIMIT_KEY,
+  SYNC_SETTINGS_MAX_PULL_PAGES_KEY,
+] as const;
 const LOCAL_BACKUP_LATEST_PAYLOAD_KEY = "local.backup.latest_payload_v1";
 const LOCAL_BACKUP_LATEST_EXPORTED_AT_KEY = "local.backup.latest_exported_at";
 const DEFAULT_SYNC_AUTO_INTERVAL_SECONDS = 60;
@@ -161,6 +224,7 @@ const MOBILE_SYNC_BACKGROUND_INTERVAL_SECONDS = 600;
 const MOBILE_SYNC_PUSH_LIMIT = 120;
 const MOBILE_SYNC_PULL_LIMIT = 120;
 const MOBILE_SYNC_MAX_PULL_PAGES = 3;
+const DEFAULT_SYNC_PROVIDER: SyncProvider = "provider_neutral";
 const LOCAL_ONLY_SETTING_PREFIX = "local.";
 const SYNC_CONFLICT_EVENT_MAX_PER_CONFLICT = 200;
 const SYNC_CONFLICT_EVENT_RETENTION_DAYS = 90;
@@ -771,7 +835,7 @@ function asSyncEntityType(value: unknown): SyncEntityType {
   ) {
     return value as SyncEntityType;
   }
-  throw new Error("Unsupported sync entity type.");
+  throw new Error(DB_ERROR_CODES.UNSUPPORTED_SYNC_ENTITY_TYPE);
 }
 
 function asSyncOperation(value: unknown): SyncOperation {
@@ -781,7 +845,7 @@ function asSyncOperation(value: unknown): SyncOperation {
   ) {
     return value as SyncOperation;
   }
-  throw new Error("Unsupported sync operation.");
+  throw new Error(DB_ERROR_CODES.UNSUPPORTED_SYNC_OPERATION);
 }
 
 function asSyncConflictType(value: unknown): SyncConflictType {
@@ -825,7 +889,58 @@ function asSyncConflictEventType(value: unknown): SyncConflictEventType {
   ) {
     return value as SyncConflictEventType;
   }
-  throw new Error("Unsupported sync conflict event type.");
+  throw new Error(DB_ERROR_CODES.UNSUPPORTED_SYNC_CONFLICT_EVENT_TYPE);
+}
+
+function asSyncProvider(
+  value: unknown,
+  fallback: SyncProvider = DEFAULT_SYNC_PROVIDER,
+): SyncProvider {
+  if (
+    typeof value === "string" &&
+    SYNC_PROVIDERS.includes(value as SyncProvider)
+  ) {
+    return value as SyncProvider;
+  }
+  return fallback;
+}
+
+function asAppLocale(value: unknown): AppLocale | null {
+  if (typeof value === "string" && APP_LOCALES.includes(value as AppLocale)) {
+    return value as AppLocale;
+  }
+  return null;
+}
+
+function asSyncRuntimeProfileSetting(
+  value: unknown,
+  fallback: SyncRuntimeProfileSetting,
+): SyncRuntimeProfileSetting {
+  if (
+    typeof value === "string" &&
+    SYNC_RUNTIME_PROFILE_SETTINGS.includes(value as SyncRuntimeProfileSetting)
+  ) {
+    return value as SyncRuntimeProfileSetting;
+  }
+  return fallback;
+}
+
+function normalizeSyncProviderConfigObject(
+  value: unknown,
+): Record<string, unknown> | null {
+  if (!isPlainObject(value)) return null;
+  return value;
+}
+
+function parseSyncProviderConfigValue(
+  value: unknown,
+): Record<string, unknown> | null {
+  if (typeof value !== "string" || !value.trim()) return null;
+  try {
+    return normalizeSyncProviderConfigObject(JSON.parse(value));
+  } catch {
+    return null;
+  }
 }
 
 async function assertProjectExists(
@@ -839,7 +954,7 @@ async function assertProjectExists(
     [projectId],
   );
   if (rows.length === 0) {
-    throw new Error("Selected project does not exist.");
+    throw new Error(DB_ERROR_CODES.SELECTED_PROJECT_MISSING);
   }
 }
 
@@ -905,6 +1020,37 @@ export async function getOrCreateDeviceId(): Promise<string> {
   return generatedDeviceId;
 }
 
+export async function getAppLocaleSetting(): Promise<AppLocaleSetting> {
+  const db = await getDb();
+  const rows = await db.select<AppSettingRecord[]>(
+    "SELECT key, value FROM settings WHERE key = $1 LIMIT 1",
+    [APP_LOCALE_KEY],
+  );
+  const locale = asAppLocale(rows[0]?.value ?? null);
+  return {
+    locale,
+  };
+}
+
+export async function updateAppLocaleSetting(
+  input: UpdateAppLocaleSettingInput,
+): Promise<AppLocaleSetting> {
+  const db = await getDb();
+  const locale = asAppLocale(input.locale);
+  if (!locale) {
+    throw new Error(DB_ERROR_CODES.UNSUPPORTED_APP_LOCALE);
+  }
+  await db.execute(
+    `INSERT INTO settings (key, value)
+         VALUES ($1, $2)
+    ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+    [APP_LOCALE_KEY, locale],
+  );
+  return {
+    locale,
+  };
+}
+
 export async function getSyncEndpointSettings(): Promise<SyncEndpointSettings> {
   const db = await getDb();
   const rows = await db.select<AppSettingRecord[]>(
@@ -938,16 +1084,14 @@ export async function updateSyncEndpointSettings(
   const hasPullUrl = Boolean(pullUrl);
 
   if (hasPushUrl !== hasPullUrl) {
-    throw new Error(
-      "Both sync push URL and sync pull URL must be set together.",
-    );
+    throw new Error(DB_ERROR_CODES.SYNC_ENDPOINTS_REQUIRE_BOTH);
   }
 
   if (
     pushUrl &&
     (!isValidSyncEndpointUrl(pushUrl) || !isValidSyncEndpointUrl(pullUrl ?? ""))
   ) {
-    throw new Error("Sync endpoints must be valid http(s) URLs.");
+    throw new Error(DB_ERROR_CODES.SYNC_ENDPOINTS_INVALID_URLS);
   }
 
   await db.execute("BEGIN IMMEDIATE");
@@ -983,6 +1127,74 @@ export async function updateSyncEndpointSettings(
   };
 }
 
+export async function getSyncProviderSettings(): Promise<SyncProviderSettings> {
+  const db = await getDb();
+  const rows = await db.select<AppSettingRecord[]>(
+    "SELECT key, value FROM settings WHERE key IN ($1, $2)",
+    [SYNC_SETTINGS_PROVIDER_KEY, SYNC_SETTINGS_PROVIDER_CONFIG_KEY],
+  );
+
+  let provider: SyncProvider = DEFAULT_SYNC_PROVIDER;
+  let providerConfig: Record<string, unknown> | null = null;
+
+  for (const row of rows) {
+    if (row.key === SYNC_SETTINGS_PROVIDER_KEY) {
+      provider = asSyncProvider(row.value, DEFAULT_SYNC_PROVIDER);
+    } else if (row.key === SYNC_SETTINGS_PROVIDER_CONFIG_KEY) {
+      providerConfig = parseSyncProviderConfigValue(row.value);
+    }
+  }
+
+  return {
+    provider,
+    provider_config: providerConfig,
+  };
+}
+
+export async function updateSyncProviderSettings(
+  input: UpdateSyncProviderSettingsInput,
+): Promise<SyncProviderSettings> {
+  const db = await getDb();
+  const provider = asSyncProvider(input.provider, DEFAULT_SYNC_PROVIDER);
+  const providerConfig = normalizeSyncProviderConfigObject(
+    input.provider_config ?? null,
+  );
+  const providerConfigJson = providerConfig
+    ? JSON.stringify(providerConfig)
+    : null;
+
+  await db.execute("BEGIN IMMEDIATE");
+  try {
+    await db.execute(
+      `INSERT INTO settings (key, value)
+           VALUES ($1, $2)
+      ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+      [SYNC_SETTINGS_PROVIDER_KEY, provider],
+    );
+    if (providerConfigJson) {
+      await db.execute(
+        `INSERT INTO settings (key, value)
+             VALUES ($1, $2)
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+        [SYNC_SETTINGS_PROVIDER_CONFIG_KEY, providerConfigJson],
+      );
+    } else {
+      await db.execute("DELETE FROM settings WHERE key = $1", [
+        SYNC_SETTINGS_PROVIDER_CONFIG_KEY,
+      ]);
+    }
+    await db.execute("COMMIT");
+  } catch (error) {
+    await db.execute("ROLLBACK");
+    throw error;
+  }
+
+  return {
+    provider,
+    provider_config: providerConfig,
+  };
+}
+
 function getSyncRuntimeDefaultsByPreset(
   preset: SyncRuntimeProfilePreset,
 ): SyncRuntimeSettings {
@@ -1005,6 +1217,12 @@ function getSyncRuntimeDefaultsByPreset(
   };
 }
 
+function getSyncRuntimeProfileDefaultByPreset(
+  preset: SyncRuntimeProfilePreset,
+): SyncRuntimeProfileSetting {
+  return preset === "mobile" ? "mobile_beta" : "desktop";
+}
+
 function toSyncRuntimeSettingsEntries(
   settings: SyncRuntimeSettings,
 ): Array<[string, string]> {
@@ -1023,34 +1241,82 @@ function toSyncRuntimeSettingsEntries(
   ];
 }
 
+export async function getSyncRuntimeProfileSettings(
+  preset: SyncRuntimeProfilePreset = "desktop",
+): Promise<SyncRuntimeProfileSettings> {
+  const db = await getDb();
+  const rows = await db.select<AppSettingRecord[]>(
+    "SELECT key, value FROM settings WHERE key = $1 LIMIT 1",
+    [SYNC_SETTINGS_RUNTIME_PROFILE_KEY],
+  );
+
+  return {
+    runtime_profile: asSyncRuntimeProfileSetting(
+      rows[0]?.value,
+      getSyncRuntimeProfileDefaultByPreset(preset),
+    ),
+  };
+}
+
 export async function ensureSyncRuntimeSettingsSeeded(
   preset: SyncRuntimeProfilePreset = "desktop",
 ): Promise<SyncRuntimeSettings> {
   const db = await getDb();
   const existingRows = await db.select<Array<{ key: string }>>(
-    "SELECT key FROM settings WHERE key IN ($1, $2, $3, $4, $5) LIMIT 1",
+    "SELECT key FROM settings WHERE key IN ($1, $2, $3, $4, $5, $6, $7) LIMIT 32",
     [
       SYNC_SETTINGS_AUTO_INTERVAL_SECONDS_KEY,
       SYNC_SETTINGS_BACKGROUND_INTERVAL_SECONDS_KEY,
       SYNC_SETTINGS_PUSH_LIMIT_KEY,
       SYNC_SETTINGS_PULL_LIMIT_KEY,
       SYNC_SETTINGS_MAX_PULL_PAGES_KEY,
+      SYNC_SETTINGS_PROVIDER_KEY,
+      SYNC_SETTINGS_RUNTIME_PROFILE_KEY,
     ],
   );
-  if (existingRows.length > 0) {
+
+  const existingKeys = new Set(existingRows.map((row) => row.key));
+  const hasAllRuntimeSettingKeys = SYNC_RUNTIME_SETTINGS_KEYS.every((key) =>
+    existingKeys.has(key),
+  );
+  const requiresSeed =
+    !hasAllRuntimeSettingKeys ||
+    !existingKeys.has(SYNC_SETTINGS_PROVIDER_KEY) ||
+    !existingKeys.has(SYNC_SETTINGS_RUNTIME_PROFILE_KEY);
+  if (!requiresSeed) {
     return getSyncRuntimeSettings();
   }
 
   const seededSettings = getSyncRuntimeDefaultsByPreset(preset);
+  const runtimeProfileDefault = getSyncRuntimeProfileDefaultByPreset(preset);
 
   await db.execute("BEGIN IMMEDIATE");
   try {
     for (const [key, value] of toSyncRuntimeSettingsEntries(seededSettings)) {
+      if (existingKeys.has(key)) continue;
       await db.execute(
         `INSERT INTO settings (key, value)
              VALUES ($1, $2)
         ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
         [key, value],
+      );
+    }
+
+    if (!existingKeys.has(SYNC_SETTINGS_PROVIDER_KEY)) {
+      await db.execute(
+        `INSERT INTO settings (key, value)
+             VALUES ($1, $2)
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+        [SYNC_SETTINGS_PROVIDER_KEY, DEFAULT_SYNC_PROVIDER],
+      );
+    }
+
+    if (!existingKeys.has(SYNC_SETTINGS_RUNTIME_PROFILE_KEY)) {
+      await db.execute(
+        `INSERT INTO settings (key, value)
+             VALUES ($1, $2)
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+        [SYNC_SETTINGS_RUNTIME_PROFILE_KEY, runtimeProfileDefault],
       );
     }
     await db.execute("COMMIT");
@@ -1059,7 +1325,7 @@ export async function ensureSyncRuntimeSettingsSeeded(
     throw error;
   }
 
-  return seededSettings;
+  return getSyncRuntimeSettings();
 }
 
 export async function getSyncRuntimeSettings(): Promise<SyncRuntimeSettings> {
@@ -1131,6 +1397,10 @@ export async function updateSyncRuntimeSettings(
   input: UpdateSyncRuntimeSettingsInput,
 ): Promise<SyncRuntimeSettings> {
   const db = await getDb();
+  const runtimeProfile = asSyncRuntimeProfileSetting(
+    input.runtime_profile,
+    "custom",
+  );
   const autoSyncIntervalSeconds = normalizeSyncRuntimeNumber(
     input.auto_sync_interval_seconds,
     {
@@ -1179,6 +1449,12 @@ export async function updateSyncRuntimeSettings(
         [key, value],
       );
     }
+    await db.execute(
+      `INSERT INTO settings (key, value)
+           VALUES ($1, $2)
+      ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+      [SYNC_SETTINGS_RUNTIME_PROFILE_KEY, runtimeProfile],
+    );
 
     await db.execute("COMMIT");
   } catch (error) {
@@ -2091,16 +2367,16 @@ export async function resolveSyncConflict(
   await ensureSyncTablesReady(db);
   const conflictId = input.conflict_id.trim();
   if (!conflictId) {
-    throw new Error("conflict_id is required.");
+    throw new Error(DB_ERROR_CODES.CONFLICT_ID_REQUIRED);
   }
   const existingConflict = await getSyncConflict(conflictId);
   if (!existingConflict) {
-    throw new Error("Conflict not found.");
+    throw new Error(DB_ERROR_CODES.CONFLICT_NOT_FOUND);
   }
 
   const strategy = asSyncConflictResolutionStrategy(input.strategy);
   if (!strategy) {
-    throw new Error("Invalid conflict resolution strategy.");
+    throw new Error(DB_ERROR_CODES.CONFLICT_STRATEGY_INVALID);
   }
   if (
     strategy === "manual_merge" &&
@@ -2108,7 +2384,7 @@ export async function resolveSyncConflict(
       !isPlainObject(input.resolution_payload) ||
       Object.keys(input.resolution_payload).length === 0)
   ) {
-    throw new Error("Manual merge requires a non-empty resolution payload.");
+    throw new Error(DB_ERROR_CODES.MANUAL_MERGE_PAYLOAD_REQUIRED);
   }
 
   const nowIso = new Date().toISOString();
@@ -2164,7 +2440,7 @@ export async function resolveSyncConflict(
 
   const updated = await getSyncConflict(conflictId);
   if (!updated) {
-    throw new Error("Conflict not found.");
+    throw new Error(DB_ERROR_CODES.CONFLICT_NOT_FOUND);
   }
 
   return updated;
@@ -2734,7 +3010,7 @@ export async function createProject(
   const deviceId = await getOrCreateDeviceId();
   const normalizedName = normalizeProjectName(input.name);
   if (!normalizedName) {
-    throw new Error("Project name is required.");
+    throw new Error(DB_ERROR_CODES.PROJECT_NAME_REQUIRED);
   }
 
   const duplicateRows = await db.select<{ id: string }[]>(
@@ -2742,7 +3018,7 @@ export async function createProject(
     [normalizedName],
   );
   if (duplicateRows.length > 0) {
-    throw new Error("Project name already exists.");
+    throw new Error(DB_ERROR_CODES.PROJECT_NAME_EXISTS);
   }
 
   const projectId = uuidv4();
@@ -2793,7 +3069,7 @@ export async function updateProject(
   );
   const existingProject = existingRows[0];
   if (!existingProject) {
-    throw new Error("Project not found.");
+    throw new Error(DB_ERROR_CODES.PROJECT_NOT_FOUND);
   }
 
   const setClauses: string[] = [];
@@ -2803,7 +3079,7 @@ export async function updateProject(
   if (input.name !== undefined) {
     const normalizedName = normalizeProjectName(input.name);
     if (!normalizedName) {
-      throw new Error("Project name is required.");
+      throw new Error(DB_ERROR_CODES.PROJECT_NAME_REQUIRED);
     }
 
     const duplicateRows = await db.select<{ id: string }[]>(
@@ -2811,7 +3087,7 @@ export async function updateProject(
       [normalizedName, input.id],
     );
     if (duplicateRows.length > 0) {
-      throw new Error("Project name already exists.");
+      throw new Error(DB_ERROR_CODES.PROJECT_NAME_EXISTS);
     }
 
     setClauses.push(`name = $${paramIndex++}`);
@@ -2999,7 +3275,7 @@ export async function updateTask(input: UpdateTaskInput): Promise<Task> {
   const existingTask = existingRows[0];
 
   if (!existingTask) {
-    throw new Error("Task not found");
+    throw new Error(DB_ERROR_CODES.TASK_NOT_FOUND);
   }
 
   // Build dynamic SET clause — only update provided fields
@@ -3587,7 +3863,7 @@ export async function createTaskSubtask(
   const deviceId = await getOrCreateDeviceId();
   const normalizedTitle = normalizeSubtaskTitle(input.title);
   if (!normalizedTitle) {
-    throw new Error("Subtask title is required.");
+    throw new Error(DB_ERROR_CODES.SUBTASK_TITLE_REQUIRED);
   }
 
   const subtaskId = uuidv4();
@@ -3642,7 +3918,7 @@ export async function updateTaskSubtask(
   const existingSubtask = existingRows[0];
 
   if (!existingSubtask) {
-    throw new Error("Subtask not found.");
+    throw new Error(DB_ERROR_CODES.SUBTASK_NOT_FOUND);
   }
 
   const setClauses: string[] = [];
@@ -3652,7 +3928,7 @@ export async function updateTaskSubtask(
   if (input.title !== undefined) {
     const normalizedTitle = normalizeSubtaskTitle(input.title);
     if (!normalizedTitle) {
-      throw new Error("Subtask title is required.");
+      throw new Error(DB_ERROR_CODES.SUBTASK_TITLE_REQUIRED);
     }
     setClauses.push(`title = $${paramIndex++}`);
     params.push(normalizedTitle);
@@ -3729,7 +4005,7 @@ export async function upsertTaskTemplate(
   const deviceId = await getOrCreateDeviceId();
   const normalizedName = input.name.trim();
   if (!normalizedName) {
-    throw new Error("Template name is required.");
+    throw new Error(DB_ERROR_CODES.TEMPLATE_NAME_REQUIRED);
   }
 
   const normalizedDueOffset = normalizeTemplateOffset(
@@ -3741,7 +4017,7 @@ export async function upsertTaskTemplate(
   const normalizedRecurrence = input.recurrence ?? "NONE";
 
   if (normalizedRecurrence !== "NONE" && normalizedDueOffset === null) {
-    throw new Error("Recurring templates require a due offset.");
+    throw new Error(DB_ERROR_CODES.RECURRING_TEMPLATE_DUE_OFFSET_REQUIRED);
   }
 
   if (
@@ -3749,7 +4025,7 @@ export async function upsertTaskTemplate(
     normalizedRemindOffset !== null &&
     normalizedRemindOffset > normalizedDueOffset
   ) {
-    throw new Error("Reminder offset must be earlier than due offset.");
+    throw new Error(DB_ERROR_CODES.REMINDER_OFFSET_MUST_BE_EARLIER);
   }
 
   const existingByNameRows = await db.select<{ id: string }[]>(
@@ -3759,7 +4035,7 @@ export async function upsertTaskTemplate(
   const existingByNameId = existingByNameRows[0]?.id ?? null;
 
   if (input.id && existingByNameId && existingByNameId !== input.id) {
-    throw new Error("Template name already exists.");
+    throw new Error(DB_ERROR_CODES.TEMPLATE_NAME_EXISTS);
   }
 
   const targetTemplateId = input.id ?? existingByNameId ?? uuidv4();
@@ -3941,17 +4217,17 @@ export async function getBackupRestorePreflight(): Promise<BackupRestorePrefligh
 
 function normalizeBackupPayload(payload: unknown): BackupPayload {
   if (!isPlainObject(payload)) {
-    throw new Error("Invalid backup payload.");
+    throw new Error(DB_ERROR_CODES.BACKUP_PAYLOAD_INVALID);
   }
 
   const version = payload.version;
   if (version !== 1) {
-    throw new Error("Unsupported backup version.");
+    throw new Error(DB_ERROR_CODES.BACKUP_VERSION_UNSUPPORTED);
   }
 
   const rawData = payload.data;
   if (!isPlainObject(rawData)) {
-    throw new Error("Invalid backup payload: missing data section.");
+    throw new Error(DB_ERROR_CODES.BACKUP_PAYLOAD_MISSING_DATA);
   }
 
   const rawSettings = Array.isArray(rawData.settings) ? rawData.settings : [];
@@ -4205,9 +4481,7 @@ export async function importBackupPayload(
       restoreBlockReasons.length > 0
         ? restoreBlockReasons.join(" and ")
         : "active restore guardrails";
-    throw new Error(
-      `Restore is blocked: ${reasonLabel}. Resolve or sync pending state first, or confirm force restore.`,
-    );
+    throw new Error(`${DB_ERROR_CODES.RESTORE_BLOCKED}:${reasonLabel}`);
   }
 
   const preservedLocalSettings = await db.select<AppSettingRecord[]>(
@@ -4451,14 +4725,14 @@ export async function restoreLatestBackupPayload(options?: {
   const latestBackupSettings = await readLatestBackupSnapshotSettings(db);
   const latestPayloadJson = latestBackupSettings.latestPayloadJson;
   if (!latestPayloadJson) {
-    throw new Error("No latest backup snapshot found. Export backup first.");
+    throw new Error(DB_ERROR_CODES.LATEST_BACKUP_NOT_FOUND);
   }
 
   let parsedPayload: unknown;
   try {
     parsedPayload = JSON.parse(latestPayloadJson) as unknown;
   } catch {
-    throw new Error("Latest backup snapshot is corrupted.");
+    throw new Error(DB_ERROR_CODES.LATEST_BACKUP_CORRUPTED);
   }
 
   return importBackupPayload(parsedPayload, {

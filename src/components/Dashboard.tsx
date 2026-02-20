@@ -1,4 +1,6 @@
 import { useTaskStats } from "@/hooks/use-tasks";
+import { useI18n } from "@/lib/i18n";
+import { localizeErrorMessage } from "@/lib/error-message";
 import {
   BarChart3,
   Circle,
@@ -11,26 +13,12 @@ import {
   TrendingUp,
 } from "lucide-react";
 
-function getErrorMessage(error: unknown): string {
-  if (error instanceof Error && error.message.trim()) {
-    return error.message;
-  }
-
-  if (typeof error === "string" && error.trim()) {
-    return error;
-  }
-
-  if (typeof error === "object" && error !== null) {
-    const maybeMessage = (error as { message?: unknown }).message;
-    if (typeof maybeMessage === "string" && maybeMessage.trim()) {
-      return maybeMessage;
-    }
-  }
-
-  return "An unexpected error occurred. Please try again.";
+function getErrorMessage(error: unknown, locale: "en" | "th"): string {
+  return localizeErrorMessage(error, locale, "app.error.unexpected");
 }
 
 export function Dashboard() {
+  const { locale, t } = useI18n();
   const { data: stats, isLoading, isError, error, refetch } = useTaskStats();
 
   const totalTasks =
@@ -42,28 +30,28 @@ export function Dashboard() {
 
   const statCards = [
     {
-      label: "Total Tasks",
+      label: t("dashboard.stat.totalTasks"),
       value: totalTasks,
       color: "var(--accent)",
       bg: "var(--accent-subtle)",
       icon: <BarChart3 size={20} />,
     },
     {
-      label: "To Do",
+      label: t("taskForm.status.todo"),
       value: stats?.TODO ?? 0,
       color: "var(--status-todo)",
       bg: "var(--status-todo-subtle)",
       icon: <Circle size={20} />,
     },
     {
-      label: "In Progress",
+      label: t("taskForm.status.doing"),
       value: stats?.DOING ?? 0,
       color: "var(--status-doing)",
       bg: "var(--status-doing-subtle)",
       icon: <Loader size={20} />,
     },
     {
-      label: "Completed",
+      label: t("dashboard.stat.completed"),
       value: stats?.DONE ?? 0,
       color: "var(--status-done)",
       bg: "var(--status-done-subtle)",
@@ -73,21 +61,21 @@ export function Dashboard() {
 
   const momentumCards = [
     {
-      label: "Due Today",
+      label: t("dashboard.momentum.dueToday"),
       value: stats?.dueToday ?? 0,
       color: "var(--warning)",
       bg: "var(--warning-subtle)",
       icon: <CalendarCheck2 size={18} />,
     },
     {
-      label: "Overdue",
+      label: t("dashboard.momentum.overdue"),
       value: stats?.overdue ?? 0,
       color: "var(--danger)",
       bg: "var(--danger-subtle)",
       icon: <AlertTriangle size={18} />,
     },
     {
-      label: "Completed This Week",
+      label: t("dashboard.momentum.completedThisWeek"),
       value: stats?.completedThisWeek ?? 0,
       color: "var(--success)",
       bg: "var(--success-subtle)",
@@ -121,7 +109,7 @@ export function Dashboard() {
               marginBottom: 6,
             }}
           >
-            Failed to load dashboard
+            {t("dashboard.error.title")}
           </h2>
           <p
             style={{
@@ -130,7 +118,7 @@ export function Dashboard() {
               marginBottom: 12,
             }}
           >
-            {getErrorMessage(error)}
+            {getErrorMessage(error, locale)} {t("dashboard.error.tryAgain")}
           </p>
           <button
             style={{
@@ -144,7 +132,7 @@ export function Dashboard() {
             }}
             onClick={() => void refetch()}
           >
-            Retry
+            {t("common.retry")}
           </button>
         </div>
       </div>
@@ -155,8 +143,8 @@ export function Dashboard() {
     <div className="dashboard">
       <div className="dashboard-header">
         <div>
-          <h1 className="dashboard-title">Dashboard</h1>
-          <p className="dashboard-subtitle">Your productivity overview</p>
+          <h1 className="dashboard-title">{t("dashboard.title")}</h1>
+          <p className="dashboard-subtitle">{t("dashboard.subtitle")}</p>
         </div>
       </div>
 
@@ -192,7 +180,9 @@ export function Dashboard() {
         <div className="progress-header">
           <div className="progress-header-left">
             <TrendingUp size={16} color="var(--status-done)" />
-            <span className="progress-label">Overall Completion</span>
+            <span className="progress-label">
+              {t("dashboard.progress.overallCompletion")}
+            </span>
           </div>
           <span className="progress-pct">{completionRate}%</span>
         </div>
@@ -241,10 +231,10 @@ export function Dashboard() {
           <div className="empty-icon-wrapper">
             <Rocket size={28} />
           </div>
-          <h3 className="empty-title">Ready to get productive?</h3>
+          <h3 className="empty-title">{t("dashboard.empty.title")}</h3>
           <p className="empty-desc">
-            Create your first task using the sidebar button or press{" "}
-            <kbd>Cmd/Ctrl+N</kbd>
+            {t("dashboard.empty.description")}{" "}
+            <kbd>{t("dashboard.empty.shortcut")}</kbd>
           </p>
         </div>
       )}

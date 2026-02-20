@@ -1,6 +1,8 @@
 import {
   createHttpSyncTransport,
   createSyncTransportFromConfig,
+  resolveSyncTransportConfig,
+  SYNC_TRANSPORT_ERROR_CODES,
 } from "@/lib/sync-transport";
 
 describe("sync-transport", () => {
@@ -116,7 +118,7 @@ describe("sync-transport", () => {
     });
 
     await expect(transport.push({ test: true })).rejects.toThrow(
-      "Sync request timed out.",
+      SYNC_TRANSPORT_ERROR_CODES.TIMEOUT,
     );
   });
 
@@ -133,5 +135,56 @@ describe("sync-transport", () => {
         pullUrl: "https://sync.example.com/v1/sync/pull",
       }),
     ).toBeNull();
+  });
+
+  it("resolves provider transport as ready when config is valid", () => {
+    const resolved = resolveSyncTransportConfig({
+      provider: "provider_neutral",
+      pushUrl: "https://sync.example.com/v1/sync/push",
+      pullUrl: "https://sync.example.com/v1/sync/pull",
+    });
+
+    expect(resolved.status).toBe("ready");
+    expect(resolved.transport).toBeTruthy();
+    expect(resolved.warning).toBeNull();
+  });
+
+  it("returns invalid_config when endpoint pair is incomplete", () => {
+    const resolved = resolveSyncTransportConfig({
+      provider: "provider_neutral",
+      pushUrl: "https://sync.example.com/v1/sync/push",
+      pullUrl: null,
+    });
+
+    expect(resolved.status).toBe("invalid_config");
+    expect(resolved.transport).toBeNull();
+    expect(resolved.warning).toContain("Push and Pull URLs");
+  });
+
+  it("returns provider_unavailable for managed provider without endpoints", () => {
+    const resolved = resolveSyncTransportConfig({
+      provider: "google_appdata",
+      pushUrl: null,
+      pullUrl: null,
+    });
+
+    expect(resolved.status).toBe("provider_unavailable");
+    expect(resolved.transport).toBeNull();
+    expect(resolved.warning).toContain("connector is not configured");
+  });
+
+  it("returns provider_unavailable when managed provider is flagged unavailable", () => {
+    const resolved = resolveSyncTransportConfig({
+      provider: "onedrive_approot",
+      pushUrl: "https://sync.example.com/v1/sync/push",
+      pullUrl: "https://sync.example.com/v1/sync/pull",
+      providerConfig: {
+        managed_available: false,
+      },
+    });
+
+    expect(resolved.status).toBe("provider_unavailable");
+    expect(resolved.transport).toBeNull();
+    expect(resolved.warning).toContain("unavailable");
   });
 });
