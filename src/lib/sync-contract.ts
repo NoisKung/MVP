@@ -14,6 +14,14 @@ import type {
 export const SYNC_SCHEMA_VERSION = 1 as const;
 export const DEFAULT_SYNC_PULL_LIMIT = 200;
 export const MAX_SYNC_PULL_LIMIT = 500;
+export const SYNC_ERROR_CODES = {
+  IDEMPOTENCY_KEY_REQUIRES_IDS: "SYNC_IDEMPOTENCY_KEY_REQUIRES_IDS",
+  DEVICE_ID_REQUIRED: "SYNC_DEVICE_ID_REQUIRED",
+  PULL_RESPONSE_INVALID: "SYNC_PULL_RESPONSE_INVALID",
+  PULL_RESPONSE_METADATA_INVALID: "SYNC_PULL_RESPONSE_METADATA_INVALID",
+  PUSH_RESPONSE_INVALID: "SYNC_PUSH_RESPONSE_INVALID",
+  PUSH_RESPONSE_METADATA_INVALID: "SYNC_PUSH_RESPONSE_METADATA_INVALID",
+} as const;
 
 const SYNC_ENTITY_TYPE_SET: ReadonlySet<SyncEntityType> = new Set([
   "PROJECT",
@@ -129,7 +137,7 @@ export function createSyncIdempotencyKey(
   const normalizedDeviceId = deviceId.trim().toLowerCase();
   const normalizedChangeId = changeId.trim().toLowerCase();
   if (!normalizedDeviceId || !normalizedChangeId) {
-    throw new Error("deviceId and changeId are required for idempotency key.");
+    throw new Error(SYNC_ERROR_CODES.IDEMPOTENCY_KEY_REQUIRES_IDS);
   }
   return `${normalizedDeviceId}:${normalizedChangeId}`;
 }
@@ -141,7 +149,7 @@ export function buildSyncPushRequest(input: {
 }): SyncPushRequest {
   const normalizedDeviceId = input.deviceId.trim();
   if (!normalizedDeviceId) {
-    throw new Error("deviceId is required.");
+    throw new Error(SYNC_ERROR_CODES.DEVICE_ID_REQUIRED);
   }
 
   const normalizedChanges = input.changes
@@ -171,7 +179,7 @@ export function buildSyncPullRequest(input: {
 }): SyncPullRequest {
   const normalizedDeviceId = input.deviceId.trim();
   if (!normalizedDeviceId) {
-    throw new Error("deviceId is required.");
+    throw new Error(SYNC_ERROR_CODES.DEVICE_ID_REQUIRED);
   }
 
   return {
@@ -184,13 +192,13 @@ export function buildSyncPullRequest(input: {
 
 export function parseSyncPullResponse(payload: unknown): SyncPullResponse {
   if (!isPlainObject(payload)) {
-    throw new Error("Invalid sync pull response.");
+    throw new Error(SYNC_ERROR_CODES.PULL_RESPONSE_INVALID);
   }
 
   const serverCursor = asNullableString(payload.server_cursor);
   const serverTime = asNullableString(payload.server_time);
   if (!serverCursor || !serverTime) {
-    throw new Error("Invalid sync pull response metadata.");
+    throw new Error(SYNC_ERROR_CODES.PULL_RESPONSE_METADATA_INVALID);
   }
 
   const rawChanges = Array.isArray(payload.changes) ? payload.changes : [];
@@ -241,13 +249,13 @@ export function parseSyncPullResponse(payload: unknown): SyncPullResponse {
 
 export function parseSyncPushResponse(payload: unknown): SyncPushResponse {
   if (!isPlainObject(payload)) {
-    throw new Error("Invalid sync push response.");
+    throw new Error(SYNC_ERROR_CODES.PUSH_RESPONSE_INVALID);
   }
 
   const serverCursor = asNullableString(payload.server_cursor);
   const serverTime = asNullableString(payload.server_time);
   if (!serverCursor || !serverTime) {
-    throw new Error("Invalid sync push response metadata.");
+    throw new Error(SYNC_ERROR_CODES.PUSH_RESPONSE_METADATA_INVALID);
   }
 
   const accepted = Array.isArray(payload.accepted)

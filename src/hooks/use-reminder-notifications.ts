@@ -7,7 +7,8 @@ import {
   type Options as NotificationOptions,
 } from "@tauri-apps/plugin-notification";
 import type { PluginListener } from "@tauri-apps/api/core";
-import type { Task } from "@/lib/types";
+import { translate } from "@/lib/i18n";
+import type { AppLocale, Task } from "@/lib/types";
 import {
   clearReminderHistoryStorage,
   REMINDER_HISTORY_STORAGE_KEY,
@@ -205,17 +206,17 @@ async function ensureNotificationPermission(): Promise<boolean> {
   return permissionState === "granted";
 }
 
-function buildReminderBody(task: Task): string {
+function buildReminderBody(task: Task, locale: AppLocale): string {
   const dueDate = parseDateTime(task.due_at);
   if (!dueDate) return task.title;
 
-  const dueLabel = dueDate.toLocaleString("en-US", {
+  const dueLabel = dueDate.toLocaleString(locale === "th" ? "th-TH" : "en-US", {
     month: "short",
     day: "numeric",
     hour: "numeric",
     minute: "2-digit",
   });
-  return `${task.title}\nDue ${dueLabel}`;
+  return `${task.title}\n${translate(locale, "reminder.dueAt", { dueAt: dueLabel })}`;
 }
 
 function getTaskIdFromNotification(
@@ -250,10 +251,11 @@ function sendWebNotification(
 
 function sendTaskReminderNotification(
   task: Task,
+  locale: AppLocale,
   onTaskNotificationClick?: (taskId: string) => void,
 ): void {
-  const title = "SoloStack Reminder";
-  const body = buildReminderBody(task);
+  const title = translate(locale, "reminder.title");
+  const body = buildReminderBody(task, locale);
   try {
     sendNotification({
       title,
@@ -271,6 +273,7 @@ function sendTaskReminderNotification(
 
 async function processReminderNotifications(
   tasks: Task[],
+  locale: AppLocale,
   onTaskNotificationClick?: (taskId: string) => void,
 ): Promise<void> {
   if (!(await ensureNotificationPermission())) return;
@@ -291,7 +294,7 @@ async function processReminderNotifications(
     if (reminderHistory[signature]) continue;
     if (reminderAt > now) continue;
 
-    sendTaskReminderNotification(task, onTaskNotificationClick);
+    sendTaskReminderNotification(task, locale, onTaskNotificationClick);
     reminderHistory[signature] = { notifiedAt: now.toISOString() };
   }
 
@@ -305,12 +308,24 @@ async function processReminderNotifications(
 export function useReminderNotifications(
   tasks: Task[],
   enabled: boolean,
+  localeOrOnTaskNotificationClick:
+    | AppLocale
+    | ((taskId: string) => void) = "en",
   onTaskNotificationClick?: (taskId: string) => void,
 ): void {
+  const locale: AppLocale =
+    typeof localeOrOnTaskNotificationClick === "function"
+      ? "en"
+      : localeOrOnTaskNotificationClick;
+  const onTaskNotificationClickResolved =
+    typeof localeOrOnTaskNotificationClick === "function"
+      ? localeOrOnTaskNotificationClick
+      : onTaskNotificationClick;
+
   const tasksRef = useRef(tasks);
-  const onTaskNotificationClickRef = useRef(onTaskNotificationClick);
+  const onTaskNotificationClickRef = useRef(onTaskNotificationClickResolved);
   tasksRef.current = tasks;
-  onTaskNotificationClickRef.current = onTaskNotificationClick;
+  onTaskNotificationClickRef.current = onTaskNotificationClickResolved;
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -360,6 +375,7 @@ export function useReminderNotifications(
       try {
         await processReminderNotifications(
           tasksRef.current,
+          locale,
           onTaskNotificationClickRef.current,
         );
       } finally {
@@ -376,5 +392,5 @@ export function useReminderNotifications(
       isCancelled = true;
       window.clearInterval(intervalId);
     };
-  }, [enabled]);
+  }, [enabled, locale]);
 }

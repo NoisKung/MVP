@@ -10,6 +10,10 @@ import type {
   SyncOutboxRecord,
 } from "./types";
 
+export const SYNC_ENGINE_ERROR_CODES = {
+  SERVER_CURSOR_REQUIRED: "SYNC_ENGINE_SERVER_CURSOR_REQUIRED",
+} as const;
+
 const SYNC_ENTITY_PRIORITY: Record<SyncPushChange["entity_type"], number> = {
   PROJECT: 0,
   TASK: 1,
@@ -355,7 +359,7 @@ export async function advanceCursor(input: {
 }): Promise<{ cursor: string; synced_at: string }> {
   const normalizedCursor = input.serverCursor.trim();
   if (!normalizedCursor) {
-    throw new Error("serverCursor is required.");
+    throw new Error(SYNC_ENGINE_ERROR_CODES.SERVER_CURSOR_REQUIRED);
   }
 
   const parsedServerTime = new Date(input.serverTime);

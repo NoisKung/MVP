@@ -84,7 +84,11 @@ test.describe("Conflict resolve strategy matrix", () => {
       .first();
     await expect(keepLocalItem).toBeVisible();
     await keepLocalItem.getByRole("button", { name: "Keep Local" }).click();
-    await expect(page.getByText("Conflict marked as resolved.")).toBeVisible();
+    await expect(
+      page.getByText(
+        "Conflict resolution queued. Undo is available for 5 seconds.",
+      ),
+    ).toBeVisible();
     await expectConflictRemoved(page, keepLocalConflict.entity_id);
 
     const keepRemoteItem = page
@@ -93,7 +97,11 @@ test.describe("Conflict resolve strategy matrix", () => {
       .first();
     await expect(keepRemoteItem).toBeVisible();
     await keepRemoteItem.getByRole("button", { name: "Keep Remote" }).click();
-    await expect(page.getByText("Conflict marked as resolved.")).toBeVisible();
+    await expect(
+      page.getByText(
+        "Conflict resolution queued. Undo is available for 5 seconds.",
+      ),
+    ).toBeVisible();
     await expectConflictRemoved(page, keepRemoteConflict.entity_id);
 
     const manualMergeItem = page
@@ -105,12 +113,20 @@ test.describe("Conflict resolve strategy matrix", () => {
 
     const manualMergeEditor = page.locator(".manual-merge-editor");
     await expect(manualMergeEditor).toBeVisible();
-    await manualMergeEditor.getByRole("button", { name: "Use Combined" }).click();
-    await expect(manualMergeEditor.getByLabel("Merged content")).not.toHaveValue(
-      "",
-    );
-    await manualMergeEditor.getByRole("button", { name: "Apply Merge" }).click();
-    await expect(page.getByText("Conflict marked as resolved.")).toBeVisible();
+    await manualMergeEditor
+      .getByRole("button", { name: "Use Combined" })
+      .click();
+    await expect(
+      manualMergeEditor.getByLabel("Merged content"),
+    ).not.toHaveValue("");
+    await manualMergeEditor
+      .getByRole("button", { name: "Apply Merge" })
+      .click();
+    await expect(
+      page.getByText(
+        "Conflict resolution queued. Undo is available for 5 seconds.",
+      ),
+    ).toBeVisible();
     await expectConflictRemoved(page, manualMergeConflict.entity_id);
 
     await expect(page.locator(".conflict-center-item")).toHaveCount(0);
@@ -124,13 +140,17 @@ test.describe("Conflict resolve strategy matrix", () => {
     expect(openConflictIds).toEqual([]);
 
     const syncCard = await openSyncCard(page);
-    await expect(syncCard.locator(".sync-pill")).toContainText("Needs attention");
+    await expect(syncCard.locator(".sync-pill")).toContainText(
+      "Needs attention",
+    );
     await syncCard
       .getByRole("button", { name: /Sync now|Syncing\.\.\./u })
       .click();
     await expect(syncCard.locator(".sync-pill")).toContainText("Synced");
     await expect(
-      syncCard.getByText("Conflicts resolved locally. Run Sync now to confirm."),
+      syncCard.getByText(
+        "Conflicts resolved locally. Run Sync now to confirm.",
+      ),
     ).toHaveCount(0);
   });
 });

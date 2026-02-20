@@ -42,6 +42,11 @@ Designed for individual developers who want a distraction-free, lightning-fast k
 
 ## 🚀 Getting Started
 
+## 📚 Manuals
+
+- ไทย: `docs/MANUAL.th.md`
+- English: `docs/MANUAL.en.md`
+
 ### Prerequisites
 
 - [Node.js](https://nodejs.org/) (v18+)

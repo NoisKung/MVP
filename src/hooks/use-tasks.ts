@@ -1,5 +1,6 @@
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import {
+  getAppLocaleSetting,
   getAllTasks,
   getProjects,
   getTodayTasks,
@@ -29,13 +30,18 @@ import {
   listSyncConflicts,
   listSyncConflictEvents,
   restoreLatestBackupPayload,
+  updateAppLocaleSetting,
   getSyncEndpointSettings,
+  getSyncProviderSettings,
+  getSyncRuntimeProfileSettings,
   ensureSyncRuntimeSettingsSeeded,
   resolveSyncConflict,
   updateSyncEndpointSettings,
+  updateSyncProviderSettings,
   updateSyncRuntimeSettings,
 } from "@/lib/database";
 import type {
+  AppLocaleSetting,
   BackupRestorePreflight,
   BackupPayload,
   CreateProjectInput,
@@ -47,11 +53,14 @@ import type {
   SyncConflictReportPayload,
   SyncConflictStatus,
   UpdateSyncEndpointSettingsInput,
+  UpdateAppLocaleSettingInput,
+  UpdateSyncProviderSettingsInput,
   SyncRuntimeProfilePreset,
   UpdateSyncRuntimeSettingsInput,
   UpdateTaskSubtaskInput,
   UpdateTaskInput,
   SyncEndpointSettings,
+  SyncProviderSettings,
   SyncRuntimeSettings,
   UpsertTaskTemplateInput,
 } from "@/lib/types";
@@ -66,8 +75,13 @@ const TASK_SUBTASKS_KEY = ["task-subtasks"] as const;
 const TASK_SUBTASK_STATS_KEY = ["task-subtask-stats"] as const;
 const TASK_TEMPLATES_KEY = ["task-templates"] as const;
 const PROJECTS_KEY = ["projects"] as const;
+const APP_LOCALE_SETTING_KEY = ["app-locale-setting"] as const;
 const SYNC_SETTINGS_KEY = ["sync-settings"] as const;
+const SYNC_PROVIDER_SETTINGS_KEY = ["sync-provider-settings"] as const;
 const SYNC_RUNTIME_SETTINGS_KEY = ["sync-runtime-settings"] as const;
+const SYNC_RUNTIME_PROFILE_SETTINGS_KEY = [
+  "sync-runtime-profile-settings",
+] as const;
 const SYNC_CONFLICTS_KEY = ["sync-conflicts"] as const;
 const SYNC_CONFLICT_EVENTS_KEY = ["sync-conflict-events"] as const;
 const SYNC_CONFLICT_OBSERVABILITY_KEY = [
@@ -341,6 +355,27 @@ export function useSyncSettings() {
   });
 }
 
+/** Read persisted app locale setting */
+export function useAppLocaleSetting() {
+  return useQuery({
+    queryKey: APP_LOCALE_SETTING_KEY,
+    queryFn: getAppLocaleSetting,
+  });
+}
+
+/** Update persisted app locale setting */
+export function useUpdateAppLocaleSetting() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (input: UpdateAppLocaleSettingInput) =>
+      updateAppLocaleSetting(input),
+    onSuccess: (_result: AppLocaleSetting) => {
+      queryClient.invalidateQueries({ queryKey: APP_LOCALE_SETTING_KEY });
+    },
+  });
+}
+
 /** Update sync endpoint settings in local SQLite */
 export function useUpdateSyncSettings() {
   const queryClient = useQueryClient();
@@ -351,6 +386,37 @@ export function useUpdateSyncSettings() {
     onSuccess: (_result: SyncEndpointSettings) => {
       queryClient.invalidateQueries({ queryKey: SYNC_SETTINGS_KEY });
     },
+  });
+}
+
+/** Read sync provider settings stored in local SQLite */
+export function useSyncProviderSettings() {
+  return useQuery({
+    queryKey: SYNC_PROVIDER_SETTINGS_KEY,
+    queryFn: getSyncProviderSettings,
+  });
+}
+
+/** Update sync provider settings in local SQLite */
+export function useUpdateSyncProviderSettings() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: (input: UpdateSyncProviderSettingsInput) =>
+      updateSyncProviderSettings(input),
+    onSuccess: (_result: SyncProviderSettings) => {
+      queryClient.invalidateQueries({ queryKey: SYNC_PROVIDER_SETTINGS_KEY });
+    },
+  });
+}
+
+/** Read selected sync runtime profile setting */
+export function useSyncRuntimeProfileSettings(
+  preset: SyncRuntimeProfilePreset = "desktop",
+) {
+  return useQuery({
+    queryKey: [...SYNC_RUNTIME_PROFILE_SETTINGS_KEY, preset],
+    queryFn: () => getSyncRuntimeProfileSettings(preset),
   });
 }
 
@@ -373,6 +439,9 @@ export function useUpdateSyncRuntimeSettings() {
       updateSyncRuntimeSettings(input),
     onSuccess: (_result: SyncRuntimeSettings) => {
       queryClient.invalidateQueries({ queryKey: SYNC_RUNTIME_SETTINGS_KEY });
+      queryClient.invalidateQueries({
+        queryKey: SYNC_RUNTIME_PROFILE_SETTINGS_KEY,
+      });
     },
   });
 }

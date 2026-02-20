@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 import { AlertTriangle, Download, RefreshCw, Settings2 } from "lucide-react";
+import { translate, useI18n } from "@/lib/i18n";
+import { localizeErrorMessage } from "@/lib/error-message";
 import {
   useExportSyncConflictReport,
   useSyncConflictEvents,
@@ -25,20 +27,15 @@ interface ConflictCenterViewProps {
   onOpenSyncSettings: () => void;
 }
 
-function getErrorMessage(error: unknown): string {
-  if (error instanceof Error && error.message.trim()) {
-    return error.message;
-  }
-  if (typeof error === "string" && error.trim()) {
-    return error;
-  }
-  return "Unable to complete this request.";
+function getErrorMessage(error: unknown, locale: "en" | "th"): string {
+  return localizeErrorMessage(error, locale, "common.error.unableRequest");
 }
 
-function formatSyncDateTime(value: string | null): string {
-  if (!value) return "Never";
+function formatSyncDateTime(value: string | null, locale: "en" | "th"): string {
+  if (!value) return translate(locale, "common.never");
   const parsedDate = new Date(value);
-  if (Number.isNaN(parsedDate.getTime())) return "Unknown";
+  if (Number.isNaN(parsedDate.getTime()))
+    return translate(locale, "common.unknown");
   return new Intl.DateTimeFormat(undefined, {
     dateStyle: "medium",
     timeStyle: "short",
@@ -47,25 +44,40 @@ function formatSyncDateTime(value: string | null): string {
 
 function formatConflictTypeLabel(
   conflictType: SyncConflictRecord["conflict_type"],
+  locale: "en" | "th",
 ) {
-  if (conflictType === "delete_vs_update") return "Delete vs Update";
-  if (conflictType === "notes_collision") return "Notes Collision";
-  if (conflictType === "validation_error") return "Validation Error";
-  return "Field Conflict";
+  if (conflictType === "delete_vs_update") {
+    return translate(locale, "conflictCenter.type.deleteVsUpdate");
+  }
+  if (conflictType === "notes_collision") {
+    return translate(locale, "conflictCenter.type.notesCollision");
+  }
+  if (conflictType === "validation_error") {
+    return translate(locale, "conflictCenter.type.validationError");
+  }
+  return translate(locale, "conflictCenter.type.fieldConflict");
 }
 
 function formatConflictEventLabel(
   eventType: SyncConflictEventRecord["event_type"],
+  locale: "en" | "th",
 ) {
-  if (eventType === "detected") return "Detected";
-  if (eventType === "resolved") return "Resolved";
-  if (eventType === "ignored") return "Ignored";
-  if (eventType === "retried") return "Retried";
-  return "Exported";
+  if (eventType === "detected")
+    return translate(locale, "conflictCenter.event.detected");
+  if (eventType === "resolved")
+    return translate(locale, "conflictCenter.event.resolved");
+  if (eventType === "ignored")
+    return translate(locale, "conflictCenter.event.ignored");
+  if (eventType === "retried")
+    return translate(locale, "conflictCenter.event.retried");
+  return translate(locale, "conflictCenter.event.exported");
 }
 
-function formatPayloadJson(payloadJson: string | null): string {
-  if (!payloadJson) return "(empty)";
+function formatPayloadJson(
+  payloadJson: string | null,
+  locale: "en" | "th",
+): string {
+  if (!payloadJson) return translate(locale, "conflictCenter.payload.empty");
   try {
     const parsed = JSON.parse(payloadJson) as unknown;
     return JSON.stringify(parsed, null, 2);
@@ -81,6 +93,7 @@ export function ConflictCenterView({
   onResolveSyncConflict,
   onOpenSyncSettings,
 }: ConflictCenterViewProps) {
+  const { locale, t } = useI18n();
   const [selectedConflictId, setSelectedConflictId] = useState<string | null>(
     null,
   );
@@ -146,22 +159,18 @@ export function ConflictCenterView({
       });
       setConflictFeedback(
         strategy === "retry"
-          ? "Conflict retry queued. Undo is available for 5 seconds."
-          : "Conflict resolution queued. Undo is available for 5 seconds.",
+          ? t("conflictCenter.feedback.retryQueued")
+          : t("conflictCenter.feedback.resolveQueued"),
       );
       return true;
     } catch (error) {
-      setConflictError(getErrorMessage(error));
+      setConflictError(getErrorMessage(error, locale));
       return false;
     }
   };
 
   const handleRetryConflict = async (conflictId: string) => {
-    if (
-      !window.confirm(
-        "Retry will re-queue this conflict in the next sync cycle. Continue?",
-      )
-    ) {
+    if (!window.confirm(t("conflictCenter.confirm.retry"))) {
       return;
     }
 
@@ -185,7 +194,7 @@ export function ConflictCenterView({
 
     const normalizedDraft = normalizeManualMergeText(manualMergeDraft);
     if (!normalizedDraft) {
-      setConflictError("Merged content must not be empty.");
+      setConflictError(t("conflictCenter.error.mergeEmpty"));
       return;
     }
 
@@ -227,19 +236,21 @@ export function ConflictCenterView({
       window.setTimeout(() => URL.revokeObjectURL(url), 0);
 
       setConflictFeedback(
-        `Conflict report exported (${payload.total_conflicts} conflict record(s)).`,
+        t("conflictCenter.feedback.exported", {
+          count: payload.total_conflicts,
+        }),
       );
     } catch (error) {
-      setConflictError(getErrorMessage(error));
+      setConflictError(getErrorMessage(error, locale));
     }
   };
 
   return (
     <div className="conflict-center-view">
       <div className="conflict-center-header">
-        <h1 className="conflict-center-title">Conflict Center</h1>
+        <h1 className="conflict-center-title">{t("conflictCenter.title")}</h1>
         <p className="conflict-center-subtitle">
-          Review, resolve, and export sync conflicts safely.
+          {t("conflictCenter.subtitle")}
         </p>
       </div>
 
@@ -250,7 +261,7 @@ export function ConflictCenterView({
           onClick={onOpenSyncSettings}
         >
           <Settings2 size={14} />
-          Open Sync Settings
+          {t("conflictCenter.action.openSyncSettings")}
         </button>
         <button
           type="button"
@@ -259,22 +270,26 @@ export function ConflictCenterView({
           disabled={exportSyncConflicts.isPending}
         >
           <Download size={14} />
-          {exportSyncConflicts.isPending ? "Exporting..." : "Export Report"}
+          {exportSyncConflicts.isPending
+            ? t("conflictCenter.action.exporting")
+            : t("conflictCenter.action.exportReport")}
         </button>
       </div>
 
       {syncConflictsLoading ? (
         <div className="conflict-center-state">
           <RefreshCw size={16} className="conflict-spin" />
-          <span>Loading conflicts...</span>
+          <span>{t("conflictCenter.loading")}</span>
         </div>
       ) : syncConflicts.length === 0 ? (
         <div className="conflict-center-empty">
           <AlertTriangle size={16} />
           <div>
-            <p className="conflict-center-empty-title">No open conflicts</p>
+            <p className="conflict-center-empty-title">
+              {t("conflictCenter.empty.title")}
+            </p>
             <p className="conflict-center-empty-subtitle">
-              Sync is clear. New conflicts will appear here when detected.
+              {t("conflictCenter.empty.subtitle")}
             </p>
           </div>
         </div>
@@ -285,18 +300,21 @@ export function ConflictCenterView({
               <div className="conflict-center-item" key={conflict.id}>
                 <div className="conflict-center-item-head">
                   <span className="conflict-center-type">
-                    {formatConflictTypeLabel(conflict.conflict_type)}
+                    {formatConflictTypeLabel(conflict.conflict_type, locale)}
                   </span>
                   <span className="conflict-center-entity">
                     {conflict.entity_type}:{conflict.entity_id}
                   </span>
                   {selectedConflictId === conflict.id && (
-                    <span className="conflict-center-selected">Selected</span>
+                    <span className="conflict-center-selected">
+                      {t("conflictCenter.selected")}
+                    </span>
                   )}
                 </div>
                 <p className="conflict-center-message">{conflict.message}</p>
                 <p className="conflict-center-meta">
-                  Detected: {formatSyncDateTime(conflict.detected_at)}
+                  {t("conflictCenter.meta.detected")}:{" "}
+                  {formatSyncDateTime(conflict.detected_at, locale)}
                 </p>
                 <div className="conflict-center-actions">
                   <button
@@ -307,7 +325,7 @@ export function ConflictCenterView({
                     }
                     disabled={syncConflictResolving}
                   >
-                    Keep Local
+                    {t("conflictCenter.action.keepLocal")}
                   </button>
                   <button
                     type="button"
@@ -317,7 +335,7 @@ export function ConflictCenterView({
                     }
                     disabled={syncConflictResolving}
                   >
-                    Keep Remote
+                    {t("conflictCenter.action.keepRemote")}
                   </button>
                   <button
                     type="button"
@@ -325,7 +343,7 @@ export function ConflictCenterView({
                     onClick={() => void handleRetryConflict(conflict.id)}
                     disabled={syncConflictResolving}
                   >
-                    Retry
+                    {t("common.retry")}
                   </button>
                   <button
                     type="button"
@@ -333,14 +351,14 @@ export function ConflictCenterView({
                     onClick={() => handleOpenManualMergeEditor(conflict)}
                     disabled={syncConflictResolving}
                   >
-                    Manual Merge
+                    {t("conflictCenter.action.manualMerge")}
                   </button>
                   <button
                     type="button"
                     className="conflict-center-btn conflict-center-btn-primary"
                     onClick={() => setSelectedConflictId(conflict.id)}
                   >
-                    Details
+                    {t("conflictCenter.action.details")}
                   </button>
                 </div>
               </div>
@@ -349,35 +367,52 @@ export function ConflictCenterView({
 
           {selectedConflict && (
             <div className="conflict-center-detail">
-              <p className="conflict-center-section-title">Conflict Detail</p>
+              <p className="conflict-center-section-title">
+                {t("conflictCenter.detail.title")}
+              </p>
               <p className="conflict-center-meta">
                 {selectedConflict.entity_type}:{selectedConflict.entity_id} ·{" "}
-                {formatConflictTypeLabel(selectedConflict.conflict_type)}
+                {formatConflictTypeLabel(
+                  selectedConflict.conflict_type,
+                  locale,
+                )}
               </p>
               <div className="conflict-center-payload-grid">
                 <div>
                   <span className="conflict-center-field-label">
-                    Local payload
+                    {t("conflictCenter.detail.localPayload")}
                   </span>
                   <pre className="conflict-center-payload">
-                    {formatPayloadJson(selectedConflict.local_payload_json)}
+                    {formatPayloadJson(
+                      selectedConflict.local_payload_json,
+                      locale,
+                    )}
                   </pre>
                 </div>
                 <div>
                   <span className="conflict-center-field-label">
-                    Remote payload
+                    {t("conflictCenter.detail.remotePayload")}
                   </span>
                   <pre className="conflict-center-payload">
-                    {formatPayloadJson(selectedConflict.remote_payload_json)}
+                    {formatPayloadJson(
+                      selectedConflict.remote_payload_json,
+                      locale,
+                    )}
                   </pre>
                 </div>
               </div>
 
-              <p className="conflict-center-section-title">Timeline</p>
+              <p className="conflict-center-section-title">
+                {t("conflictCenter.detail.timeline")}
+              </p>
               {isConflictEventsLoading ? (
-                <p className="conflict-center-meta">Loading timeline...</p>
+                <p className="conflict-center-meta">
+                  {t("conflictCenter.detail.loadingTimeline")}
+                </p>
               ) : selectedConflictEvents.length === 0 ? (
-                <p className="conflict-center-meta">No events yet.</p>
+                <p className="conflict-center-meta">
+                  {t("conflictCenter.detail.noEvents")}
+                </p>
               ) : (
                 <div className="conflict-center-timeline">
                   {selectedConflictEvents.map((event) => (
@@ -386,10 +421,10 @@ export function ConflictCenterView({
                       key={event.id}
                     >
                       <span className="conflict-center-event-pill">
-                        {formatConflictEventLabel(event.event_type)}
+                        {formatConflictEventLabel(event.event_type, locale)}
                       </span>
                       <span className="conflict-center-meta">
-                        {formatSyncDateTime(event.created_at)}
+                        {formatSyncDateTime(event.created_at, locale)}
                       </span>
                     </div>
                   ))}

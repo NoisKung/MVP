@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Bolt, X } from "lucide-react";
+import { useI18n } from "@/lib/i18n";
 
 interface QuickCaptureProps {
   isSubmitting: boolean;
@@ -14,6 +15,7 @@ export function QuickCapture({
   onSubmit,
   onClose,
 }: QuickCaptureProps) {
+  const { t } = useI18n();
   const [title, setTitle] = useState("");
 
   useEffect(() => {
@@ -44,13 +46,13 @@ export function QuickCapture({
         <div className="quick-capture-header">
           <div className="quick-capture-title">
             <Bolt size={14} />
-            Quick Capture
+            {t("quickCapture.title")}
           </div>
           <button
             type="button"
             className="quick-capture-close"
             onClick={onClose}
-            aria-label="Close quick capture"
+            aria-label={t("quickCapture.close")}
           >
             <X size={14} />
           </button>
@@ -61,7 +63,7 @@ export function QuickCapture({
             className="quick-capture-input"
             value={title}
             onChange={(event) => setTitle(event.target.value)}
-            placeholder="Type a task and press Enter..."
+            placeholder={t("quickCapture.placeholder")}
             autoFocus
             maxLength={200}
             disabled={isSubmitting}
@@ -70,13 +72,15 @@ export function QuickCapture({
           {error && <div className="quick-capture-error">{error}</div>}
 
           <div className="quick-capture-actions">
-            <span className="quick-capture-hint">Esc to close</span>
+            <span className="quick-capture-hint">
+              {t("quickCapture.hintEsc")}
+            </span>
             <button
               type="submit"
               className="quick-capture-submit"
               disabled={isSubmitting || title.trim().length === 0}
             >
-              {isSubmitting ? "Saving..." : "Save"}
+              {isSubmitting ? t("quickCapture.saving") : t("quickCapture.save")}
             </button>
           </div>
         </form>

@@ -158,7 +158,9 @@ test.describe("Transport-backed conflict resolve flow", () => {
 
     await conflictItem.getByRole("button", { name: "Keep Local" }).click();
     await expect(
-      syncCard.getByText("Conflict marked as resolved."),
+      syncCard.getByText(
+        "Conflict resolution queued. Undo is available for 5 seconds.",
+      ),
     ).toBeVisible();
     await expect(
       syncCard

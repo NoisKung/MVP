@@ -6,6 +6,7 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { afterAll, describe, expect, it, vi } from "vitest";
 import type { SyncPushChange } from "@/lib/types";
+import { resolveSyncTransportConfig } from "@/lib/sync-transport";
 
 const TEMP_ROOT = fs.mkdtempSync(
   path.join(os.tmpdir(), "solostack-db-migration-test-"),
@@ -250,5 +251,197 @@ describe("database migration", () => {
       limit: 20,
     });
     expect(openConflicts.length).toBeGreaterThan(0);
+  });
+
+  it("seeds provider and runtime profile defaults for desktop preset", async () => {
+    const database = await loadDatabaseModule({
+      namespace: `runtime-desktop-${randomUUID()}`,
+      preseed: "none",
+    });
+
+    const runtime = await database.ensureSyncRuntimeSettingsSeeded("desktop");
+    expect(runtime).toEqual({
+      auto_sync_interval_seconds: 60,
+      background_sync_interval_seconds: 300,
+      push_limit: 200,
+      pull_limit: 200,
+      max_pull_pages: 5,
+    });
+
+    const providerSettings = await database.getSyncProviderSettings();
+    expect(providerSettings).toEqual({
+      provider: "provider_neutral",
+      provider_config: null,
+    });
+
+    const runtimeProfile =
+      await database.getSyncRuntimeProfileSettings("desktop");
+    expect(runtimeProfile.runtime_profile).toBe("desktop");
+  });
+
+  it("seeds mobile runtime profile default for legacy users", async () => {
+    const database = await loadDatabaseModule({
+      namespace: `runtime-mobile-${randomUUID()}`,
+      preseed: "legacy_v0",
+    });
+
+    const runtime = await database.ensureSyncRuntimeSettingsSeeded("mobile");
+    expect(runtime).toEqual({
+      auto_sync_interval_seconds: 120,
+      background_sync_interval_seconds: 600,
+      push_limit: 120,
+      pull_limit: 120,
+      max_pull_pages: 3,
+    });
+
+    const runtimeProfile =
+      await database.getSyncRuntimeProfileSettings("desktop");
+    expect(runtimeProfile.runtime_profile).toBe("mobile_beta");
+  });
+
+  it("persists provider config and runtime profile updates", async () => {
+    const database = await loadDatabaseModule({
+      namespace: `provider-persist-${randomUUID()}`,
+      preseed: "none",
+    });
+
+    await database.ensureSyncRuntimeSettingsSeeded("desktop");
+
+    const updatedProvider = await database.updateSyncProviderSettings({
+      provider: "google_appdata",
+      provider_config: {
+        mode: "managed",
+        scope: "appdata",
+      },
+    });
+    expect(updatedProvider.provider).toBe("google_appdata");
+    expect(updatedProvider.provider_config).toEqual({
+      mode: "managed",
+      scope: "appdata",
+    });
+
+    const readBackProvider = await database.getSyncProviderSettings();
+    expect(readBackProvider).toEqual(updatedProvider);
+
+    await database.updateSyncRuntimeSettings({
+      auto_sync_interval_seconds: 45,
+      background_sync_interval_seconds: 120,
+      push_limit: 150,
+      pull_limit: 140,
+      max_pull_pages: 6,
+      runtime_profile: "mobile_beta",
+    });
+    let runtimeProfile =
+      await database.getSyncRuntimeProfileSettings("desktop");
+    expect(runtimeProfile.runtime_profile).toBe("mobile_beta");
+
+    await database.updateSyncRuntimeSettings({
+      auto_sync_interval_seconds: 45,
+      background_sync_interval_seconds: 120,
+      push_limit: 150,
+      pull_limit: 140,
+      max_pull_pages: 6,
+    });
+    runtimeProfile = await database.getSyncRuntimeProfileSettings("desktop");
+    expect(runtimeProfile.runtime_profile).toBe("custom");
+  });
+
+  it("keeps provider/runtime/checkpoint/outbox stable across restart", async () => {
+    const namespace = `restart-stability-${randomUUID()}`;
+    const database = await loadDatabaseModule({
+      namespace,
+      preseed: "none",
+    });
+
+    await database.ensureSyncRuntimeSettingsSeeded("desktop");
+    await database.updateSyncEndpointSettings({
+      push_url: "https://sync.example.com/v1/sync/push",
+      pull_url: "https://sync.example.com/v1/sync/pull",
+    });
+    await database.updateSyncProviderSettings({
+      provider: "google_appdata",
+      provider_config: {
+        endpoint_mode: "managed",
+        managed_available: true,
+      },
+    });
+    await database.updateSyncRuntimeSettings({
+      auto_sync_interval_seconds: 120,
+      background_sync_interval_seconds: 600,
+      push_limit: 140,
+      pull_limit: 130,
+      max_pull_pages: 4,
+      runtime_profile: "mobile_beta",
+    });
+    await database.setSyncCheckpoint(
+      "cursor-before-restart",
+      "2026-02-19T00:00:00.000Z",
+    );
+    await database.createTask({
+      title: "Restart stability task",
+      priority: "NORMAL",
+      is_important: false,
+      recurrence: "NONE",
+    });
+
+    const outboxBefore = await database.listSyncOutboxChanges(100);
+    expect(outboxBefore.length).toBeGreaterThan(0);
+    const checkpointBefore = await database.getSyncCheckpoint();
+    expect(checkpointBefore.last_sync_cursor).toBe("cursor-before-restart");
+
+    const restartedDatabase = await loadDatabaseModule({
+      namespace,
+      preseed: "none",
+    });
+
+    const provider = await restartedDatabase.getSyncProviderSettings();
+    expect(provider).toEqual({
+      provider: "google_appdata",
+      provider_config: {
+        endpoint_mode: "managed",
+        managed_available: true,
+      },
+    });
+    const runtimeProfile =
+      await restartedDatabase.getSyncRuntimeProfileSettings("desktop");
+    expect(runtimeProfile.runtime_profile).toBe("mobile_beta");
+    const runtime = await restartedDatabase.getSyncRuntimeSettings();
+    expect(runtime).toEqual({
+      auto_sync_interval_seconds: 120,
+      background_sync_interval_seconds: 600,
+      push_limit: 140,
+      pull_limit: 130,
+      max_pull_pages: 4,
+    });
+    const endpoints = await restartedDatabase.getSyncEndpointSettings();
+    expect(endpoints).toEqual({
+      push_url: "https://sync.example.com/v1/sync/push",
+      pull_url: "https://sync.example.com/v1/sync/pull",
+    });
+
+    const resolvedTransport = resolveSyncTransportConfig({
+      provider: provider.provider,
+      providerConfig: provider.provider_config,
+      pushUrl: endpoints.push_url,
+      pullUrl: endpoints.pull_url,
+    });
+    expect(resolvedTransport.status).toBe("ready");
+    expect(resolvedTransport.transport).toBeTruthy();
+
+    await restartedDatabase.updateSyncProviderSettings({
+      provider: "provider_neutral",
+      provider_config: {
+        endpoint_mode: "custom",
+      },
+    });
+    const checkpointAfterSwitch = await restartedDatabase.getSyncCheckpoint();
+    expect(checkpointAfterSwitch.last_sync_cursor).toBe(
+      "cursor-before-restart",
+    );
+    const outboxAfterSwitch =
+      await restartedDatabase.listSyncOutboxChanges(100);
+    expect(outboxAfterSwitch.map((change) => change.id)).toEqual(
+      outboxBefore.map((change) => change.id),
+    );
   });
 });

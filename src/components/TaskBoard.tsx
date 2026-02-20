@@ -3,10 +3,10 @@ import { TaskCard } from "./TaskCard";
 import { Circle, Loader, CheckCircle2, Plus } from "lucide-react";
 import { useMemo, useRef, useState } from "react";
 import { useTaskSubtaskStats } from "@/hooks/use-tasks";
+import { useI18n } from "@/lib/i18n";
 
 interface KanbanColumnDef {
   status: TaskStatus;
-  label: string;
   icon: React.ReactNode;
   accentColor: string;
   dotColor: string;
@@ -15,21 +15,18 @@ interface KanbanColumnDef {
 const COLUMNS: KanbanColumnDef[] = [
   {
     status: "TODO",
-    label: "To Do",
     icon: <Circle size={14} />,
     accentColor: "var(--status-todo)",
     dotColor: "var(--status-todo)",
   },
   {
     status: "DOING",
-    label: "In Progress",
     icon: <Loader size={14} />,
     accentColor: "var(--status-doing)",
     dotColor: "var(--status-doing)",
   },
   {
     status: "DONE",
-    label: "Done",
     icon: <CheckCircle2 size={14} />,
     accentColor: "var(--status-done)",
     dotColor: "var(--status-done)",
@@ -53,6 +50,7 @@ export function TaskBoard({
   onDelete,
   onCreateClick,
 }: TaskBoardProps) {
+  const { t } = useI18n();
   const [draggedTaskId, setDraggedTaskId] = useState<string | null>(null);
   const [dropTargetStatus, setDropTargetStatus] = useState<TaskStatus | null>(
     null,
@@ -79,6 +77,19 @@ export function TaskBoard({
   const draggedTask = draggedTaskId
     ? (taskById.get(draggedTaskId) ?? null)
     : null;
+  const columnLabelByStatus: Record<TaskStatus, string> = {
+    TODO: t("taskForm.status.todo"),
+    DOING: t("taskForm.status.doing"),
+    DONE: t("taskForm.status.done"),
+    ARCHIVED: t("taskForm.status.archived"),
+  };
+  const boardTitle = t("taskBoard.title");
+  const boardSubtitle = t("taskBoard.subtitle", {
+    tasks: tasks.length,
+    columns: COLUMNS.length,
+  });
+  const addTaskTitle = t("taskBoard.action.addTask");
+  const noTasksLabel = t("taskBoard.empty.noTasks");
 
   const clearDragState = () => {
     if (dragEndTimerRef.current !== null) {
@@ -167,11 +178,8 @@ export function TaskBoard({
       {/* Header */}
       <div className="board-header">
         <div>
-          <h1 className="board-title">Board</h1>
-          <p className="board-subtitle">
-            {tasks.length} task{tasks.length !== 1 ? "s" : ""} across{" "}
-            {COLUMNS.length} columns
-          </p>
+          <h1 className="board-title">{boardTitle}</h1>
+          <p className="board-subtitle">{boardSubtitle}</p>
         </div>
       </div>
 
@@ -202,14 +210,16 @@ export function TaskBoard({
                   >
                     {column.icon}
                   </span>
-                  <span className="column-label">{column.label}</span>
+                  <span className="column-label">
+                    {columnLabelByStatus[column.status]}
+                  </span>
                   <span className="column-count">{columnTasks.length}</span>
                 </div>
                 {column.status === "TODO" && (
                   <button
                     className="column-add-btn"
                     onClick={onCreateClick}
-                    title="Add task"
+                    title={addTaskTitle}
                   >
                     <Plus size={14} />
                   </button>
@@ -229,7 +239,7 @@ export function TaskBoard({
               >
                 {columnTasks.length === 0 ? (
                   <div className="column-empty">
-                    <span className="column-empty-text">No tasks</span>
+                    <span className="column-empty-text">{noTasksLabel}</span>
                   </div>
                 ) : (
                   columnTasks.map((task, index) => (

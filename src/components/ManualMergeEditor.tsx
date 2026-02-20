@@ -3,6 +3,7 @@ import {
   buildManualMergeDiffRowsFromConflict,
   getManualMergeTextSources,
 } from "@/lib/manual-merge";
+import { useI18n } from "@/lib/i18n";
 import type { SyncConflictRecord } from "@/lib/types";
 
 interface ManualMergeEditorProps {
@@ -30,6 +31,7 @@ export function ManualMergeEditor({
   onCancel,
   onSubmit,
 }: ManualMergeEditorProps) {
+  const { t } = useI18n();
   const mergeSources = useMemo(
     () => getManualMergeTextSources(conflict),
     [conflict],
@@ -60,7 +62,7 @@ export function ManualMergeEditor({
 
   return (
     <div className="manual-merge-editor">
-      <p className="manual-merge-title">Manual Merge Editor</p>
+      <p className="manual-merge-title">{t("manualMerge.title")}</p>
       <p className="manual-merge-subtitle">
         {conflict.entity_type}:{conflict.entity_id}
       </p>
@@ -72,7 +74,7 @@ export function ManualMergeEditor({
           onClick={() => onDraftChange(mergeSources.localText)}
           disabled={isSaving || !mergeSources.localText}
         >
-          Use Local
+          {t("manualMerge.useLocal")}
         </button>
         <button
           type="button"
@@ -80,7 +82,7 @@ export function ManualMergeEditor({
           onClick={() => onDraftChange(mergeSources.remoteText)}
           disabled={isSaving || !mergeSources.remoteText}
         >
-          Use Remote
+          {t("manualMerge.useRemote")}
         </button>
         <button
           type="button"
@@ -96,7 +98,7 @@ export function ManualMergeEditor({
             isSaving || (!mergeSources.localText && !mergeSources.remoteText)
           }
         >
-          Use Combined
+          {t("manualMerge.useCombined")}
         </button>
         <button
           type="button"
@@ -104,7 +106,7 @@ export function ManualMergeEditor({
           onClick={() => onDraftChange(appendText(draft, localOnlyText))}
           disabled={isSaving || !localOnlyText}
         >
-          Append Local-only
+          {t("manualMerge.appendLocalOnly")}
         </button>
         <button
           type="button"
@@ -112,17 +114,17 @@ export function ManualMergeEditor({
           onClick={() => onDraftChange(appendText(draft, remoteOnlyText))}
           disabled={isSaving || !remoteOnlyText}
         >
-          Append Remote-only
+          {t("manualMerge.appendRemoteOnly")}
         </button>
       </div>
 
       <div className="manual-merge-diff">
         <div className="manual-merge-diff-head">
-          <span>Local</span>
-          <span>Remote</span>
+          <span>{t("manualMerge.local")}</span>
+          <span>{t("manualMerge.remote")}</span>
         </div>
         {visibleRows.length === 0 ? (
-          <div className="manual-merge-empty">No diff content available.</div>
+          <div className="manual-merge-empty">{t("manualMerge.emptyDiff")}</div>
         ) : (
           <div className="manual-merge-diff-body">
             {visibleRows.map((row, index) => (
@@ -151,12 +153,15 @@ export function ManualMergeEditor({
       </div>
       {isDiffTruncated && (
         <p className="manual-merge-meta">
-          Diff is truncated to first {visibleRows.length} rows for readability.
+          {t("manualMerge.truncated", { count: visibleRows.length })}
         </p>
       )}
 
-      <label className="manual-merge-label" htmlFor={`manual-merge-${conflict.id}`}>
-        Merged content
+      <label
+        className="manual-merge-label"
+        htmlFor={`manual-merge-${conflict.id}`}
+      >
+        {t("manualMerge.mergedContent")}
       </label>
       <textarea
         id={`manual-merge-${conflict.id}`}
@@ -173,7 +178,7 @@ export function ManualMergeEditor({
           onClick={onCancel}
           disabled={isSaving}
         >
-          Cancel
+          {t("manualMerge.cancel")}
         </button>
         <button
           type="button"
@@ -181,7 +186,7 @@ export function ManualMergeEditor({
           onClick={onSubmit}
           disabled={isSaving}
         >
-          {isSaving ? "Applying..." : "Apply Merge"}
+          {isSaving ? t("manualMerge.applying") : t("manualMerge.apply")}
         </button>
       </div>
 

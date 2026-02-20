@@ -1,4 +1,5 @@
 import type { Task, TaskPriority, TaskStatus } from "@/lib/types";
+import { translate, useI18n } from "@/lib/i18n";
 import {
   AlertTriangle,
   Minus,
@@ -16,26 +17,22 @@ const PRIORITY_CONFIG: Record<
   {
     color: string;
     bg: string;
-    label: string;
     icon: React.ReactNode;
   }
 > = {
   URGENT: {
     color: "var(--danger)",
     bg: "var(--danger-subtle)",
-    label: "Urgent",
     icon: <AlertTriangle size={11} />,
   },
   NORMAL: {
     color: "var(--accent)",
     bg: "var(--accent-subtle)",
-    label: "Normal",
     icon: <Minus size={11} />,
   },
   LOW: {
     color: "var(--text-muted)",
     bg: "var(--bg-hover)",
-    label: "Low",
     icon: <ArrowDown size={11} />,
   },
 };
@@ -66,15 +63,25 @@ export function TaskCard({
   onDragEnd,
   isDragging = false,
 }: TaskCardProps) {
+  const { locale, t } = useI18n();
   const [showActions, setShowActions] = useState(false);
   const priorityConfig = PRIORITY_CONFIG[task.priority];
   const nextStatus = getNextStatus(task.status);
   const prevStatus = getPrevStatus(task.status);
-  const dueBadge = getDueBadge(task);
-  const recurrenceLabel = getRecurrenceLabel(task.recurrence);
-  const checklistProgressLabel = getChecklistProgressLabel(subtaskProgress);
+  const dueBadge = getDueBadge(task, locale);
+  const recurrenceLabel = getRecurrenceLabel(task.recurrence, locale);
+  const checklistProgressLabel = getChecklistProgressLabel(
+    subtaskProgress,
+    locale,
+  );
+  const priorityLabel =
+    task.priority === "URGENT"
+      ? t("taskForm.priority.urgent")
+      : task.priority === "LOW"
+        ? t("taskForm.priority.low")
+        : t("taskForm.priority.normal");
 
-  const relativeDate = getRelativeDate(task.created_at);
+  const relativeDate = getRelativeDate(task.created_at, locale);
 
   const handleDragStart = (event: React.DragEvent<HTMLDivElement>) => {
     event.dataTransfer.setData(
@@ -102,7 +109,7 @@ export function TaskCard({
           style={{ color: priorityConfig.color, background: priorityConfig.bg }}
         >
           {priorityConfig.icon}
-          {priorityConfig.label}
+          {priorityLabel}
         </span>
         <div className="card-top-right">
           {!!task.is_important && (
@@ -115,7 +122,7 @@ export function TaskCard({
                 e.stopPropagation();
                 onDelete(task.id);
               }}
-              title="Delete"
+              title={t("taskCard.action.delete")}
             >
               <Trash2 size={13} />
             </button>
@@ -164,7 +171,9 @@ export function TaskCard({
             <button
               className="status-btn"
               onClick={() => onStatusChange(task.id, prevStatus)}
-              title={`Move to ${prevStatus}`}
+              title={t("taskCard.action.moveTo", {
+                status: getStatusLabel(prevStatus, locale),
+              })}
             >
               <ChevronLeft size={14} />
             </button>
@@ -173,7 +182,9 @@ export function TaskCard({
             <button
               className="status-btn status-btn-forward"
               onClick={() => onStatusChange(task.id, nextStatus)}
-              title={`Move to ${nextStatus}`}
+              title={t("taskCard.action.moveTo", {
+                status: getStatusLabel(nextStatus, locale),
+              })}
             >
               <ChevronRight size={14} />
             </button>
@@ -194,7 +205,7 @@ function getPrevStatus(current: TaskStatus): TaskStatus | null {
   return flow[current] ?? null;
 }
 
-function getRelativeDate(dateStr: string): string {
+function getRelativeDate(dateStr: string, locale: "en" | "th"): string {
   const date = new Date(dateStr);
   const now = new Date();
   const diffMs = now.getTime() - date.getTime();
@@ -202,11 +213,24 @@ function getRelativeDate(dateStr: string): string {
   const diffHours = Math.floor(diffMins / 60);
   const diffDays = Math.floor(diffHours / 24);
 
-  if (diffMins < 1) return "Just now";
-  if (diffMins < 60) return `${diffMins}m ago`;
-  if (diffHours < 24) return `${diffHours}h ago`;
-  if (diffDays < 7) return `${diffDays}d ago`;
-  return date.toLocaleDateString("en-US", { month: "short", day: "numeric" });
+  if (diffMins < 1) return translate(locale, "taskForm.relative.justNow");
+  if (diffMins < 60) {
+    return translate(locale, "taskForm.relative.minutesAgo", {
+      count: diffMins,
+    });
+  }
+  if (diffHours < 24) {
+    return translate(locale, "taskForm.relative.hoursAgo", {
+      count: diffHours,
+    });
+  }
+  if (diffDays < 7) {
+    return translate(locale, "taskForm.relative.daysAgo", { count: diffDays });
+  }
+  return date.toLocaleDateString(locale === "th" ? "th-TH" : "en-US", {
+    month: "short",
+    day: "numeric",
+  });
 }
 
 type DueBadgeTone = "overdue" | "today" | "upcoming" | "neutral";
@@ -216,7 +240,7 @@ interface DueBadge {
   tone: DueBadgeTone;
 }
 
-function getDueBadge(task: Task): DueBadge | null {
+function getDueBadge(task: Task, locale: "en" | "th"): DueBadge | null {
   if (!task.due_at) return null;
 
   const dueDate = new Date(task.due_at);
@@ -235,11 +259,12 @@ function getDueBadge(task: Task): DueBadge | null {
   const todayEnd = new Date(todayStart);
   todayEnd.setDate(todayEnd.getDate() + 1);
 
-  const formattedDate = dueDate.toLocaleDateString("en-US", {
+  const formatLocale = locale === "th" ? "th-TH" : "en-US";
+  const formattedDate = dueDate.toLocaleDateString(formatLocale, {
     month: "short",
     day: "numeric",
   });
-  const formattedTime = dueDate.toLocaleTimeString("en-US", {
+  const formattedTime = dueDate.toLocaleTimeString(formatLocale, {
     hour: "numeric",
     minute: "2-digit",
   });
@@ -247,33 +272,70 @@ function getDueBadge(task: Task): DueBadge | null {
   const isDone = task.status === "DONE";
   if (!isDone && dueDate < now) {
     return {
-      label: `Overdue • ${formattedDate} ${formattedTime}`,
+      label: translate(locale, "taskCard.due.overdue", {
+        date: formattedDate,
+        time: formattedTime,
+      }),
       tone: "overdue",
     };
   }
   if (dueDate >= todayStart && dueDate < todayEnd) {
-    return { label: `Due today • ${formattedTime}`, tone: "today" };
+    return {
+      label: translate(locale, "taskCard.due.today", {
+        time: formattedTime,
+      }),
+      tone: "today",
+    };
   }
   if (dueDate >= todayEnd) {
     return {
-      label: `Due • ${formattedDate} ${formattedTime}`,
+      label: translate(locale, "taskCard.due.default", {
+        date: formattedDate,
+        time: formattedTime,
+      }),
       tone: "upcoming",
     };
   }
-  return { label: `Due • ${formattedDate} ${formattedTime}`, tone: "neutral" };
+  return {
+    label: translate(locale, "taskCard.due.default", {
+      date: formattedDate,
+      time: formattedTime,
+    }),
+    tone: "neutral",
+  };
 }
 
-function getRecurrenceLabel(taskRecurrence: Task["recurrence"]): string | null {
-  if (taskRecurrence === "DAILY") return "Repeats daily";
-  if (taskRecurrence === "WEEKLY") return "Repeats weekly";
-  if (taskRecurrence === "MONTHLY") return "Repeats monthly";
+function getRecurrenceLabel(
+  taskRecurrence: Task["recurrence"],
+  locale: "en" | "th",
+): string | null {
+  if (taskRecurrence === "DAILY") {
+    return translate(locale, "taskCard.recurrence.daily");
+  }
+  if (taskRecurrence === "WEEKLY") {
+    return translate(locale, "taskCard.recurrence.weekly");
+  }
+  if (taskRecurrence === "MONTHLY") {
+    return translate(locale, "taskCard.recurrence.monthly");
+  }
   return null;
 }
 
 function getChecklistProgressLabel(
   progress: TaskCardProps["subtaskProgress"],
+  locale: "en" | "th",
 ): string | null {
   if (!progress) return null;
   if (progress.total <= 0) return null;
-  return `Checklist ${progress.done}/${progress.total}`;
+  return translate(locale, "taskCard.checklist.progress", {
+    done: progress.done,
+    total: progress.total,
+  });
+}
+
+function getStatusLabel(status: TaskStatus, locale: "en" | "th"): string {
+  if (status === "TODO") return translate(locale, "taskForm.status.todo");
+  if (status === "DOING") return translate(locale, "taskForm.status.doing");
+  if (status === "DONE") return translate(locale, "taskForm.status.done");
+  return translate(locale, "taskForm.status.archived");
 }

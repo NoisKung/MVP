@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useI18n } from "@/lib/i18n";
 import type {
   SavedTaskView,
   TaskDueFilter,
@@ -17,32 +18,24 @@ import {
   X,
 } from "lucide-react";
 
-const STATUS_OPTIONS: Array<{ value: TaskStatus; label: string }> = [
-  { value: "TODO", label: "To Do" },
-  { value: "DOING", label: "In Progress" },
-  { value: "DONE", label: "Done" },
+const STATUS_OPTIONS: TaskStatus[] = ["TODO", "DOING", "DONE"];
+
+const PRIORITY_OPTIONS: TaskPriority[] = ["URGENT", "NORMAL", "LOW"];
+
+const DUE_FILTER_OPTIONS: TaskDueFilter[] = [
+  "ALL",
+  "OVERDUE",
+  "TODAY",
+  "NEXT_7_DAYS",
+  "NO_DUE",
 ];
 
-const PRIORITY_OPTIONS: Array<{ value: TaskPriority; label: string }> = [
-  { value: "URGENT", label: "Urgent" },
-  { value: "NORMAL", label: "Normal" },
-  { value: "LOW", label: "Low" },
-];
-
-const DUE_FILTER_OPTIONS: Array<{ value: TaskDueFilter; label: string }> = [
-  { value: "ALL", label: "All due" },
-  { value: "OVERDUE", label: "Overdue" },
-  { value: "TODAY", label: "Today" },
-  { value: "NEXT_7_DAYS", label: "Next 7 days" },
-  { value: "NO_DUE", label: "No due date" },
-];
-
-const SORT_OPTIONS: Array<{ value: TaskSortBy; label: string }> = [
-  { value: "CREATED_DESC", label: "Newest created" },
-  { value: "UPDATED_DESC", label: "Recently updated" },
-  { value: "DUE_ASC", label: "Due date (earliest)" },
-  { value: "PRIORITY_DESC", label: "Priority (high to low)" },
-  { value: "TITLE_ASC", label: "Title (A-Z)" },
+const SORT_OPTIONS: TaskSortBy[] = [
+  "CREATED_DESC",
+  "UPDATED_DESC",
+  "DUE_ASC",
+  "PRIORITY_DESC",
+  "TITLE_ASC",
 ];
 
 interface TaskFiltersBarProps {
@@ -93,6 +86,39 @@ export function TaskFiltersBar({
   onApplySavedView,
   onDeleteSavedView,
 }: TaskFiltersBarProps) {
+  const { t } = useI18n();
+  const getStatusLabel = (status: TaskStatus): string => {
+    if (status === "TODO") return t("taskForm.status.todo");
+    if (status === "DOING") return t("taskForm.status.doing");
+    return t("taskForm.status.done");
+  };
+  const getPriorityLabel = (priority: TaskPriority): string => {
+    if (priority === "URGENT") return t("taskForm.priority.urgent");
+    if (priority === "LOW") return t("taskForm.priority.low");
+    return t("taskForm.priority.normal");
+  };
+  const getDueFilterLabel = (value: TaskDueFilter): string => {
+    if (value === "ALL") return t("taskFilters.due.all");
+    if (value === "OVERDUE") return t("taskFilters.due.overdue");
+    if (value === "TODAY") return t("taskFilters.due.today");
+    if (value === "NEXT_7_DAYS") return t("taskFilters.due.next7Days");
+    return t("taskFilters.due.noDue");
+  };
+  const getSortLabel = (value: TaskSortBy): string => {
+    if (value === "CREATED_DESC") {
+      return t("taskFilters.sort.createdDesc");
+    }
+    if (value === "UPDATED_DESC") {
+      return t("taskFilters.sort.updatedDesc");
+    }
+    if (value === "DUE_ASC") {
+      return t("taskFilters.sort.dueAsc");
+    }
+    if (value === "PRIORITY_DESC") {
+      return t("taskFilters.sort.priorityDesc");
+    }
+    return t("taskFilters.sort.titleAsc");
+  };
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const [isFiltersOpen, setIsFiltersOpen] = useState(false);
 
@@ -107,8 +133,8 @@ export function TaskFiltersBar({
       activeSavedViewId &&
       savedViews.find((savedView) => savedView.id === activeSavedViewId)?.name;
     const inputName = window.prompt(
-      "Name this saved view",
-      suggestedName ?? "My View",
+      t("taskFilters.prompt.saveViewName"),
+      suggestedName ?? t("taskFilters.prompt.defaultViewName"),
     );
     if (!inputName) return;
     onSaveCurrentView(inputName);
@@ -157,15 +183,15 @@ export function TaskFiltersBar({
                 searchInputRef.current?.blur();
               }
             }}
-            placeholder="Search title or description..."
+            placeholder={t("taskFilters.search.placeholder")}
           />
           {filters.search ? (
             <button
               type="button"
               className="search-clear-btn"
               onClick={handleClearSearch}
-              aria-label="Clear search"
-              title="Clear search"
+              aria-label={t("taskFilters.search.clear")}
+              title={t("taskFilters.search.clear")}
             >
               <X size={12} />
             </button>
@@ -181,7 +207,7 @@ export function TaskFiltersBar({
             onClick={handleSaveViewClick}
           >
             <BookmarkPlus size={13} />
-            Save View
+            {t("taskFilters.action.saveView")}
           </button>
           <button
             type="button"
@@ -190,7 +216,7 @@ export function TaskFiltersBar({
             disabled={!hasActiveFilters}
           >
             <FilterX size={13} />
-            Clear
+            {t("taskFilters.action.clear")}
           </button>
         </div>
       </div>
@@ -204,22 +230,29 @@ export function TaskFiltersBar({
           aria-controls="advanced-filters-panel"
         >
           <ChevronDown size={14} />
-          {isFiltersOpen ? "Hide Filters" : "Show Filters"}
+          {isFiltersOpen
+            ? t("taskFilters.action.hideFilters")
+            : t("taskFilters.action.showFilters")}
         </button>
 
         <span className="result-count">
-          Showing {visibleTasks} / {totalTasks}
+          {t("taskFilters.summary.showing", {
+            shown: visibleTasks,
+            total: totalTasks,
+          })}
         </span>
       </div>
 
       {isFiltersOpen ? (
         <div id="advanced-filters-panel" className="filters-advanced">
           <div className="filters-row">
-            <span className="filters-label">Project</span>
+            <span className="filters-label">
+              {t("taskFilters.label.project")}
+            </span>
             <div className="chip-row">
               {availableProjects.length === 0 ? (
                 <span className="saved-view-empty">
-                  No projects available for filtering.
+                  {t("taskFilters.empty.noProjects")}
                 </span>
               ) : (
                 availableProjects.map((project) => (
@@ -237,39 +270,43 @@ export function TaskFiltersBar({
           </div>
 
           <div className="filters-row">
-            <span className="filters-label">Status</span>
+            <span className="filters-label">
+              {t("taskFilters.label.status")}
+            </span>
             <div className="chip-row">
               {STATUS_OPTIONS.map((option) => (
                 <button
-                  key={option.value}
+                  key={option}
                   type="button"
-                  className={`filter-chip${filters.statuses.includes(option.value) ? " active" : ""}`}
-                  onClick={() => onToggleStatus(option.value)}
+                  className={`filter-chip${filters.statuses.includes(option) ? " active" : ""}`}
+                  onClick={() => onToggleStatus(option)}
                 >
-                  {option.label}
+                  {getStatusLabel(option)}
                 </button>
               ))}
             </div>
           </div>
 
           <div className="filters-row">
-            <span className="filters-label">Priority</span>
+            <span className="filters-label">
+              {t("taskFilters.label.priority")}
+            </span>
             <div className="chip-row">
               {PRIORITY_OPTIONS.map((option) => (
                 <button
-                  key={option.value}
+                  key={option}
                   type="button"
-                  className={`filter-chip${filters.priorities.includes(option.value) ? " active" : ""}`}
-                  onClick={() => onTogglePriority(option.value)}
+                  className={`filter-chip${filters.priorities.includes(option) ? " active" : ""}`}
+                  onClick={() => onTogglePriority(option)}
                 >
-                  {option.label}
+                  {getPriorityLabel(option)}
                 </button>
               ))}
             </div>
           </div>
 
           <div className="filters-row">
-            <span className="filters-label">Due</span>
+            <span className="filters-label">{t("taskFilters.label.due")}</span>
             <select
               className="due-select"
               value={filters.dueFilter}
@@ -278,13 +315,15 @@ export function TaskFiltersBar({
               }
             >
               {DUE_FILTER_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
+                <option key={option} value={option}>
+                  {getDueFilterLabel(option)}
                 </option>
               ))}
             </select>
 
-            <span className="filters-label inline-label">Sort</span>
+            <span className="filters-label inline-label">
+              {t("taskFilters.label.sort")}
+            </span>
             <select
               className="due-select"
               value={filters.sortBy}
@@ -293,8 +332,8 @@ export function TaskFiltersBar({
               }
             >
               {SORT_OPTIONS.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
+                <option key={option} value={option}>
+                  {getSortLabel(option)}
                 </option>
               ))}
             </select>
@@ -305,16 +344,18 @@ export function TaskFiltersBar({
               onClick={() => onSetImportantOnly(!filters.importantOnly)}
             >
               <Star size={12} />
-              Important
+              {t("taskFilters.label.important")}
             </button>
           </div>
 
           <div className="saved-views-row">
-            <span className="filters-label">Saved Views</span>
+            <span className="filters-label">
+              {t("taskFilters.label.savedViews")}
+            </span>
             <div className="saved-views-list">
               {savedViews.length === 0 ? (
                 <span className="saved-view-empty">
-                  Save your favorite filter combinations here.
+                  {t("taskFilters.empty.savedViews")}
                 </span>
               ) : (
                 savedViews.map((savedView) => (
@@ -323,7 +364,7 @@ export function TaskFiltersBar({
                     type="button"
                     className={`saved-view-chip${activeSavedViewId === savedView.id ? " active" : ""}`}
                     onClick={() => onApplySavedView(savedView.id)}
-                    title="Apply saved view"
+                    title={t("taskFilters.savedView.applyTitle")}
                   >
                     <span className="saved-view-name">{savedView.name}</span>
                     <span
