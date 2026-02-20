@@ -16,6 +16,8 @@ import { CommandPalette } from "./components/CommandPalette";
 import { GlobalUndoBar } from "./components/GlobalUndoBar";
 import { ShortcutHelpModal } from "./components/ShortcutHelpModal";
 import {
+  useAppLocaleSetting,
+  useMigrationDiagnosticsSetting,
   useTasks,
   useProjects,
   useTodayTasks,
@@ -35,6 +37,7 @@ import {
   useUpdateSyncProviderSettings,
   useUpdateSyncRuntimeSettings,
   useUpdateSyncSettings,
+  useUpdateAppLocaleSetting,
 } from "./hooks/use-tasks";
 import { useReminderNotifications } from "./hooks/use-reminder-notifications";
 import { useQuickCaptureShortcut } from "./hooks/use-quick-capture-shortcut";
@@ -42,6 +45,7 @@ import { useTaskFilters } from "./hooks/use-task-filters";
 import { useSync } from "./hooks/use-sync";
 import { useAppStore } from "./store/app-store";
 import type {
+  AppLocale,
   CreateTaskInput,
   UpdateTaskInput,
   TaskStatus,
@@ -56,6 +60,7 @@ import type {
   UpdateSyncProviderSettingsInput,
   UpdateSyncRuntimeSettingsInput,
 } from "./lib/types";
+import { I18nProvider, detectSystemAppLocale, translate } from "./lib/i18n";
 import {
   getRemindersEnabledPreference,
   setRemindersEnabledPreference,
@@ -69,6 +74,7 @@ import {
   parseSyncPullResponse,
   parseSyncPushResponse,
 } from "./lib/sync-contract";
+import { localizeErrorMessage } from "./lib/error-message";
 import "./index.css";
 
 const queryClient = new QueryClient({
@@ -80,23 +86,8 @@ const queryClient = new QueryClient({
   },
 });
 
-function getErrorMessage(error: unknown): string {
-  if (error instanceof Error && error.message.trim()) {
-    return error.message;
-  }
-
-  if (typeof error === "string" && error.trim()) {
-    return error;
-  }
-
-  if (typeof error === "object" && error !== null) {
-    const maybeMessage = (error as { message?: unknown }).message;
-    if (typeof maybeMessage === "string" && maybeMessage.trim()) {
-      return maybeMessage;
-    }
-  }
-
-  return "An unexpected error occurred. Please try again.";
+function getErrorMessage(error: unknown, locale: AppLocale = "en"): string {
+  return localizeErrorMessage(error, locale, "app.error.unexpected");
 }
 
 function isEditableEventTarget(target: EventTarget | null): boolean {
@@ -106,50 +97,59 @@ function isEditableEventTarget(target: EventTarget | null): boolean {
   return tagName === "INPUT" || tagName === "TEXTAREA" || tagName === "SELECT";
 }
 
-function formatRelativeSyncTime(value: string | null): string | null {
+function formatRelativeSyncTime(
+  value: string | null,
+  locale: AppLocale,
+): string | null {
   if (!value) return null;
   const parsedDate = new Date(value);
   if (Number.isNaN(parsedDate.getTime())) return null;
 
   const diffMs = Date.now() - parsedDate.getTime();
-  if (diffMs < 0) return "just now";
+  if (diffMs < 0) return translate(locale, "sync.time.justNow");
 
   const minuteMs = 60_000;
   const hourMs = 60 * minuteMs;
 
-  if (diffMs < minuteMs) return "just now";
+  if (diffMs < minuteMs) return translate(locale, "sync.time.justNow");
   if (diffMs < hourMs) {
     const minutes = Math.floor(diffMs / minuteMs);
-    return `${minutes}m ago`;
+    return translate(locale, "sync.time.minutesAgo", { count: minutes });
   }
   if (diffMs < 24 * hourMs) {
     const hours = Math.floor(diffMs / hourMs);
-    return `${hours}h ago`;
+    return translate(locale, "sync.time.hoursAgo", { count: hours });
   }
   const days = Math.floor(diffMs / (24 * hourMs));
-  return `${days}d ago`;
+  return translate(locale, "sync.time.daysAgo", { count: days });
 }
 
 function getSyncStatusLabel(input: {
   status: SyncStatus;
   isOnline: boolean;
   lastSyncedAt: string | null;
+  locale: AppLocale;
 }): string {
   if (input.status === "LOCAL_ONLY") {
-    return "Local only";
+    return translate(input.locale, "sync.status.localOnly");
   }
   if (input.status === "SYNCING") {
-    return "Syncing...";
+    return translate(input.locale, "sync.status.syncing");
   }
   if (input.status === "SYNCED") {
-    const relativeTime = formatRelativeSyncTime(input.lastSyncedAt);
-    return relativeTime ? `Synced ${relativeTime}` : "Synced";
+    const relativeTime = formatRelativeSyncTime(
+      input.lastSyncedAt,
+      input.locale,
+    );
+    return relativeTime
+      ? translate(input.locale, "sync.status.syncedAgo", { time: relativeTime })
+      : translate(input.locale, "sync.status.synced");
   }
   if (input.status === "OFFLINE") {
-    if (!input.isOnline) return "Offline";
-    return "Sync paused";
+    if (!input.isOnline) return translate(input.locale, "sync.status.offline");
+    return translate(input.locale, "sync.status.paused");
   }
-  return "Needs attention";
+  return translate(input.locale, "sync.status.attention");
 }
 
 type AutosaveStatus = "ready" | "saving" | "saved" | "error";
@@ -197,36 +197,45 @@ function getAutosaveIndicator(input: {
   isSaving: boolean;
   lastSavedAt: string | null;
   lastError: string | null;
+  locale: AppLocale;
 }): AutosaveIndicator {
   if (input.isSaving) {
     return {
       status: "saving",
-      label: "Autosaving...",
-      detail: "Saving local changes.",
+      label: translate(input.locale, "autosave.saving"),
+      detail: translate(input.locale, "autosave.detail.saving"),
     };
   }
 
   if (input.lastError) {
     return {
       status: "error",
-      label: "Autosave failed",
+      label: translate(input.locale, "autosave.failed"),
       detail: input.lastError,
     };
   }
 
   if (input.lastSavedAt) {
-    const relativeTime = formatRelativeSyncTime(input.lastSavedAt);
+    const relativeTime = formatRelativeSyncTime(
+      input.lastSavedAt,
+      input.locale,
+    );
+    const localeTag = input.locale === "th" ? "th-TH" : "en-US";
     return {
       status: "saved",
-      label: relativeTime ? `Saved ${relativeTime}` : "Saved",
-      detail: `Last autosave at ${new Date(input.lastSavedAt).toLocaleString()}.`,
+      label: relativeTime
+        ? translate(input.locale, "autosave.savedAgo", { time: relativeTime })
+        : translate(input.locale, "autosave.saved"),
+      detail: translate(input.locale, "autosave.detail.savedAt", {
+        time: new Date(input.lastSavedAt).toLocaleString(localeTag),
+      }),
     };
   }
 
   return {
     status: "ready",
-    label: "Autosave ready",
-    detail: "Waiting for local changes.",
+    label: translate(input.locale, "autosave.ready"),
+    detail: translate(input.locale, "autosave.detail.waiting"),
   };
 }
 
@@ -243,6 +252,18 @@ function isE2ETransportModeEnabled(): boolean {
 }
 
 const E2E_SYNC_DEVICE_ID = "e2e-local-device";
+const APP_ERROR_CODES = {
+  UNDO_BACKUP_RESTORE_PENDING: "APP_UNDO_BACKUP_RESTORE_PENDING",
+  UNDO_BACKUP_IMPORT_PENDING: "APP_UNDO_BACKUP_IMPORT_PENDING",
+  UNDO_CONFLICT_PENDING: "APP_UNDO_CONFLICT_PENDING",
+  UNDO_TASK_PENDING: "APP_UNDO_TASK_PENDING",
+  UNDO_PROJECT_PENDING: "APP_UNDO_PROJECT_PENDING",
+} as const;
+const E2E_ERROR_CODES = {
+  TRANSPORT_INVALID_JSON: "E2E_TRANSPORT_INVALID_JSON",
+  TRANSPORT_REQUEST_FAILED: "E2E_TRANSPORT_REQUEST_FAILED",
+  TRANSPORT_REMOTE_ERROR: "E2E_TRANSPORT_REMOTE_ERROR",
+} as const;
 
 function normalizeE2EEndpointUrl(
   value: string | null | undefined,
@@ -270,18 +291,25 @@ async function postE2ETransportJson(input: {
     try {
       responsePayload = JSON.parse(responseText) as unknown;
     } catch {
-      throw new Error("E2E transport returned invalid JSON.");
+      throw new Error(E2E_ERROR_CODES.TRANSPORT_INVALID_JSON);
     }
   }
 
   if (!response.ok) {
     if (typeof responsePayload === "object" && responsePayload !== null) {
+      const code = (responsePayload as { code?: unknown }).code;
       const message = (responsePayload as { message?: unknown }).message;
       if (typeof message === "string" && message.trim()) {
-        throw new Error(message);
+        const normalizedCode =
+          typeof code === "string" && /^[A-Z0-9_]+$/.test(code.trim())
+            ? code.trim()
+            : E2E_ERROR_CODES.TRANSPORT_REMOTE_ERROR;
+        throw new Error(`[${normalizedCode}] ${message.trim()}`);
       }
     }
-    throw new Error(`E2E transport request failed (${response.status}).`);
+    throw new Error(
+      `${E2E_ERROR_CODES.TRANSPORT_REQUEST_FAILED}:${response.status}`,
+    );
   }
 
   return responsePayload;
@@ -376,10 +404,30 @@ function createE2EConflictResolutionOutboxChange(input: {
   };
 }
 
-function buildE2EConflictMessage(conflictCount: number): string {
+function buildE2EConflictMessage(
+  conflictCount: number,
+  locale: AppLocale,
+): string {
   const normalizedCount = Math.max(0, Math.floor(conflictCount));
-  if (normalizedCount <= 0) return "Sync requires attention.";
-  return `${normalizedCount} conflict(s) detected.`;
+  if (normalizedCount <= 0) {
+    return translate(locale, "app.e2e.syncNeedsAttention");
+  }
+  return translate(locale, "app.e2e.conflictsDetected", {
+    count: normalizedCount,
+  });
+}
+
+function buildE2EMigrationSyncWriteBlockedMessage(
+  locale: AppLocale,
+  reason: string | null | undefined,
+): string {
+  const normalizedReason = typeof reason === "string" ? reason.trim() : "";
+  if (normalizedReason) {
+    return translate(locale, "sync.migration.writeBlockedWithError", {
+      error: normalizedReason,
+    });
+  }
+  return translate(locale, "sync.migration.writeBlocked");
 }
 
 function AppContent() {
@@ -443,6 +491,15 @@ function AppContent() {
   const { data: syncSettings, isLoading: isSyncSettingsLoading } =
     useSyncSettings();
   const updateSyncSettings = useUpdateSyncSettings();
+  const { data: appLocaleSetting } = useAppLocaleSetting();
+  const {
+    data: migrationDiagnosticsSetting,
+    isLoading: isMigrationDiagnosticsSettingLoading,
+  } = useMigrationDiagnosticsSetting();
+  const updateAppLocaleSetting = useUpdateAppLocaleSetting();
+  const [appLocale, setAppLocale] = useState<AppLocale>(() =>
+    detectSystemAppLocale(),
+  );
   const {
     filters,
     savedViews,
@@ -511,6 +568,12 @@ function AppContent() {
   const e2eResolvedIncomingKeysRef = useRef<Set<string>>(new Set());
   const [isE2EConflictResolving, setIsE2EConflictResolving] = useState(false);
   const e2eSyncFailureBudgetRef = useRef(0);
+  const [e2eMigrationSyncWriteBlocked, setE2EMigrationSyncWriteBlocked] =
+    useState(false);
+  const [
+    e2eMigrationSyncWriteBlockedReason,
+    setE2EMigrationSyncWriteBlockedReason,
+  ] = useState<string | null>(null);
   const [e2eSyncStatus, setE2ESyncStatus] = useState<SyncStatus>(() =>
     e2eBridgeEnabled && e2eTransportModeEnabled ? "LOCAL_ONLY" : "SYNCED",
   );
@@ -546,6 +609,12 @@ function AppContent() {
           pull_limit: syncRuntimeSettings?.pull_limit ?? 200,
           max_pull_pages: syncRuntimeSettings?.max_pull_pages ?? 5,
         };
+  const effectiveSyncWriteBlocked = e2eBridgeEnabled
+    ? e2eMigrationSyncWriteBlocked
+    : (migrationDiagnosticsSetting?.sync_write_blocked ?? false);
+  const effectiveSyncWriteBlockedReason = e2eBridgeEnabled
+    ? e2eMigrationSyncWriteBlockedReason
+    : (migrationDiagnosticsSetting?.last_error ?? null);
   const sync = useSync({
     pushUrl:
       e2eBridgeEnabled && e2eTransportModeEnabled
@@ -562,6 +631,7 @@ function AppContent() {
       e2eBridgeEnabled && e2eTransportModeEnabled
         ? true
         : !isSyncSettingsLoading &&
+          !isMigrationDiagnosticsSettingLoading &&
           !isSyncRuntimeSettingsLoading &&
           !isSyncProviderSettingsLoading &&
           !isSyncRuntimeProfileSettingsLoading,
@@ -572,6 +642,9 @@ function AppContent() {
     pushLimit: effectiveSyncRuntimeSettings.push_limit,
     pullLimit: effectiveSyncRuntimeSettings.pull_limit,
     maxPullPages: effectiveSyncRuntimeSettings.max_pull_pages,
+    syncWriteBlocked: effectiveSyncWriteBlocked,
+    syncWriteBlockedReason: effectiveSyncWriteBlockedReason,
+    locale: appLocale,
   });
   const visibleSyncStatus = e2eBridgeEnabled ? e2eSyncStatus : sync.status;
   const visibleSyncLastSyncedAt = e2eBridgeEnabled
@@ -587,7 +660,7 @@ function AppContent() {
     ? Boolean(e2eTransportPushUrl && e2eTransportPullUrl)
     : true;
   const visibleSyncHasTransport = e2eBridgeEnabled
-    ? e2eHasTransport
+    ? e2eHasTransport && !e2eMigrationSyncWriteBlocked
     : sync.hasTransport;
   const visibleSyncIsOnline = e2eBridgeEnabled ? true : sync.isOnline;
   const visibleSyncPushUrl =
@@ -598,14 +671,27 @@ function AppContent() {
     e2eBridgeEnabled && e2eTransportModeEnabled
       ? e2eTransportPullUrl
       : (syncSettings?.pull_url ?? null);
+  useEffect(() => {
+    const persistedLocale = appLocaleSetting?.locale;
+    if (!persistedLocale) return;
+    setAppLocale((currentLocale) =>
+      currentLocale === persistedLocale ? currentLocale : persistedLocale,
+    );
+  }, [appLocaleSetting?.locale]);
   const syncStatusLabel = useMemo(
     () =>
       getSyncStatusLabel({
         status: visibleSyncStatus,
         isOnline: visibleSyncIsOnline,
         lastSyncedAt: visibleSyncLastSyncedAt,
+        locale: appLocale,
       }),
-    [visibleSyncIsOnline, visibleSyncLastSyncedAt, visibleSyncStatus],
+    [
+      appLocale,
+      visibleSyncIsOnline,
+      visibleSyncLastSyncedAt,
+      visibleSyncStatus,
+    ],
   );
   const markAutosaveSuccess = useCallback(() => {
     setLastAutosaveError(null);
@@ -613,7 +699,7 @@ function AppContent() {
     setAutosaveClock((previous) => previous + 1);
   }, []);
   const markAutosaveFailure = useCallback((error: unknown) => {
-    setLastAutosaveError(getErrorMessage(error));
+    setLastAutosaveError(getErrorMessage(error, appLocale));
     setAutosaveClock((previous) => previous + 1);
   }, []);
   const enqueueUndoAction = useCallback((input: EnqueueUndoActionInput) => {
@@ -684,6 +770,7 @@ function AppContent() {
     (e2eBridgeEnabled
       ? isE2EConflictResolving
       : resolveSyncConflict.isPending) ||
+    updateAppLocaleSetting.isPending ||
     updateSyncProviderSettings.isPending ||
     updateSyncSettings.isPending ||
     updateSyncRuntimeSettings.isPending;
@@ -693,8 +780,15 @@ function AppContent() {
         isSaving: isAutosaveSaving,
         lastSavedAt: lastAutosavedAt,
         lastError: lastAutosaveError,
+        locale: appLocale,
       }),
-    [autosaveClock, isAutosaveSaving, lastAutosaveError, lastAutosavedAt],
+    [
+      appLocale,
+      autosaveClock,
+      isAutosaveSaving,
+      lastAutosaveError,
+      lastAutosavedAt,
+    ],
   );
   useEffect(() => {
     if (!lastAutosavedAt || lastAutosaveError || isAutosaveSaving) return;
@@ -737,6 +831,30 @@ function AppContent() {
       }
     };
   }, [undoQueue]);
+  const handleSaveAppLocale = useCallback(
+    async (locale: AppLocale): Promise<void> => {
+      const previousLocale = appLocale;
+      if (locale === previousLocale && appLocaleSetting?.locale === locale) {
+        return;
+      }
+
+      setAppLocale(locale);
+      if (e2eBridgeEnabled) return;
+
+      try {
+        await updateAppLocaleSetting.mutateAsync({ locale });
+      } catch (error) {
+        setAppLocale(previousLocale);
+        throw error;
+      }
+    },
+    [
+      appLocale,
+      appLocaleSetting?.locale,
+      e2eBridgeEnabled,
+      updateAppLocaleSetting,
+    ],
+  );
   const handleSaveSyncSettings = useCallback(
     async (input: UpdateSyncEndpointSettingsInput): Promise<void> => {
       if (e2eBridgeEnabled && e2eTransportModeEnabled) {
@@ -756,7 +874,9 @@ function AppContent() {
         const openConflictCount = e2eOpenConflictsRef.current.length;
         if (openConflictCount > 0) {
           setE2ESyncStatus("CONFLICT");
-          setE2ESyncLastError(buildE2EConflictMessage(openConflictCount));
+          setE2ESyncLastError(
+            buildE2EConflictMessage(openConflictCount, appLocale),
+          );
           markAutosaveSuccess();
           return;
         }
@@ -776,6 +896,7 @@ function AppContent() {
       }
     },
     [
+      appLocale,
       e2eBridgeEnabled,
       e2eTransportModeEnabled,
       markAutosaveFailure,
@@ -786,6 +907,18 @@ function AppContent() {
     ],
   );
   const handleE2ESyncNow = useCallback(async (): Promise<void> => {
+    if (e2eMigrationSyncWriteBlocked) {
+      setE2ESyncStatus("OFFLINE");
+      setE2ESyncLastError(
+        buildE2EMigrationSyncWriteBlockedMessage(
+          appLocale,
+          e2eMigrationSyncWriteBlockedReason,
+        ),
+      );
+      setIsE2ESyncRunning(false);
+      return;
+    }
+
     setIsE2ESyncRunning(true);
     setE2ESyncStatus("SYNCING");
     setE2ESyncLastError(null);
@@ -798,7 +931,7 @@ function AppContent() {
       if (e2eSyncFailureBudgetRef.current > 0) {
         e2eSyncFailureBudgetRef.current -= 1;
         setE2ESyncStatus("CONFLICT");
-        setE2ESyncLastError("E2E simulated transport failure.");
+        setE2ESyncLastError(translate(appLocale, "app.e2e.simulatedFailure"));
         setIsE2ESyncRunning(false);
         return;
       }
@@ -806,7 +939,9 @@ function AppContent() {
       const openConflictCount = e2eOpenConflictsRef.current.length;
       if (openConflictCount > 0) {
         setE2ESyncStatus("CONFLICT");
-        setE2ESyncLastError(buildE2EConflictMessage(openConflictCount));
+        setE2ESyncLastError(
+          buildE2EConflictMessage(openConflictCount, appLocale),
+        );
         setIsE2ESyncRunning(false);
         return;
       }
@@ -920,7 +1055,9 @@ function AppContent() {
       const openConflictCount = nextConflicts.length;
       if (openConflictCount > 0) {
         setE2ESyncStatus("CONFLICT");
-        setE2ESyncLastError(buildE2EConflictMessage(openConflictCount));
+        setE2ESyncLastError(
+          buildE2EConflictMessage(openConflictCount, appLocale),
+        );
         return;
       }
 
@@ -930,11 +1067,18 @@ function AppContent() {
       setE2ESyncLastError(null);
     } catch (error) {
       setE2ESyncStatus("CONFLICT");
-      setE2ESyncLastError(getErrorMessage(error));
+      setE2ESyncLastError(getErrorMessage(error, appLocale));
     } finally {
       setIsE2ESyncRunning(false);
     }
-  }, [e2eTransportModeEnabled, e2eTransportPullUrl, e2eTransportPushUrl]);
+  }, [
+    appLocale,
+    e2eMigrationSyncWriteBlocked,
+    e2eMigrationSyncWriteBlockedReason,
+    e2eTransportModeEnabled,
+    e2eTransportPullUrl,
+    e2eTransportPushUrl,
+  ]);
 
   const handleE2ESetSyncFailureBudget = useCallback((count: number) => {
     const normalizedCount = Number.isFinite(count)
@@ -942,6 +1086,50 @@ function AppContent() {
       : 0;
     e2eSyncFailureBudgetRef.current = normalizedCount;
   }, []);
+  const handleE2ESetMigrationSyncWriteBlocked = useCallback(
+    (blocked: boolean, reason?: string | null) => {
+      const normalizedBlocked = Boolean(blocked);
+      const normalizedReason =
+        typeof reason === "string" && reason.trim() ? reason.trim() : null;
+      setE2EMigrationSyncWriteBlocked(normalizedBlocked);
+      setE2EMigrationSyncWriteBlockedReason(normalizedReason);
+
+      if (normalizedBlocked) {
+        setE2ESyncStatus("OFFLINE");
+        setE2ESyncLastError(
+          buildE2EMigrationSyncWriteBlockedMessage(appLocale, normalizedReason),
+        );
+        return;
+      }
+
+      const openConflictCount = e2eOpenConflictsRef.current.length;
+      if (openConflictCount > 0) {
+        setE2ESyncStatus("CONFLICT");
+        setE2ESyncLastError(
+          buildE2EConflictMessage(openConflictCount, appLocale),
+        );
+        return;
+      }
+
+      if (e2eTransportModeEnabled) {
+        const hasTransportEndpoints = Boolean(
+          e2eTransportPushUrl && e2eTransportPullUrl,
+        );
+        setE2ESyncStatus(hasTransportEndpoints ? "SYNCED" : "LOCAL_ONLY");
+        setE2ESyncLastError(null);
+        return;
+      }
+
+      setE2ESyncStatus("SYNCED");
+      setE2ESyncLastError(null);
+    },
+    [
+      appLocale,
+      e2eTransportModeEnabled,
+      e2eTransportPullUrl,
+      e2eTransportPushUrl,
+    ],
+  );
   const visibleSyncNow = e2eBridgeEnabled ? handleE2ESyncNow : sync.syncNow;
   const handleE2ERetryLastFailedSync =
     useCallback(async (): Promise<boolean> => {
@@ -955,7 +1143,7 @@ function AppContent() {
   const handleQueueRestoreLatestBackup = useCallback(
     async (input: { force: boolean }) => {
       const queued = enqueueUndoAction({
-        label: "Restore latest backup",
+        label: translate(appLocale, "app.undo.restoreLatestBackup"),
         dedupeKey: "backup-restore-latest",
         execute: async () => {
           await restoreLatestBackup.mutateAsync({
@@ -967,15 +1155,16 @@ function AppContent() {
           markAutosaveSuccess();
         },
         onExecuteError: (error) => {
-          setActionError(getErrorMessage(error));
+          setActionError(getErrorMessage(error, appLocale));
           markAutosaveFailure(error);
         },
       });
       if (!queued) {
-        throw new Error("A backup restore already has a pending undo action.");
+        throw new Error(APP_ERROR_CODES.UNDO_BACKUP_RESTORE_PENDING);
       }
     },
     [
+      appLocale,
       enqueueUndoAction,
       markAutosaveFailure,
       markAutosaveSuccess,
@@ -992,8 +1181,10 @@ function AppContent() {
       sourceName?: string;
     }) => {
       const label = input.sourceName?.trim()
-        ? `Import backup "${input.sourceName.trim()}"`
-        : "Import backup file";
+        ? translate(appLocale, "app.undo.importBackupNamed", {
+            name: input.sourceName.trim(),
+          })
+        : translate(appLocale, "app.undo.importBackupFile");
 
       const queued = enqueueUndoAction({
         label,
@@ -1009,15 +1200,16 @@ function AppContent() {
           markAutosaveSuccess();
         },
         onExecuteError: (error) => {
-          setActionError(getErrorMessage(error));
+          setActionError(getErrorMessage(error, appLocale));
           markAutosaveFailure(error);
         },
       });
       if (!queued) {
-        throw new Error("A backup import already has a pending undo action.");
+        throw new Error(APP_ERROR_CODES.UNDO_BACKUP_IMPORT_PENDING);
       }
     },
     [
+      appLocale,
       enqueueUndoAction,
       importBackup,
       markAutosaveFailure,
@@ -1073,7 +1265,9 @@ function AppContent() {
               return next;
             });
             setE2ESyncStatus("CONFLICT");
-            setE2ESyncLastError(buildE2EConflictMessage(nextConflictCount));
+            setE2ESyncLastError(
+              buildE2EConflictMessage(nextConflictCount, appLocale),
+            );
             markAutosaveSuccess();
             return;
           }
@@ -1100,8 +1294,8 @@ function AppContent() {
           setE2ESyncStatus("CONFLICT");
           setE2ESyncLastError(
             nextConflictCount > 0
-              ? buildE2EConflictMessage(nextConflictCount)
-              : "Conflicts resolved locally. Run Sync now to confirm.",
+              ? buildE2EConflictMessage(nextConflictCount, appLocale)
+              : translate(appLocale, "app.sync.conflictsResolvedLocally"),
           );
           markAutosaveSuccess();
           return;
@@ -1113,8 +1307,12 @@ function AppContent() {
       const queued = enqueueUndoAction({
         label:
           input.strategy === "retry"
-            ? `Retry conflict ${input.conflict_id.slice(0, 8)}`
-            : `Resolve conflict ${input.conflict_id.slice(0, 8)}`,
+            ? translate(appLocale, "app.undo.retryConflict", {
+                id: input.conflict_id.slice(0, 8),
+              })
+            : translate(appLocale, "app.undo.resolveConflict", {
+                id: input.conflict_id.slice(0, 8),
+              }),
         dedupeKey: `conflict-resolution:${input.conflict_id}`,
         execute: async () => {
           await resolveSyncConflict.mutateAsync(input);
@@ -1122,15 +1320,16 @@ function AppContent() {
           markAutosaveSuccess();
         },
         onExecuteError: (error) => {
-          setActionError(getErrorMessage(error));
+          setActionError(getErrorMessage(error, appLocale));
           markAutosaveFailure(error);
         },
       });
       if (!queued) {
-        throw new Error("This conflict already has a pending undo action.");
+        throw new Error(APP_ERROR_CODES.UNDO_CONFLICT_PENDING);
       }
     },
     [
+      appLocale,
       enqueueUndoAction,
       e2eBridgeEnabled,
       e2eTransportModeEnabled,
@@ -1261,6 +1460,8 @@ function AppContent() {
     e2eTransportOutboxRef.current = [];
     e2eResolvedIncomingKeysRef.current = new Set();
     e2eSyncFailureBudgetRef.current = 0;
+    setE2EMigrationSyncWriteBlocked(false);
+    setE2EMigrationSyncWriteBlockedReason(null);
     setE2ESyncStatus(e2eTransportModeEnabled ? "LOCAL_ONLY" : "SYNCED");
     setE2ESyncLastSyncedAt(null);
     setE2ESyncLastError(null);
@@ -1276,12 +1477,12 @@ function AppContent() {
       return next;
     });
     setE2ESyncStatus("CONFLICT");
-    setE2ESyncLastError(buildE2EConflictMessage(nextConflictCount));
+    setE2ESyncLastError(buildE2EConflictMessage(nextConflictCount, appLocale));
     return {
       conflict_id: fixture.id,
       entity_id: fixture.entity_id,
     };
-  }, []);
+  }, [appLocale]);
 
   const handleE2EListOpenConflictIds = useCallback(
     () => e2eOpenConflictsRef.current.map((conflict) => conflict.id),
@@ -1295,11 +1496,13 @@ function AppContent() {
       onSeedTaskFieldConflict: handleE2ESeedTaskFieldConflict,
       onListOpenConflictIds: handleE2EListOpenConflictIds,
       onSetSyncFailureBudget: handleE2ESetSyncFailureBudget,
+      onSetMigrationSyncWriteBlocked: handleE2ESetMigrationSyncWriteBlocked,
     });
   }, [
     e2eBridgeEnabled,
     handleE2EListOpenConflictIds,
     handleE2EResetSyncState,
+    handleE2ESetMigrationSyncWriteBlocked,
     handleE2ESetSyncFailureBudget,
     handleE2ESeedTaskFieldConflict,
   ]);
@@ -1336,6 +1539,7 @@ function AppContent() {
   useReminderNotifications(
     allTasks,
     remindersEnabled && !isLoadingAllTasks && !isAllTasksError,
+    appLocale,
     handleTaskNotificationOpen,
   );
 
@@ -1464,7 +1668,7 @@ function AppContent() {
       setIsCreateOpen(false);
       setCreateModalProjectId(null);
     } catch (error) {
-      setActionError(getErrorMessage(error));
+      setActionError(getErrorMessage(error, appLocale));
       markAutosaveFailure(error);
     }
   };
@@ -1476,7 +1680,7 @@ function AppContent() {
       markAutosaveSuccess();
       setEditingTask(null);
     } catch (error) {
-      setActionError(getErrorMessage(error));
+      setActionError(getErrorMessage(error, appLocale));
       markAutosaveFailure(error);
     }
   };
@@ -1489,7 +1693,7 @@ function AppContent() {
         markAutosaveSuccess();
       })
       .catch((error) => {
-        setActionError(getErrorMessage(error));
+        setActionError(getErrorMessage(error, appLocale));
         markAutosaveFailure(error);
       });
   };
@@ -1498,8 +1702,10 @@ function AppContent() {
     setActionError(null);
     const matchedTask = allTasks.find((task) => task.id === taskId);
     const label = matchedTask?.title?.trim()
-      ? `Delete task "${matchedTask.title.trim()}"`
-      : "Delete task";
+      ? translate(appLocale, "app.undo.deleteTaskNamed", {
+          name: matchedTask.title.trim(),
+        })
+      : translate(appLocale, "app.undo.deleteTask");
 
     const queued = enqueueUndoAction({
       label,
@@ -1509,12 +1715,14 @@ function AppContent() {
         markAutosaveSuccess();
       },
       onExecuteError: (error) => {
-        setActionError(getErrorMessage(error));
+        setActionError(getErrorMessage(error, appLocale));
         markAutosaveFailure(error);
       },
     });
     if (!queued) {
-      setActionError("This task already has a pending undo action.");
+      setActionError(
+        getErrorMessage(APP_ERROR_CODES.UNDO_TASK_PENDING, appLocale),
+      );
     }
   };
   const handleDeleteProject = useCallback(
@@ -1522,23 +1730,28 @@ function AppContent() {
       setActionError(null);
 
       const queued = enqueueUndoAction({
-        label: `Delete project "${input.projectName}"`,
+        label: translate(appLocale, "app.undo.deleteProjectNamed", {
+          name: input.projectName,
+        }),
         dedupeKey: `project-delete:${input.projectId}`,
         execute: async () => {
           await deleteProject.mutateAsync(input.projectId);
           markAutosaveSuccess();
         },
         onExecuteError: (error) => {
-          setActionError(getErrorMessage(error));
+          setActionError(getErrorMessage(error, appLocale));
           markAutosaveFailure(error);
         },
       });
       if (!queued) {
-        setActionError("This project already has a pending undo action.");
+        setActionError(
+          getErrorMessage(APP_ERROR_CODES.UNDO_PROJECT_PENDING, appLocale),
+        );
       }
       return { queued, undoWindowMs: DEFAULT_UNDO_WINDOW_MS };
     },
     [
+      appLocale,
       deleteProject,
       enqueueUndoAction,
       markAutosaveFailure,
@@ -1563,7 +1776,7 @@ function AppContent() {
         markAutosaveSuccess();
         setIsQuickCaptureOpen(false);
       } catch (error) {
-        setQuickCaptureError(getErrorMessage(error));
+        setQuickCaptureError(getErrorMessage(error, appLocale));
         markAutosaveFailure(error);
       }
     },
@@ -1660,7 +1873,7 @@ function AppContent() {
           color: "var(--text-primary)",
         }}
       >
-        Failed to load tasks
+        {translate(appLocale, "app.error.failedLoadTasks")}
       </h2>
       <p
         style={{
@@ -1669,7 +1882,7 @@ function AppContent() {
           color: "var(--text-secondary)",
         }}
       >
-        {getErrorMessage(taskViewState.error)}
+        {getErrorMessage(taskViewState.error, appLocale)}
       </p>
       <button
         style={{
@@ -1683,7 +1896,7 @@ function AppContent() {
         }}
         onClick={() => void taskViewState?.refetch()}
       >
-        Retry
+        {translate(appLocale, "common.retry")}
       </button>
     </div>
   ) : activeView === "board" ? (
@@ -1759,7 +1972,7 @@ function AppContent() {
             color: "var(--text-primary)",
           }}
         >
-          Failed to load calendar
+          {translate(appLocale, "app.error.failedLoadCalendar")}
         </h2>
         <p
           style={{
@@ -1768,7 +1981,7 @@ function AppContent() {
             color: "var(--text-secondary)",
           }}
         >
-          {getErrorMessage(allTasksError)}
+          {getErrorMessage(allTasksError, appLocale)}
         </p>
         <button
           style={{
@@ -1782,7 +1995,7 @@ function AppContent() {
           }}
           onClick={() => void refetchAllTasks()}
         >
-          Retry
+          {translate(appLocale, "common.retry")}
         </button>
       </div>
     ) : (
@@ -1814,6 +2027,11 @@ function AppContent() {
     <ReminderSettings
       remindersEnabled={remindersEnabled}
       onRemindersEnabledChange={handleRemindersEnabledChange}
+      appLocale={appLocale}
+      appLocaleSaving={
+        e2eBridgeEnabled ? false : updateAppLocaleSetting.isPending
+      }
+      onSaveAppLocale={handleSaveAppLocale}
       syncStatus={visibleSyncStatus}
       syncStatusLabel={syncStatusLabel}
       syncLastSyncedAt={visibleSyncLastSyncedAt}
@@ -1882,109 +2100,113 @@ function AppContent() {
   );
 
   return (
-    <AppShell
-      onCreateClick={() => openCreateModal(null)}
-      syncStatus={visibleSyncStatus}
-      syncStatusLabel={syncStatusLabel}
-      autosaveStatus={autosaveIndicator.status}
-      autosaveStatusLabel={autosaveIndicator.label}
-      autosaveStatusDetail={autosaveIndicator.detail}
-      onOpenConflictCenter={() => setActiveView("conflicts")}
-      onOpenShortcutHelp={openShortcutHelp}
-    >
-      {taskViewState && !taskViewState.isLoading && !taskViewState.isError && (
-        <TaskFiltersBar
-          filters={filters}
-          availableProjects={availableProjects}
-          savedViews={savedViews}
-          activeSavedViewId={activeSavedViewId}
-          hasActiveFilters={hasActiveFilters}
-          visibleTasks={filteredTaskViewTasks.length}
-          totalTasks={taskViewState.tasks.length}
-          onSearchChange={setSearch}
-          onToggleProject={toggleProject}
-          onToggleStatus={toggleStatus}
-          onTogglePriority={togglePriority}
-          onSetImportantOnly={setImportantOnly}
-          onSetDueFilter={setDueFilter}
-          onSetSortBy={setSortBy}
-          onClearFilters={clearFilters}
-          onSaveCurrentView={saveCurrentFiltersAsView}
-          onApplySavedView={applySavedView}
-          onDeleteSavedView={deleteSavedView}
-        />
-      )}
-      {actionError && (
-        <div
-          style={{
-            margin: "16px 24px 0",
-            padding: "10px 12px",
-            border: "1px solid var(--danger)",
-            borderRadius: 8,
-            background: "var(--danger-subtle)",
-            color: "var(--danger)",
-            fontSize: 12,
-          }}
-        >
-          {actionError}
-        </div>
-      )}
-      {content}
-      {activeUndoAction && (
-        <GlobalUndoBar
-          actionLabel={activeUndoAction.label}
-          pendingCount={undoQueue.length}
-          undoWindowMs={activeUndoAction.timeoutMs}
-          onUndo={undoNextQueuedAction}
-        />
-      )}
+    <I18nProvider locale={appLocale}>
+      <AppShell
+        onCreateClick={() => openCreateModal(null)}
+        syncStatus={visibleSyncStatus}
+        syncStatusLabel={syncStatusLabel}
+        autosaveStatus={autosaveIndicator.status}
+        autosaveStatusLabel={autosaveIndicator.label}
+        autosaveStatusDetail={autosaveIndicator.detail}
+        onOpenConflictCenter={() => setActiveView("conflicts")}
+        onOpenShortcutHelp={openShortcutHelp}
+      >
+        {taskViewState &&
+          !taskViewState.isLoading &&
+          !taskViewState.isError && (
+            <TaskFiltersBar
+              filters={filters}
+              availableProjects={availableProjects}
+              savedViews={savedViews}
+              activeSavedViewId={activeSavedViewId}
+              hasActiveFilters={hasActiveFilters}
+              visibleTasks={filteredTaskViewTasks.length}
+              totalTasks={taskViewState.tasks.length}
+              onSearchChange={setSearch}
+              onToggleProject={toggleProject}
+              onToggleStatus={toggleStatus}
+              onTogglePriority={togglePriority}
+              onSetImportantOnly={setImportantOnly}
+              onSetDueFilter={setDueFilter}
+              onSetSortBy={setSortBy}
+              onClearFilters={clearFilters}
+              onSaveCurrentView={saveCurrentFiltersAsView}
+              onApplySavedView={applySavedView}
+              onDeleteSavedView={deleteSavedView}
+            />
+          )}
+        {actionError && (
+          <div
+            style={{
+              margin: "16px 24px 0",
+              padding: "10px 12px",
+              border: "1px solid var(--danger)",
+              borderRadius: 8,
+              background: "var(--danger-subtle)",
+              color: "var(--danger)",
+              fontSize: 12,
+            }}
+          >
+            {actionError}
+          </div>
+        )}
+        {content}
+        {activeUndoAction && (
+          <GlobalUndoBar
+            actionLabel={activeUndoAction.label}
+            pendingCount={undoQueue.length}
+            undoWindowMs={activeUndoAction.timeoutMs}
+            onUndo={undoNextQueuedAction}
+          />
+        )}
 
-      <CommandPalette
-        isOpen={isCommandPaletteOpen}
-        activeView={activeView}
-        tasks={allTasks}
-        onClose={closeCommandPalette}
-        onOpenCreate={() => openCreateModal(null)}
-        onOpenQuickCapture={openQuickCapture}
-        onEditTask={handleEditTask}
-        onChangeTaskStatus={handleStatusChange}
-        onChangeView={setActiveView}
-      />
-      <ShortcutHelpModal
-        isOpen={isShortcutHelpOpen}
-        onClose={closeShortcutHelp}
-      />
-
-      {isQuickCaptureOpen && (
-        <QuickCapture
-          isSubmitting={createTask.isPending}
-          error={quickCaptureError}
-          onSubmit={handleQuickCaptureCreate}
-          onClose={closeQuickCapture}
+        <CommandPalette
+          isOpen={isCommandPaletteOpen}
+          activeView={activeView}
+          tasks={allTasks}
+          onClose={closeCommandPalette}
+          onOpenCreate={() => openCreateModal(null)}
+          onOpenQuickCapture={openQuickCapture}
+          onEditTask={handleEditTask}
+          onChangeTaskStatus={handleStatusChange}
+          onChangeView={setActiveView}
         />
-      )}
-
-      {/* Create Task Modal */}
-      {isCreateOpen && (
-        <TaskForm
-          initialProjectId={createModalProjectId}
-          onSubmit={handleCreate}
-          onClose={() => {
-            setIsCreateOpen(false);
-            setCreateModalProjectId(null);
-          }}
+        <ShortcutHelpModal
+          isOpen={isShortcutHelpOpen}
+          onClose={closeShortcutHelp}
         />
-      )}
 
-      {/* Edit Task Modal */}
-      {editingTask && (
-        <TaskForm
-          task={editingTask}
-          onSubmit={handleUpdate}
-          onClose={() => setEditingTask(null)}
-        />
-      )}
-    </AppShell>
+        {isQuickCaptureOpen && (
+          <QuickCapture
+            isSubmitting={createTask.isPending}
+            error={quickCaptureError}
+            onSubmit={handleQuickCaptureCreate}
+            onClose={closeQuickCapture}
+          />
+        )}
+
+        {/* Create Task Modal */}
+        {isCreateOpen && (
+          <TaskForm
+            initialProjectId={createModalProjectId}
+            onSubmit={handleCreate}
+            onClose={() => {
+              setIsCreateOpen(false);
+              setCreateModalProjectId(null);
+            }}
+          />
+        )}
+
+        {/* Edit Task Modal */}
+        {editingTask && (
+          <TaskForm
+            task={editingTask}
+            onSubmit={handleUpdate}
+            onClose={() => setEditingTask(null)}
+          />
+        )}
+      </AppShell>
+    </I18nProvider>
   );
 }
 

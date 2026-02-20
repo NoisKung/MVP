@@ -61,7 +61,9 @@ test.describe("Conflict retry and re-resolve flow", () => {
       })
       .toContain("re-queue this conflict");
 
-    await expect(page.getByText("Conflict queued for retry.")).toBeVisible();
+    await expect(
+      page.getByText("Conflict retry queued. Undo is available for 5 seconds."),
+    ).toBeVisible();
     await expect(conflictItem).toBeVisible();
 
     const openConflictIdsAfterRetry = await page.evaluate(async () => {
@@ -72,7 +74,11 @@ test.describe("Conflict retry and re-resolve flow", () => {
     expect(openConflictIdsAfterRetry).toContain(seededConflict.conflict_id);
 
     await conflictItem.getByRole("button", { name: "Keep Local" }).click();
-    await expect(page.getByText("Conflict marked as resolved.")).toBeVisible();
+    await expect(
+      page.getByText(
+        "Conflict resolution queued. Undo is available for 5 seconds.",
+      ),
+    ).toBeVisible();
 
     await expect(
       page
