@@ -12,10 +12,12 @@ import {
   normalizeManualMergeText,
 } from "@/lib/manual-merge";
 import type {
+  SyncConflictDefaultStrategy,
   ResolveSyncConflictInput,
   SyncConflictEventRecord,
   SyncConflictRecord,
   SyncConflictResolutionStrategy,
+  SyncConflictStrategyDefaults,
 } from "@/lib/types";
 import { ManualMergeEditor } from "./ManualMergeEditor";
 
@@ -23,6 +25,7 @@ interface ConflictCenterViewProps {
   syncConflicts: SyncConflictRecord[];
   syncConflictsLoading: boolean;
   syncConflictResolving: boolean;
+  syncConflictStrategyDefaults: SyncConflictStrategyDefaults;
   onResolveSyncConflict: (input: ResolveSyncConflictInput) => Promise<void>;
   onOpenSyncSettings: () => void;
 }
@@ -73,6 +76,19 @@ function formatConflictEventLabel(
   return translate(locale, "conflictCenter.event.exported");
 }
 
+function formatConflictResolutionStrategyLabel(
+  strategy: SyncConflictDefaultStrategy,
+  locale: "en" | "th",
+) {
+  if (strategy === "keep_remote") {
+    return translate(locale, "conflictCenter.strategy.keepRemote");
+  }
+  if (strategy === "manual_merge") {
+    return translate(locale, "conflictCenter.strategy.manualMerge");
+  }
+  return translate(locale, "conflictCenter.strategy.keepLocal");
+}
+
 function formatPayloadJson(
   payloadJson: string | null,
   locale: "en" | "th",
@@ -90,6 +106,7 @@ export function ConflictCenterView({
   syncConflicts,
   syncConflictsLoading,
   syncConflictResolving,
+  syncConflictStrategyDefaults,
   onResolveSyncConflict,
   onOpenSyncSettings,
 }: ConflictCenterViewProps) {
@@ -182,6 +199,20 @@ export function ConflictCenterView({
     setConflictFeedback(null);
     setManualMergeConflictId(conflict.id);
     setManualMergeDraft(buildManualMergeInitialText(conflict));
+  };
+
+  const handleApplyDefaultStrategy = async (conflict: SyncConflictRecord) => {
+    const defaultStrategy =
+      syncConflictStrategyDefaults[conflict.conflict_type];
+    if (defaultStrategy === "manual_merge") {
+      handleOpenManualMergeEditor(conflict);
+      return;
+    }
+
+    await handleResolveConflict(conflict.id, defaultStrategy, {
+      default_applied: true,
+      source: "dedicated_conflict_center",
+    });
   };
 
   const handleCancelManualMerge = () => {
@@ -316,7 +347,23 @@ export function ConflictCenterView({
                   {t("conflictCenter.meta.detected")}:{" "}
                   {formatSyncDateTime(conflict.detected_at, locale)}
                 </p>
+                <p className="conflict-center-meta">
+                  {t("conflictCenter.defaultStrategy", {
+                    strategy: formatConflictResolutionStrategyLabel(
+                      syncConflictStrategyDefaults[conflict.conflict_type],
+                      locale,
+                    ),
+                  })}
+                </p>
                 <div className="conflict-center-actions">
+                  <button
+                    type="button"
+                    className="conflict-center-btn conflict-center-btn-primary"
+                    onClick={() => void handleApplyDefaultStrategy(conflict)}
+                    disabled={syncConflictResolving}
+                  >
+                    {t("conflictCenter.action.applyDefault")}
+                  </button>
                   <button
                     type="button"
                     className="conflict-center-btn"
@@ -355,7 +402,7 @@ export function ConflictCenterView({
                   </button>
                   <button
                     type="button"
-                    className="conflict-center-btn conflict-center-btn-primary"
+                    className="conflict-center-btn"
                     onClick={() => setSelectedConflictId(conflict.id)}
                   >
                     {t("conflictCenter.action.details")}

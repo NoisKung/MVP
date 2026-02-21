@@ -40,6 +40,8 @@ interface UseSyncOptions {
   provider: SyncProvider;
   providerConfig?: Record<string, unknown> | null;
   runtimeProfile: SyncRuntimeProfileSetting;
+  syncWriteBlocked?: boolean;
+  syncWriteBlockedReason?: string | null;
   timeoutMs?: number;
   configReady?: boolean;
   autoSyncIntervalMs?: number;
@@ -357,9 +359,33 @@ function buildConflictMessage(
   return `${parts.join(", ")}.`;
 }
 
+function buildMigrationSyncWriteBlockedMessage(
+  locale: AppLocale,
+  reason: string | null | undefined,
+): string {
+  const normalizedReason = typeof reason === "string" ? reason.trim() : "";
+  if (normalizedReason) {
+    return translate(locale, "sync.migration.writeBlockedWithError", {
+      error: normalizedReason,
+    });
+  }
+  return translate(locale, "sync.migration.writeBlocked");
+}
+
 export function useSync(options: UseSyncOptions): UseSyncState {
   const locale = options.locale ?? "en";
   const isConfigReady = options.configReady ?? true;
+  const syncWriteBlocked = options.syncWriteBlocked ?? false;
+  const syncWriteBlockedMessage = useMemo(
+    () =>
+      syncWriteBlocked
+        ? buildMigrationSyncWriteBlockedMessage(
+            locale,
+            options.syncWriteBlockedReason,
+          )
+        : null,
+    [locale, options.syncWriteBlockedReason, syncWriteBlocked],
+  );
   const runtimeProfileNormalization = useMemo(
     () =>
       normalizeSyncRuntimeProfileWithValidation({
@@ -411,8 +437,9 @@ export function useSync(options: UseSyncOptions): UseSyncState {
   );
   const [lastKnownGoodTransport, setLastKnownGoodTransport] =
     useState<ReturnType<typeof resolveSyncTransportConfig>["transport"]>(null);
-  const effectiveTransport =
-    resolvedTransportConfig.status === "ready"
+  const effectiveTransport = syncWriteBlocked
+    ? null
+    : resolvedTransportConfig.status === "ready"
       ? resolvedTransportConfig.transport
       : resolvedTransportConfig.status === "invalid_config"
         ? lastKnownGoodTransport
@@ -430,6 +457,7 @@ export function useSync(options: UseSyncOptions): UseSyncState {
   });
   const [status, setStatus] = useState<SyncStatus>(() => {
     if (!isConfigReady) return "OFFLINE";
+    if (syncWriteBlocked) return "OFFLINE";
     if (resolvedTransportConfig.status === "provider_unavailable") {
       return "OFFLINE";
     }
@@ -460,15 +488,17 @@ export function useSync(options: UseSyncOptions): UseSyncState {
     const providerChanged = lastProviderRef.current !== options.provider;
     const runtimeProfileChanged =
       lastRuntimeProfileRef.current !== options.runtimeProfile;
-    const warning = resolvedTransportConfig.warning;
+    const warning = syncWriteBlockedMessage ?? resolvedTransportConfig.warning;
     const validationRejected =
       runtimeValidationRejected ||
-      resolvedTransportConfig.status === "invalid_config";
+      resolvedTransportConfig.status === "invalid_config" ||
+      syncWriteBlocked;
     const nextValidationEventKey = validationRejected
       ? [
           options.provider,
           options.runtimeProfile,
           resolvedTransportConfig.status,
+          syncWriteBlocked ? "migration_write_blocked" : "migration_clear",
           warning ?? "",
         ].join("|")
       : null;
@@ -496,6 +526,8 @@ export function useSync(options: UseSyncOptions): UseSyncState {
     options.runtimeProfile,
     resolvedTransportConfig.status,
     resolvedTransportConfig.warning,
+    syncWriteBlocked,
+    syncWriteBlockedMessage,
     runtimeValidationRejected,
   ]);
 
@@ -513,6 +545,12 @@ export function useSync(options: UseSyncOptions): UseSyncState {
       if (!isConfigReady) {
         setStatus("OFFLINE");
         setLastError(null);
+        return;
+      }
+
+      if (syncWriteBlocked) {
+        setStatus("OFFLINE");
+        setLastError(syncWriteBlockedMessage);
         return;
       }
 
@@ -626,6 +664,8 @@ export function useSync(options: UseSyncOptions): UseSyncState {
       queryClient,
       resolvedTransportConfig.status,
       resolvedTransportConfig.warning,
+      syncWriteBlocked,
+      syncWriteBlockedMessage,
       usesLastKnownGoodTransport,
       locale,
     ],
@@ -673,6 +713,12 @@ export function useSync(options: UseSyncOptions): UseSyncState {
       return;
     }
 
+    if (syncWriteBlocked) {
+      setStatus("OFFLINE");
+      setLastError(syncWriteBlockedMessage);
+      return;
+    }
+
     if (resolvedTransportConfig.status === "provider_unavailable") {
       setStatus("OFFLINE");
       setLastError(
@@ -712,11 +758,13 @@ export function useSync(options: UseSyncOptions): UseSyncState {
     locale,
     resolvedTransportConfig.status,
     resolvedTransportConfig.warning,
+    syncWriteBlocked,
+    syncWriteBlockedMessage,
     runSync,
   ]);
 
   useEffect(() => {
-    if (!isConfigReady || !effectiveTransport) return;
+    if (!isConfigReady || syncWriteBlocked || !effectiveTransport) return;
     if (resolvedTransportConfig.status === "provider_unavailable") return;
 
     const activeIntervalMs = getAutoSyncIntervalMsForVisibility(
@@ -733,13 +781,15 @@ export function useSync(options: UseSyncOptions): UseSyncState {
     isConfigReady,
     isDocumentVisible,
     resolvedTransportConfig.status,
+    syncWriteBlocked,
     runSync,
     runtimeProfile,
   ]);
 
   useEffect(() => {
     if (!isDocumentVisible) return;
-    if (!isConfigReady || !effectiveTransport || !isOnline) return;
+    if (!isConfigReady || syncWriteBlocked || !effectiveTransport || !isOnline)
+      return;
     if (resolvedTransportConfig.status === "provider_unavailable") return;
     void runSync(false);
   }, [
@@ -748,6 +798,7 @@ export function useSync(options: UseSyncOptions): UseSyncState {
     isDocumentVisible,
     isOnline,
     resolvedTransportConfig.status,
+    syncWriteBlocked,
     runSync,
   ]);
 
@@ -755,7 +806,7 @@ export function useSync(options: UseSyncOptions): UseSyncState {
     status,
     isSyncing,
     isOnline,
-    hasTransport: Boolean(effectiveTransport),
+    hasTransport: Boolean(effectiveTransport) && !syncWriteBlocked,
     lastSyncedAt,
     lastError,
     diagnostics,

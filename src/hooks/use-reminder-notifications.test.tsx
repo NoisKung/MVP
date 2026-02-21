@@ -15,12 +15,14 @@ import { createTaskFixture } from "@/test/fixtures";
 
 const isPermissionGrantedMock = vi.fn();
 const onActionMock = vi.fn();
+const registerActionTypesMock = vi.fn();
 const requestPermissionMock = vi.fn();
 const sendNotificationMock = vi.fn();
 
 vi.mock("@tauri-apps/plugin-notification", () => ({
   isPermissionGranted: (...args: unknown[]) => isPermissionGrantedMock(...args),
   onAction: (...args: unknown[]) => onActionMock(...args),
+  registerActionTypes: (...args: unknown[]) => registerActionTypesMock(...args),
   requestPermission: (...args: unknown[]) => requestPermissionMock(...args),
   sendNotification: (...args: unknown[]) => sendNotificationMock(...args),
 }));
@@ -78,8 +80,10 @@ describe("use-reminder-notifications", () => {
     resetReminderPermissionCache();
     isPermissionGrantedMock.mockReset();
     onActionMock.mockReset();
+    registerActionTypesMock.mockReset();
     requestPermissionMock.mockReset();
     sendNotificationMock.mockReset();
+    registerActionTypesMock.mockResolvedValue(undefined);
     mockWebNotificationApi();
   });
 
@@ -135,9 +139,7 @@ describe("use-reminder-notifications", () => {
     isPermissionGrantedMock.mockResolvedValue(true);
 
     const unregisterMock = vi.fn();
-    let actionHandler:
-      | ((notification: { extra?: { taskId?: string } }) => void)
-      | null = null;
+    let actionHandler: ((notification: unknown) => void) | null = null;
     onActionMock.mockImplementation(async (handler: typeof actionHandler) => {
       actionHandler = handler;
       return { unregister: unregisterMock };
@@ -162,6 +164,14 @@ describe("use-reminder-notifications", () => {
     });
 
     expect(sendNotificationMock).toHaveBeenCalledTimes(1);
+    expect(sendNotificationMock.mock.calls[0]?.[0]).toMatchObject({
+      actionTypeId: "solostack.task-reminder",
+      extra: {
+        source: "task-reminder",
+        taskId: "task-1",
+      },
+    });
+    expect(registerActionTypesMock).toHaveBeenCalledTimes(1);
     expect(
       window.localStorage.getItem(REMINDER_HISTORY_STORAGE_KEY),
     ).not.toBeNull();
@@ -171,11 +181,60 @@ describe("use-reminder-notifications", () => {
     });
     expect(sendNotificationMock).toHaveBeenCalledTimes(1);
 
-    actionHandler?.({ extra: { taskId: "task-1" } });
+    actionHandler?.({ actionId: "tap", extra: { taskId: "task-1" } });
     expect(onTaskNotificationClick).toHaveBeenCalledWith("task-1");
 
     unmount();
     expect(unregisterMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("routes snooze notification actions to snooze callback", async () => {
+    const now = new Date(2026, 1, 15, 12, 0, 0, 0);
+    vi.setSystemTime(now);
+    isPermissionGrantedMock.mockResolvedValue(true);
+
+    let actionHandler: ((notification: unknown) => void) | null = null;
+    onActionMock.mockImplementation(async (handler: typeof actionHandler) => {
+      actionHandler = handler;
+      return { unregister: vi.fn() };
+    });
+
+    const task = createTaskFixture({
+      id: "task-4",
+      title: "Reminder with snooze",
+      remind_at: new Date(now.getTime() - 120_000).toISOString(),
+    });
+    const onTaskNotificationClick = vi.fn();
+    const onTaskReminderSnooze = vi.fn();
+
+    renderHook(() =>
+      useReminderNotifications(
+        [task],
+        true,
+        "en",
+        onTaskNotificationClick,
+        onTaskReminderSnooze,
+      ),
+    );
+    await act(async () => {
+      await Promise.resolve();
+      await vi.advanceTimersByTimeAsync(REMINDER_CHECK_INTERVAL_MS);
+    });
+
+    actionHandler?.({
+      actionId: "snooze_15m",
+      notification: {
+        extra: {
+          taskId: "task-4",
+        },
+      },
+    });
+
+    expect(onTaskReminderSnooze).toHaveBeenCalledWith({
+      taskId: "task-4",
+      preset: "SNOOZE_15_MINUTES",
+    });
+    expect(onTaskNotificationClick).not.toHaveBeenCalled();
   });
 
   it("falls back to web notification when plugin send fails", async () => {

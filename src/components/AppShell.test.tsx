@@ -12,6 +12,11 @@ describe("AppShell", () => {
       activeView: "board",
       editingTask: null,
       isCreateOpen: false,
+      taskDetailFocus: {
+        mode: "IDLE",
+        taskId: null,
+        projectId: null,
+      },
     });
   });
 

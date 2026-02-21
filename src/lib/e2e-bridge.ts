@@ -55,5 +55,11 @@ export function installE2EBridge(input: InstallE2EBridgeInput): void {
     async setSyncFailureBudget(count: number) {
       await input.onSetSyncFailureBudget(count);
     },
+    async setMigrationSyncWriteBlocked(
+      blocked: boolean,
+      reason?: string | null,
+    ) {
+      await input.onSetMigrationSyncWriteBlocked(blocked, reason);
+    },
   };
 }

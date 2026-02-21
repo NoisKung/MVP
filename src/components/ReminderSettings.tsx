@@ -36,20 +36,25 @@ import {
 } from "@/lib/manual-merge";
 import type {
   AppLocale,
+  BackupImportResult,
   BackupRestorePreflight,
   ResolveSyncConflictInput,
+  SyncConflictDefaultStrategy,
   SyncConflictEventRecord,
   SyncConflictRecord,
   SyncConflictResolutionStrategy,
+  SyncConflictStrategyDefaults,
   SyncProvider,
   SyncRuntimeProfilePreset,
   SyncRuntimeProfileSetting,
   SyncSessionDiagnostics,
   SyncStatus,
+  UpdateSyncConflictStrategyDefaultsInput,
   UpdateSyncEndpointSettingsInput,
   UpdateSyncProviderSettingsInput,
   UpdateSyncRuntimeSettingsInput,
 } from "@/lib/types";
+import { summarizeUnknownBackupPayload } from "@/lib/backup-summary";
 import { translate, useI18n } from "@/lib/i18n";
 import { localizeErrorMessage } from "@/lib/error-message";
 import { ManualMergeEditor } from "./ManualMergeEditor";
@@ -96,6 +101,14 @@ interface ReminderSettingsProps {
   syncConflictsLoading: boolean;
   syncConflictResolving: boolean;
   onResolveSyncConflict: (input: ResolveSyncConflictInput) => Promise<void>;
+  syncConflictStrategyDefaults: SyncConflictStrategyDefaults;
+  syncConflictStrategyDefaultsLoading: boolean;
+  syncConflictStrategyDefaultsSaving: boolean;
+  onSaveSyncConflictStrategyDefaults: (
+    input: UpdateSyncConflictStrategyDefaultsInput,
+  ) => Promise<void>;
+  focusTarget?: "sync_diagnostics" | "backup_preflight" | null;
+  focusRequestId?: number;
   backupRestoreLatestBusy: boolean;
   backupImportBusy: boolean;
   onQueueRestoreLatestBackup: (input: { force: boolean }) => Promise<void>;
@@ -134,6 +147,21 @@ const SYNC_RUNTIME_PROFILE_OPTION_VALUES: SyncRuntimeProfileSetting[] = [
   "desktop",
   "mobile_beta",
   "custom",
+];
+
+const SYNC_CONFLICT_DEFAULT_OPTION_VALUES: SyncConflictDefaultStrategy[] = [
+  "keep_local",
+  "keep_remote",
+  "manual_merge",
+];
+
+const SYNC_CONFLICT_DEFAULT_TYPE_VALUES: Array<
+  keyof SyncConflictStrategyDefaults
+> = [
+  "field_conflict",
+  "delete_vs_update",
+  "notes_collision",
+  "validation_error",
 ];
 
 function getSyncProviderCapabilities(
@@ -421,6 +449,19 @@ function formatConflictEventLabel(
   return translate(locale, "conflictCenter.event.exported");
 }
 
+function formatConflictResolutionStrategyLabel(
+  strategy: SyncConflictDefaultStrategy,
+  locale: AppLocale,
+) {
+  if (strategy === "keep_remote") {
+    return translate(locale, "conflictCenter.strategy.keepRemote");
+  }
+  if (strategy === "manual_merge") {
+    return translate(locale, "conflictCenter.strategy.manualMerge");
+  }
+  return translate(locale, "conflictCenter.strategy.keepLocal");
+}
+
 function formatPayloadJson(
   payloadJson: string | null,
   locale: AppLocale,
@@ -434,9 +475,29 @@ function formatPayloadJson(
   }
 }
 
+interface RestoreDryRunSummaryInput {
+  source_label: string;
+  payload_summary: BackupImportResult | null;
+}
+
+function buildRestoreDryRunDataSummaryLabel(
+  summary: BackupImportResult | null,
+  locale: AppLocale,
+): string {
+  if (!summary) {
+    return translate(locale, "settings.backup.confirm.dryRunDataUnknown");
+  }
+  return translate(locale, "settings.backup.confirm.dryRunData", {
+    projects: summary.projects,
+    tasks: summary.tasks,
+    templates: summary.task_templates,
+  });
+}
+
 function buildRestoreConfirmationMessage(
   preflight: BackupRestorePreflight,
   locale: AppLocale,
+  dryRunSummary: RestoreDryRunSummaryInput,
 ) {
   const forceReasonSegments: string[] = [];
   if (preflight.pending_outbox_changes > 0) {
@@ -456,11 +517,25 @@ function buildRestoreConfirmationMessage(
     );
   }
 
+  const dryRunLines = [
+    translate(locale, "settings.backup.confirm.dryRunTitle"),
+    dryRunSummary.source_label,
+    buildRestoreDryRunDataSummaryLabel(dryRunSummary.payload_summary, locale),
+    translate(locale, "settings.backup.confirm.dryRunClears", {
+      outbox: preflight.pending_outbox_changes,
+      conflicts: preflight.open_conflicts,
+    }),
+  ];
+
   if (forceReasonSegments.length === 0) {
-    return translate(locale, "settings.backup.confirm.replaceData");
+    return [
+      ...dryRunLines,
+      translate(locale, "settings.backup.confirm.replaceData"),
+    ].join("\n");
   }
 
   return [
+    ...dryRunLines,
     translate(locale, "settings.backup.confirm.forceReason", {
       reason: forceReasonSegments.join(
         ` ${translate(locale, "settings.backup.reason.and")} `,
@@ -533,6 +608,12 @@ export function ReminderSettings({
   syncConflictsLoading,
   syncConflictResolving,
   onResolveSyncConflict,
+  syncConflictStrategyDefaults,
+  syncConflictStrategyDefaultsLoading,
+  syncConflictStrategyDefaultsSaving,
+  onSaveSyncConflictStrategyDefaults,
+  focusTarget,
+  focusRequestId,
   backupRestoreLatestBusy,
   backupImportBusy,
   onQueueRestoreLatestBackup,
@@ -580,6 +661,15 @@ export function ReminderSettings({
     null,
   );
   const [syncRuntimeError, setSyncRuntimeError] = useState<string | null>(null);
+  const [
+    syncConflictStrategyDefaultsDraft,
+    setSyncConflictStrategyDefaultsDraft,
+  ] = useState<SyncConflictStrategyDefaults>(syncConflictStrategyDefaults);
+  const [syncConflictDefaultsFeedback, setSyncConflictDefaultsFeedback] =
+    useState<string | null>(null);
+  const [syncConflictDefaultsError, setSyncConflictDefaultsError] = useState<
+    string | null
+  >(null);
   const [conflictFeedback, setConflictFeedback] = useState<string | null>(null);
   const [conflictError, setConflictError] = useState<string | null>(null);
   const [selectedConflictId, setSelectedConflictId] = useState<string | null>(
@@ -589,6 +679,8 @@ export function ReminderSettings({
     string | null
   >(null);
   const [manualMergeDraft, setManualMergeDraft] = useState("");
+  const syncDiagnosticsRef = useRef<HTMLDivElement | null>(null);
+  const backupPreflightRef = useRef<HTMLDivElement | null>(null);
   const backupInputRef = useRef<HTMLInputElement | null>(null);
   const backupRestorePreflight = useBackupRestorePreflight();
   const exportBackup = useExportBackup();
@@ -750,6 +842,10 @@ export function ReminderSettings({
   }, [syncMaxPullPages]);
 
   useEffect(() => {
+    setSyncConflictStrategyDefaultsDraft(syncConflictStrategyDefaults);
+  }, [syncConflictStrategyDefaults]);
+
+  useEffect(() => {
     if (syncConflicts.length === 0) {
       setSelectedConflictId(null);
       return;
@@ -777,6 +873,25 @@ export function ReminderSettings({
     setManualMergeConflictId(null);
     setManualMergeDraft("");
   }, [manualMergeConflictId, syncConflicts]);
+
+  useEffect(() => {
+    if (!focusTarget) return;
+
+    if (focusTarget === "sync_diagnostics") {
+      syncDiagnosticsRef.current?.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
+      return;
+    }
+
+    if (focusTarget === "backup_preflight") {
+      backupPreflightRef.current?.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
+    }
+  }, [focusTarget, focusRequestId]);
 
   const handleRequestPermission = async () => {
     setIsBusy(true);
@@ -822,7 +937,10 @@ export function ReminderSettings({
       return refreshed.data ?? backupRestorePreflight.data ?? null;
     };
 
-  const confirmRestoreWithPreflight = async (): Promise<{
+  const confirmRestoreWithPreflight = async (input?: {
+    sourceLabel?: string;
+    payloadSummary?: BackupImportResult | null;
+  }): Promise<{
     force: boolean;
   } | null> => {
     const preflight = await loadLatestRestorePreflight();
@@ -831,7 +949,16 @@ export function ReminderSettings({
       return null;
     }
 
-    const confirmMessage = buildRestoreConfirmationMessage(preflight, locale);
+    const latestSourceLabel = preflight.latest_backup_exported_at
+      ? t("settings.backup.confirm.source.latest", {
+          time: formatSyncDateTime(preflight.latest_backup_exported_at, locale),
+        })
+      : t("settings.backup.confirm.source.latestUnknown");
+    const confirmMessage = buildRestoreConfirmationMessage(preflight, locale, {
+      source_label: input?.sourceLabel ?? latestSourceLabel,
+      payload_summary:
+        input?.payloadSummary ?? preflight.latest_backup_summary ?? null,
+    });
     if (!window.confirm(confirmMessage)) {
       return null;
     }
@@ -878,11 +1005,17 @@ export function ReminderSettings({
     setBackupError(null);
     setBackupFeedback(null);
     try {
-      const confirmation = await confirmRestoreWithPreflight();
-      if (!confirmation) return;
-
       const fileContent = await selectedFile.text();
       const parsedPayload = JSON.parse(fileContent) as unknown;
+      const payloadSummary = summarizeUnknownBackupPayload(parsedPayload);
+      const confirmation = await confirmRestoreWithPreflight({
+        sourceLabel: t("settings.backup.confirm.source.file", {
+          name: selectedFile.name,
+        }),
+        payloadSummary,
+      });
+      if (!confirmation) return;
+
       await onQueueImportBackup({
         payload: parsedPayload,
         force: confirmation.force,
@@ -1074,6 +1207,34 @@ export function ReminderSettings({
     }
   };
 
+  const handleChangeConflictDefaultStrategy = (
+    conflictType: keyof SyncConflictStrategyDefaults,
+    strategy: SyncConflictDefaultStrategy,
+  ) => {
+    setSyncConflictDefaultsFeedback(null);
+    setSyncConflictDefaultsError(null);
+    setSyncConflictStrategyDefaultsDraft((previous) => ({
+      ...previous,
+      [conflictType]: strategy,
+    }));
+  };
+
+  const handleSaveConflictStrategyDefaults = async () => {
+    setSyncConflictDefaultsFeedback(null);
+    setSyncConflictDefaultsError(null);
+
+    try {
+      await onSaveSyncConflictStrategyDefaults(
+        syncConflictStrategyDefaultsDraft,
+      );
+      setSyncConflictDefaultsFeedback(
+        t("settings.sync.conflictDefaults.feedback.saved"),
+      );
+    } catch (error) {
+      setSyncConflictDefaultsError(getErrorMessage(error, locale));
+    }
+  };
+
   const handleResolveConflict = async (
     conflictId: string,
     strategy: SyncConflictResolutionStrategy,
@@ -1105,6 +1266,20 @@ export function ReminderSettings({
     }
 
     await handleResolveConflict(conflictId, "retry");
+  };
+
+  const handleApplyDefaultStrategy = async (conflict: SyncConflictRecord) => {
+    const defaultStrategy =
+      syncConflictStrategyDefaults[conflict.conflict_type];
+    if (defaultStrategy === "manual_merge") {
+      handleOpenManualMergeEditor(conflict);
+      return;
+    }
+
+    await handleResolveConflict(conflict.id, defaultStrategy, {
+      default_applied: true,
+      source: "settings_conflict_center",
+    });
   };
 
   const handleOpenManualMergeEditor = (conflict: SyncConflictRecord) => {
@@ -1401,6 +1576,81 @@ export function ReminderSettings({
                 : t("conflictCenter.action.exportReport")}
             </button>
           </div>
+
+          <div className="sync-conflict-defaults">
+            <p className="settings-row-title">
+              {t("settings.sync.conflictDefaults.title")}
+            </p>
+            <p className="settings-row-subtitle">
+              {t("settings.sync.conflictDefaults.desc")}
+            </p>
+            {syncConflictStrategyDefaultsLoading ? (
+              <p className="settings-row-subtitle">
+                {t("settings.sync.conflictDefaults.loading")}
+              </p>
+            ) : (
+              <div className="sync-conflict-defaults-grid">
+                {SYNC_CONFLICT_DEFAULT_TYPE_VALUES.map((conflictType) => (
+                  <label className="settings-field" key={conflictType}>
+                    <span className="settings-field-label">
+                      {formatConflictTypeLabel(conflictType, locale)}
+                    </span>
+                    <select
+                      className="settings-input settings-select"
+                      value={syncConflictStrategyDefaultsDraft[conflictType]}
+                      onChange={(event) =>
+                        handleChangeConflictDefaultStrategy(
+                          conflictType,
+                          event.target.value as SyncConflictDefaultStrategy,
+                        )
+                      }
+                      disabled={
+                        syncConflictStrategyDefaultsLoading ||
+                        syncConflictStrategyDefaultsSaving
+                      }
+                    >
+                      {SYNC_CONFLICT_DEFAULT_OPTION_VALUES.map((strategy) => (
+                        <option value={strategy} key={strategy}>
+                          {formatConflictResolutionStrategyLabel(
+                            strategy,
+                            locale,
+                          )}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                ))}
+              </div>
+            )}
+            <div className="settings-actions settings-actions-single">
+              <button
+                type="button"
+                className="settings-btn settings-btn-primary settings-btn-provider"
+                onClick={() => void handleSaveConflictStrategyDefaults()}
+                disabled={
+                  syncConflictStrategyDefaultsLoading ||
+                  syncConflictStrategyDefaultsSaving
+                }
+              >
+                <span className="settings-btn-label">
+                  {syncConflictStrategyDefaultsSaving
+                    ? t("settings.sync.action.saving")
+                    : t("settings.sync.conflictDefaults.save")}
+                </span>
+              </button>
+            </div>
+            {syncConflictDefaultsFeedback && (
+              <p className="settings-feedback">
+                {syncConflictDefaultsFeedback}
+              </p>
+            )}
+            {syncConflictDefaultsError && (
+              <p className="settings-feedback settings-feedback-error">
+                {syncConflictDefaultsError}
+              </p>
+            )}
+          </div>
+
           {syncConflictsLoading ? (
             <p className="settings-row-subtitle">
               {t("conflictCenter.loading")}
@@ -1431,7 +1681,23 @@ export function ReminderSettings({
                     {t("conflictCenter.meta.detected")}:{" "}
                     {formatSyncDateTime(conflict.detected_at, locale)}
                   </p>
+                  <p className="settings-row-subtitle">
+                    {t("conflictCenter.defaultStrategy", {
+                      strategy: formatConflictResolutionStrategyLabel(
+                        syncConflictStrategyDefaults[conflict.conflict_type],
+                        locale,
+                      ),
+                    })}
+                  </p>
                   <div className="settings-actions">
+                    <button
+                      type="button"
+                      className="settings-btn settings-btn-primary"
+                      onClick={() => void handleApplyDefaultStrategy(conflict)}
+                      disabled={syncConflictResolving}
+                    >
+                      {t("conflictCenter.action.applyDefault")}
+                    </button>
                     <button
                       type="button"
                       className="settings-btn"
@@ -1882,7 +2148,7 @@ export function ReminderSettings({
               {syncRuntimeError}
             </p>
           )}
-          <div>
+          <div ref={syncDiagnosticsRef}>
             <p className="settings-row-title">
               {t("settings.sync.diagnostics.title")}
             </p>
@@ -2109,7 +2375,7 @@ export function ReminderSettings({
             {t("settings.backup.preflight.loading")}
           </p>
         ) : backupPreflight ? (
-          <div className="backup-preflight">
+          <div className="backup-preflight" ref={backupPreflightRef}>
             <p className="settings-row-subtitle">
               {t("settings.backup.preflight.latestInternal", {
                 time: formatSyncDateTime(
@@ -2118,6 +2384,16 @@ export function ReminderSettings({
                 ),
               })}
             </p>
+            {backupPreflight.latest_backup_summary && (
+              <p className="settings-row-subtitle">
+                {t("settings.backup.preflight.latestSummary", {
+                  projects: backupPreflight.latest_backup_summary.projects,
+                  tasks: backupPreflight.latest_backup_summary.tasks,
+                  templates:
+                    backupPreflight.latest_backup_summary.task_templates,
+                })}
+              </p>
+            )}
             <p className="settings-row-subtitle">
               {t("settings.backup.preflight.pendingOutbox", {
                 count: backupPreflight.pending_outbox_changes,
@@ -2447,6 +2723,20 @@ export function ReminderSettings({
           gap: 8px;
           margin-bottom: 8px;
         }
+        .sync-conflict-defaults {
+          border: 1px solid var(--border-default);
+          border-radius: var(--radius-md);
+          background: var(--bg-surface);
+          padding: 10px;
+          margin-bottom: 10px;
+        }
+        .sync-conflict-defaults-grid {
+          display: grid;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 8px;
+          margin-top: 8px;
+          margin-bottom: 10px;
+        }
         .sync-conflict-list {
           display: grid;
           gap: 8px;
@@ -2663,6 +2953,9 @@ export function ReminderSettings({
           .sync-conflicts-head {
             align-items: flex-start;
             flex-direction: column;
+          }
+          .sync-conflict-defaults-grid {
+            grid-template-columns: 1fr;
           }
           .sync-conflict-payload-grid {
             grid-template-columns: 1fr;

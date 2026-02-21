@@ -2,9 +2,9 @@ import { useEffect, useRef } from "react";
 import {
   isPermissionGranted,
   onAction,
+  registerActionTypes,
   requestPermission,
   sendNotification,
-  type Options as NotificationOptions,
 } from "@tauri-apps/plugin-notification";
 import type { PluginListener } from "@tauri-apps/api/core";
 import { translate } from "@/lib/i18n";
@@ -17,8 +17,23 @@ import {
 export const REMINDER_CHECK_INTERVAL_MS = 30 * 1000;
 const REMINDER_HISTORY_RETENTION_MS = 14 * 24 * 60 * 60 * 1000;
 const REMINDER_HISTORY_MAX_SIZE = 500;
+const REMINDER_ACTION_TYPE_ID = "solostack.task-reminder";
+const REMINDER_SNOOZE_ACTION_IDS = {
+  MINUTES_15: "snooze_15m",
+  HOUR_1: "snooze_1h",
+  TOMORROW: "snooze_tomorrow",
+} as const;
 
 export type NotificationPermissionState = "unknown" | "granted" | "denied";
+export type ReminderSnoozePreset =
+  | "SNOOZE_15_MINUTES"
+  | "SNOOZE_1_HOUR"
+  | "SNOOZE_TOMORROW";
+
+interface ReminderActionPayload {
+  taskId: string;
+  actionId: string;
+}
 
 interface ReminderHistoryEntry {
   notifiedAt: string;
@@ -34,6 +49,17 @@ function parseDateTime(value: string | null): Date | null {
   const parsedDate = new Date(value);
   if (Number.isNaN(parsedDate.getTime())) return null;
   return parsedDate;
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  if (!value || typeof value !== "object") return null;
+  return value as Record<string, unknown>;
+}
+
+function asNonEmptyString(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const normalized = value.trim();
+  return normalized.length > 0 ? normalized : null;
 }
 
 function getReminderSignature(task: Task): string | null {
@@ -219,14 +245,64 @@ function buildReminderBody(task: Task, locale: AppLocale): string {
   return `${task.title}\n${translate(locale, "reminder.dueAt", { dueAt: dueLabel })}`;
 }
 
-function getTaskIdFromNotification(
-  notification: NotificationOptions,
-): string | null {
-  const maybeTaskId = notification.extra?.taskId;
-  if (typeof maybeTaskId === "string" && maybeTaskId.trim().length > 0) {
-    return maybeTaskId;
+function parseReminderActionPayload(
+  input: unknown,
+): ReminderActionPayload | null {
+  const payload = asRecord(input);
+  if (!payload) return null;
+
+  const topLevelTaskId = asNonEmptyString(
+    asRecord(payload.extra)?.taskId ?? payload.taskId,
+  );
+  const notificationPayload = asRecord(payload.notification);
+  const nestedTaskId = asNonEmptyString(
+    asRecord(notificationPayload?.extra)?.taskId ??
+      asRecord(notificationPayload?.data)?.taskId,
+  );
+  const taskId = topLevelTaskId ?? nestedTaskId;
+  if (!taskId) return null;
+
+  const actionId = asNonEmptyString(payload.actionId) ?? "tap";
+  return { taskId, actionId };
+}
+
+function toSnoozePreset(actionId: string): ReminderSnoozePreset | null {
+  if (actionId === REMINDER_SNOOZE_ACTION_IDS.MINUTES_15) {
+    return "SNOOZE_15_MINUTES";
+  }
+  if (actionId === REMINDER_SNOOZE_ACTION_IDS.HOUR_1) {
+    return "SNOOZE_1_HOUR";
+  }
+  if (actionId === REMINDER_SNOOZE_ACTION_IDS.TOMORROW) {
+    return "SNOOZE_TOMORROW";
   }
   return null;
+}
+
+async function registerReminderActionTypes(locale: AppLocale): Promise<void> {
+  try {
+    await registerActionTypes([
+      {
+        id: REMINDER_ACTION_TYPE_ID,
+        actions: [
+          {
+            id: REMINDER_SNOOZE_ACTION_IDS.MINUTES_15,
+            title: translate(locale, "reminder.action.snooze15m"),
+          },
+          {
+            id: REMINDER_SNOOZE_ACTION_IDS.HOUR_1,
+            title: translate(locale, "reminder.action.snooze1h"),
+          },
+          {
+            id: REMINDER_SNOOZE_ACTION_IDS.TOMORROW,
+            title: translate(locale, "reminder.action.snoozeTomorrow"),
+          },
+        ],
+      },
+    ]);
+  } catch {
+    // Ignore if notification action registration is unavailable in this runtime.
+  }
 }
 
 function sendWebNotification(
@@ -261,6 +337,7 @@ function sendTaskReminderNotification(
       title,
       body,
       autoCancel: true,
+      actionTypeId: REMINDER_ACTION_TYPE_ID,
       extra: {
         source: "task-reminder",
         taskId: task.id,
@@ -312,6 +389,10 @@ export function useReminderNotifications(
     | AppLocale
     | ((taskId: string) => void) = "en",
   onTaskNotificationClick?: (taskId: string) => void,
+  onTaskReminderSnooze?: (input: {
+    taskId: string;
+    preset: ReminderSnoozePreset;
+  }) => void,
 ): void {
   const locale: AppLocale =
     typeof localeOrOnTaskNotificationClick === "function"
@@ -324,8 +405,10 @@ export function useReminderNotifications(
 
   const tasksRef = useRef(tasks);
   const onTaskNotificationClickRef = useRef(onTaskNotificationClickResolved);
+  const onTaskReminderSnoozeRef = useRef(onTaskReminderSnooze);
   tasksRef.current = tasks;
   onTaskNotificationClickRef.current = onTaskNotificationClickResolved;
+  onTaskReminderSnoozeRef.current = onTaskReminderSnooze;
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -335,10 +418,22 @@ export function useReminderNotifications(
 
     const registerActionListener = async () => {
       try {
+        await registerReminderActionTypes(locale);
         const listener = await onAction((notification) => {
-          const taskId = getTaskIdFromNotification(notification);
-          if (!taskId) return;
-          onTaskNotificationClickRef.current?.(taskId);
+          const actionPayload = parseReminderActionPayload(notification);
+          if (!actionPayload) return;
+
+          const snoozePreset = toSnoozePreset(actionPayload.actionId);
+          if (snoozePreset) {
+            onTaskReminderSnoozeRef.current?.({
+              taskId: actionPayload.taskId,
+              preset: snoozePreset,
+            });
+            return;
+          }
+
+          if (actionPayload.actionId === "dismiss") return;
+          onTaskNotificationClickRef.current?.(actionPayload.taskId);
         });
 
         if (disposed) {
@@ -361,7 +456,7 @@ export function useReminderNotifications(
         actionListener = null;
       }
     };
-  }, []);
+  }, [locale]);
 
   useEffect(() => {
     if (!enabled || typeof window === "undefined") return;

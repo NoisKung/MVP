@@ -279,6 +279,39 @@ describe("database migration", () => {
     expect(runtimeProfile.runtime_profile).toBe("desktop");
   });
 
+  it("seeds migration diagnostics defaults on startup", async () => {
+    const database = await loadDatabaseModule({
+      namespace: `migration-diagnostics-${randomUUID()}`,
+      preseed: "none",
+    });
+
+    const diagnostics = await database.getMigrationDiagnosticsSetting();
+    expect(diagnostics).toEqual({
+      last_status: "not_checked",
+      last_error: null,
+      legacy_path_detected: false,
+      sync_write_blocked: false,
+    });
+  });
+
+  it("preserves migration diagnostics keys across backup import", async () => {
+    const database = await loadDatabaseModule({
+      namespace: `migration-preserve-${randomUUID()}`,
+      preseed: "none",
+    });
+
+    const diagnosticsBefore = await database.getMigrationDiagnosticsSetting();
+    const backupPayload = await database.exportBackupPayload();
+    backupPayload.data.settings = backupPayload.data.settings.filter(
+      (setting) => !setting.key.startsWith("migration."),
+    );
+
+    await database.importBackupPayload(backupPayload, { force: true });
+
+    const diagnosticsAfter = await database.getMigrationDiagnosticsSetting();
+    expect(diagnosticsAfter).toEqual(diagnosticsBefore);
+  });
+
   it("seeds mobile runtime profile default for legacy users", async () => {
     const database = await loadDatabaseModule({
       namespace: `runtime-mobile-${randomUUID()}`,

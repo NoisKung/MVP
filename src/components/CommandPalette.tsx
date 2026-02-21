@@ -7,9 +7,15 @@ interface CommandPaletteProps {
   isOpen: boolean;
   activeView: ViewMode;
   tasks: Task[];
+  syncNowDisabled: boolean;
+  exportBackupDisabled: boolean;
   onClose: () => void;
   onOpenCreate: () => void;
   onOpenQuickCapture: () => void;
+  onSyncNow: () => void;
+  onExportBackup: () => void;
+  onOpenSyncDiagnostics: () => void;
+  onOpenRestorePreflight: () => void;
   onEditTask: (task: Task) => void;
   onChangeTaskStatus: (taskId: string, status: TaskStatus) => void;
   onChangeView: (view: ViewMode) => void;
@@ -21,6 +27,7 @@ interface PaletteCommand {
   label: string;
   meta?: string;
   shortcut?: string;
+  disabled?: boolean;
   keywords: string;
   onSelect: () => void;
 }
@@ -80,9 +87,15 @@ export function CommandPalette({
   isOpen,
   activeView,
   tasks,
+  syncNowDisabled,
+  exportBackupDisabled,
   onClose,
   onOpenCreate,
   onOpenQuickCapture,
+  onSyncNow,
+  onExportBackup,
+  onOpenSyncDiagnostics,
+  onOpenRestorePreflight,
   onEditTask,
   onChangeTaskStatus,
   onChangeView,
@@ -130,6 +143,42 @@ export function CommandPalette({
           ? "บันทึก ด่วน quick capture inbox"
           : "quick capture capture inbox",
         onSelect: onOpenQuickCapture,
+      },
+      {
+        id: "action-sync-now",
+        group: groupActionsLabel,
+        label: t("commandPalette.action.syncNow"),
+        keywords: isTh ? "ซิงก์ sync ตอนนี้ ทันที" : "sync now run sync",
+        disabled: syncNowDisabled,
+        onSelect: onSyncNow,
+      },
+      {
+        id: "action-export-backup",
+        group: groupActionsLabel,
+        label: t("commandPalette.action.exportBackup"),
+        keywords: isTh
+          ? "สำรองข้อมูล backup export json"
+          : "backup export json",
+        disabled: exportBackupDisabled,
+        onSelect: onExportBackup,
+      },
+      {
+        id: "action-open-sync-diagnostics",
+        group: groupActionsLabel,
+        label: t("commandPalette.action.openSyncDiagnostics"),
+        keywords: isTh
+          ? "ซิงก์ diagnostics สุขภาพ สถิติ"
+          : "sync diagnostics health metrics",
+        onSelect: onOpenSyncDiagnostics,
+      },
+      {
+        id: "action-open-restore-preflight",
+        group: groupActionsLabel,
+        label: t("commandPalette.action.openRestorePreflight"),
+        keywords: isTh
+          ? "กู้คืน preflight backup restore"
+          : "restore preflight backup restore",
+        onSelect: onOpenRestorePreflight,
       },
       ...VIEW_COMMANDS.map((viewCommand) => ({
         id: `view-${viewCommand.view}`,
@@ -233,13 +282,19 @@ export function CommandPalette({
     onChangeTaskStatus,
     onChangeView,
     onEditTask,
+    onExportBackup,
     onOpenCreate,
+    onOpenRestorePreflight,
+    onOpenSyncDiagnostics,
     onOpenQuickCapture,
+    onSyncNow,
     locale,
+    exportBackupDisabled,
     groupActionsLabel,
     groupNavigationLabel,
     groupTasksLabel,
     isTh,
+    syncNowDisabled,
     t,
     viewLabelById,
   ]);
@@ -293,7 +348,7 @@ export function CommandPalette({
       if (event.key === "Enter") {
         event.preventDefault();
         const selectedCommand = commands[selectedIndex];
-        if (!selectedCommand) return;
+        if (!selectedCommand || selectedCommand.disabled) return;
         onClose();
         selectedCommand.onSelect();
       }
@@ -348,8 +403,10 @@ export function CommandPalette({
                   <button
                     type="button"
                     className={`command-item${isSelected ? " selected" : ""}`}
+                    disabled={command.disabled}
                     onMouseEnter={() => setSelectedIndex(index)}
                     onClick={() => {
+                      if (command.disabled) return;
                       onClose();
                       command.onSelect();
                     }}
@@ -460,6 +517,10 @@ export function CommandPalette({
           background: color-mix(in srgb, var(--accent-subtle) 80%, #0b1224);
           border-color: color-mix(in srgb, var(--accent) 55%, transparent);
           color: var(--text-primary);
+        }
+        .command-item:disabled {
+          opacity: 0.5;
+          cursor: not-allowed;
         }
         .command-main {
           display: flex;

@@ -1,13 +1,17 @@
 import {
+  DEFAULT_TASK_ACTIVE_SAVED_VIEW_IDS,
   applyTaskFilters,
   DEFAULT_TASK_FILTERS,
   DEFAULT_TASK_VIEW_FILTERS,
+  loadActiveSavedViewIdsFromStorage,
   loadSavedTaskViewsFromStorage,
   loadTaskViewFiltersFromStorage,
   normalizeTaskFilters,
   SAVED_TASK_VIEWS_STORAGE_KEY,
+  saveActiveSavedViewIdsToStorage,
   saveSavedTaskViewsToStorage,
   saveTaskViewFiltersToStorage,
+  TASK_ACTIVE_SAVED_VIEW_IDS_STORAGE_KEY,
   TASK_FILTERS_STORAGE_KEY,
   TASK_VIEW_FILTERS_STORAGE_KEY,
   TASK_VIEW_SORTS_STORAGE_KEY,
@@ -20,6 +24,7 @@ function clearFilterStorage(): void {
   window.localStorage.removeItem(TASK_VIEW_SORTS_STORAGE_KEY);
   window.localStorage.removeItem(TASK_VIEW_FILTERS_STORAGE_KEY);
   window.localStorage.removeItem(SAVED_TASK_VIEWS_STORAGE_KEY);
+  window.localStorage.removeItem(TASK_ACTIVE_SAVED_VIEW_IDS_STORAGE_KEY);
 }
 
 describe("task-filters", () => {
@@ -380,6 +385,37 @@ describe("task-filters", () => {
         sortBy: "UPDATED_DESC",
       }).map((task) => task.id),
     ).toEqual(["invalid-updated-newer", "invalid-updated-older"]);
+  });
+
+  it("loads and saves active saved-view ids safely", () => {
+    expect(loadActiveSavedViewIdsFromStorage()).toEqual(
+      DEFAULT_TASK_ACTIVE_SAVED_VIEW_IDS,
+    );
+
+    saveActiveSavedViewIdsToStorage({
+      board: "board-view",
+      today: "today-view",
+      upcoming: null,
+    });
+    expect(loadActiveSavedViewIdsFromStorage()).toEqual({
+      board: "board-view",
+      today: "today-view",
+      upcoming: null,
+    });
+
+    window.localStorage.setItem(
+      TASK_ACTIVE_SAVED_VIEW_IDS_STORAGE_KEY,
+      JSON.stringify({
+        board: "  ",
+        today: 123,
+        upcoming: "upcoming-view",
+      }),
+    );
+    expect(loadActiveSavedViewIdsFromStorage()).toEqual({
+      board: null,
+      today: null,
+      upcoming: "upcoming-view",
+    });
   });
 
   it("loads task view filters from new storage format", () => {

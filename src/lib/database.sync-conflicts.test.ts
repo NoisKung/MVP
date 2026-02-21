@@ -80,6 +80,42 @@ function createIncomingTaskChange(
 }
 
 describe("database sync conflict persistence", () => {
+  it("returns built-in conflict strategy defaults when not configured yet", async () => {
+    const defaults = await database.getSyncConflictStrategyDefaults();
+
+    expect(defaults).toEqual({
+      field_conflict: "keep_local",
+      delete_vs_update: "keep_local",
+      notes_collision: "manual_merge",
+      validation_error: "keep_local",
+    });
+  });
+
+  it("updates conflict strategy defaults and keeps unspecified values", async () => {
+    const first = await database.updateSyncConflictStrategyDefaults({
+      notes_collision: "keep_remote",
+    });
+    expect(first).toEqual({
+      field_conflict: "keep_local",
+      delete_vs_update: "keep_local",
+      notes_collision: "keep_remote",
+      validation_error: "keep_local",
+    });
+
+    const second = await database.updateSyncConflictStrategyDefaults({
+      field_conflict: "manual_merge",
+    });
+    expect(second).toEqual({
+      field_conflict: "manual_merge",
+      delete_vs_update: "keep_local",
+      notes_collision: "keep_remote",
+      validation_error: "keep_local",
+    });
+
+    const reloaded = await database.getSyncConflictStrategyDefaults();
+    expect(reloaded).toEqual(second);
+  });
+
   it("persists field_conflict when incoming task title is missing", async () => {
     const change = createIncomingTaskChange({
       payload: {

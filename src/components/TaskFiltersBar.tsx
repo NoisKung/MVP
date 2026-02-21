@@ -5,6 +5,7 @@ import type {
   TaskDueFilter,
   TaskFilterState,
   TaskPriority,
+  TaskRecurrence,
   TaskSortBy,
   TaskStatus,
 } from "@/lib/types";
@@ -21,6 +22,12 @@ import {
 const STATUS_OPTIONS: TaskStatus[] = ["TODO", "DOING", "DONE"];
 
 const PRIORITY_OPTIONS: TaskPriority[] = ["URGENT", "NORMAL", "LOW"];
+const RECURRENCE_OPTIONS: TaskRecurrence[] = [
+  "NONE",
+  "DAILY",
+  "WEEKLY",
+  "MONTHLY",
+];
 
 const DUE_FILTER_OPTIONS: TaskDueFilter[] = [
   "ALL",
@@ -46,6 +53,9 @@ interface TaskFiltersBarProps {
   hasActiveFilters: boolean;
   visibleTasks: number;
   totalTasks: number;
+  selectedTaskCount: number;
+  allVisibleSelected: boolean;
+  bulkEditBusy: boolean;
   onSearchChange: (search: string) => void;
   onToggleProject: (projectId: string) => void;
   onToggleStatus: (status: TaskStatus) => void;
@@ -57,6 +67,15 @@ interface TaskFiltersBarProps {
   onSaveCurrentView: (name: string) => SavedTaskView | null;
   onApplySavedView: (savedViewId: string) => void;
   onDeleteSavedView: (savedViewId: string) => void;
+  onToggleSelectAllVisible: () => void;
+  onClearSelectedTasks: () => void;
+  onBulkSetStatus: (status: TaskStatus) => void;
+  onBulkSetPriority: (priority: TaskPriority) => void;
+  onBulkSetProject: (projectId: string | null) => void;
+  onBulkSetImportant: (important: boolean) => void;
+  onBulkSetDueAt: (dueAt: string | null) => void;
+  onBulkSetRemindAt: (remindAt: string | null) => void;
+  onBulkSetRecurrence: (recurrence: TaskRecurrence) => void;
 }
 
 function isEditableEventTarget(target: EventTarget | null): boolean {
@@ -74,6 +93,9 @@ export function TaskFiltersBar({
   hasActiveFilters,
   visibleTasks,
   totalTasks,
+  selectedTaskCount,
+  allVisibleSelected,
+  bulkEditBusy,
   onSearchChange,
   onToggleProject,
   onToggleStatus,
@@ -85,6 +107,15 @@ export function TaskFiltersBar({
   onSaveCurrentView,
   onApplySavedView,
   onDeleteSavedView,
+  onToggleSelectAllVisible,
+  onClearSelectedTasks,
+  onBulkSetStatus,
+  onBulkSetPriority,
+  onBulkSetProject,
+  onBulkSetImportant,
+  onBulkSetDueAt,
+  onBulkSetRemindAt,
+  onBulkSetRecurrence,
 }: TaskFiltersBarProps) {
   const { t } = useI18n();
   const getStatusLabel = (status: TaskStatus): string => {
@@ -96,6 +127,12 @@ export function TaskFiltersBar({
     if (priority === "URGENT") return t("taskForm.priority.urgent");
     if (priority === "LOW") return t("taskForm.priority.low");
     return t("taskForm.priority.normal");
+  };
+  const getRecurrenceLabel = (recurrence: TaskRecurrence): string => {
+    if (recurrence === "DAILY") return t("taskForm.recurrence.daily");
+    if (recurrence === "WEEKLY") return t("taskForm.recurrence.weekly");
+    if (recurrence === "MONTHLY") return t("taskForm.recurrence.monthly");
+    return t("taskForm.recurrence.none");
   };
   const getDueFilterLabel = (value: TaskDueFilter): string => {
     if (value === "ALL") return t("taskFilters.due.all");
@@ -121,12 +158,31 @@ export function TaskFiltersBar({
   };
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const [isFiltersOpen, setIsFiltersOpen] = useState(false);
+  const [bulkStatusDraft, setBulkStatusDraft] = useState<"" | TaskStatus>("");
+  const [bulkPriorityDraft, setBulkPriorityDraft] = useState<"" | TaskPriority>(
+    "",
+  );
+  const [bulkProjectDraft, setBulkProjectDraft] = useState("");
+  const [bulkDueAtDraft, setBulkDueAtDraft] = useState("");
+  const [bulkRemindAtDraft, setBulkRemindAtDraft] = useState("");
+  const [bulkRecurrenceDraft, setBulkRecurrenceDraft] = useState<
+    "" | TaskRecurrence
+  >("");
 
   useEffect(() => {
     if (hasActiveFilters) {
       setIsFiltersOpen(true);
     }
   }, [hasActiveFilters]);
+  useEffect(() => {
+    if (selectedTaskCount > 0) return;
+    setBulkStatusDraft("");
+    setBulkPriorityDraft("");
+    setBulkProjectDraft("");
+    setBulkDueAtDraft("");
+    setBulkRemindAtDraft("");
+    setBulkRecurrenceDraft("");
+  }, [selectedTaskCount]);
 
   const handleSaveViewClick = () => {
     const suggestedName =
@@ -142,6 +198,13 @@ export function TaskFiltersBar({
   const handleClearSearch = () => {
     onSearchChange("");
     searchInputRef.current?.focus();
+  };
+  const toIsoDateTime = (value: string): string | null => {
+    const normalizedValue = value.trim();
+    if (!normalizedValue) return null;
+    const parsedDate = new Date(normalizedValue);
+    if (Number.isNaN(parsedDate.getTime())) return null;
+    return parsedDate.toISOString();
   };
 
   useEffect(() => {
@@ -204,6 +267,26 @@ export function TaskFiltersBar({
           <button
             type="button"
             className="filters-btn"
+            onClick={onToggleSelectAllVisible}
+            disabled={visibleTasks === 0 || bulkEditBusy}
+          >
+            {allVisibleSelected
+              ? t("taskFilters.bulk.unselectShown")
+              : t("taskFilters.bulk.selectShown")}
+          </button>
+          {selectedTaskCount > 0 && (
+            <button
+              type="button"
+              className="filters-btn"
+              onClick={onClearSelectedTasks}
+              disabled={bulkEditBusy}
+            >
+              {t("taskFilters.bulk.clearSelected")}
+            </button>
+          )}
+          <button
+            type="button"
+            className="filters-btn"
             onClick={handleSaveViewClick}
           >
             <BookmarkPlus size={13} />
@@ -241,7 +324,183 @@ export function TaskFiltersBar({
             total: totalTasks,
           })}
         </span>
+        {selectedTaskCount > 0 && (
+          <span className="selected-count-chip">
+            {t("taskFilters.bulk.selectedCount", {
+              count: selectedTaskCount,
+            })}
+          </span>
+        )}
       </div>
+
+      {selectedTaskCount > 0 && (
+        <div className="bulk-edit-row">
+          <span className="filters-label">{t("taskFilters.bulk.title")}</span>
+          <div className="bulk-edit-controls">
+            <select
+              className="due-select"
+              value={bulkStatusDraft}
+              onChange={(event) => {
+                const value = event.target.value as "" | TaskStatus;
+                setBulkStatusDraft(value);
+                if (!value) return;
+                onBulkSetStatus(value);
+                setBulkStatusDraft("");
+              }}
+              disabled={bulkEditBusy}
+            >
+              <option value="">
+                {t("taskFilters.bulk.statusPlaceholder")}
+              </option>
+              {STATUS_OPTIONS.map((option) => (
+                <option key={option} value={option}>
+                  {getStatusLabel(option)}
+                </option>
+              ))}
+            </select>
+            <select
+              className="due-select"
+              value={bulkPriorityDraft}
+              onChange={(event) => {
+                const value = event.target.value as "" | TaskPriority;
+                setBulkPriorityDraft(value);
+                if (!value) return;
+                onBulkSetPriority(value);
+                setBulkPriorityDraft("");
+              }}
+              disabled={bulkEditBusy}
+            >
+              <option value="">
+                {t("taskFilters.bulk.priorityPlaceholder")}
+              </option>
+              {PRIORITY_OPTIONS.map((option) => (
+                <option key={option} value={option}>
+                  {getPriorityLabel(option)}
+                </option>
+              ))}
+            </select>
+            <select
+              className="due-select"
+              value={bulkProjectDraft}
+              onChange={(event) => {
+                const value = event.target.value;
+                setBulkProjectDraft(value);
+                if (!value) return;
+                onBulkSetProject(value === "__none__" ? null : value);
+                setBulkProjectDraft("");
+              }}
+              disabled={bulkEditBusy}
+            >
+              <option value="">
+                {t("taskFilters.bulk.projectPlaceholder")}
+              </option>
+              <option value="__none__">
+                {t("taskFilters.bulk.projectClear")}
+              </option>
+              {availableProjects.map((project) => (
+                <option key={project.id} value={project.id}>
+                  {project.name}
+                </option>
+              ))}
+            </select>
+            <button
+              type="button"
+              className="filter-chip"
+              onClick={() => onBulkSetImportant(true)}
+              disabled={bulkEditBusy}
+            >
+              {t("taskFilters.bulk.markImportant")}
+            </button>
+            <button
+              type="button"
+              className="filter-chip"
+              onClick={() => onBulkSetImportant(false)}
+              disabled={bulkEditBusy}
+            >
+              {t("taskFilters.bulk.unmarkImportant")}
+            </button>
+            <input
+              type="datetime-local"
+              className="bulk-datetime-input"
+              value={bulkDueAtDraft}
+              onChange={(event) => setBulkDueAtDraft(event.target.value)}
+              aria-label={t("taskFilters.bulk.duePlaceholder")}
+              disabled={bulkEditBusy}
+            />
+            <button
+              type="button"
+              className="filter-chip"
+              onClick={() => {
+                const dueAtIso = toIsoDateTime(bulkDueAtDraft);
+                if (!dueAtIso) return;
+                onBulkSetDueAt(dueAtIso);
+                setBulkDueAtDraft("");
+              }}
+              disabled={bulkEditBusy || !bulkDueAtDraft.trim()}
+            >
+              {t("taskFilters.bulk.setDue")}
+            </button>
+            <button
+              type="button"
+              className="filter-chip"
+              onClick={() => onBulkSetDueAt(null)}
+              disabled={bulkEditBusy}
+            >
+              {t("taskFilters.bulk.clearDue")}
+            </button>
+            <input
+              type="datetime-local"
+              className="bulk-datetime-input"
+              value={bulkRemindAtDraft}
+              onChange={(event) => setBulkRemindAtDraft(event.target.value)}
+              aria-label={t("taskFilters.bulk.reminderPlaceholder")}
+              disabled={bulkEditBusy}
+            />
+            <button
+              type="button"
+              className="filter-chip"
+              onClick={() => {
+                const remindAtIso = toIsoDateTime(bulkRemindAtDraft);
+                if (!remindAtIso) return;
+                onBulkSetRemindAt(remindAtIso);
+                setBulkRemindAtDraft("");
+              }}
+              disabled={bulkEditBusy || !bulkRemindAtDraft.trim()}
+            >
+              {t("taskFilters.bulk.setReminder")}
+            </button>
+            <button
+              type="button"
+              className="filter-chip"
+              onClick={() => onBulkSetRemindAt(null)}
+              disabled={bulkEditBusy}
+            >
+              {t("taskFilters.bulk.clearReminder")}
+            </button>
+            <select
+              className="due-select"
+              value={bulkRecurrenceDraft}
+              onChange={(event) => {
+                const value = event.target.value as "" | TaskRecurrence;
+                setBulkRecurrenceDraft(value);
+                if (!value) return;
+                onBulkSetRecurrence(value);
+                setBulkRecurrenceDraft("");
+              }}
+              disabled={bulkEditBusy}
+            >
+              <option value="">
+                {t("taskFilters.bulk.recurrencePlaceholder")}
+              </option>
+              {RECURRENCE_OPTIONS.map((option) => (
+                <option key={option} value={option}>
+                  {getRecurrenceLabel(option)}
+                </option>
+              ))}
+            </select>
+          </div>
+        </div>
+      )}
 
       {isFiltersOpen ? (
         <div id="advanced-filters-panel" className="filters-advanced">
@@ -412,6 +671,7 @@ export function TaskFiltersBar({
           display: flex;
           align-items: center;
           gap: 8px;
+          flex-wrap: wrap;
         }
         .search-wrap {
           flex: 1;
@@ -577,6 +837,18 @@ export function TaskFiltersBar({
           font-family: inherit;
           outline: none;
         }
+        .bulk-datetime-input {
+          border: 1px solid var(--border-default);
+          background: var(--bg-elevated);
+          color: var(--text-secondary);
+          border-radius: var(--radius-md);
+          height: 30px;
+          padding: 0 8px;
+          font-size: 12px;
+          font-family: inherit;
+          outline: none;
+          min-width: 178px;
+        }
         .important-chip {
           margin-left: 2px;
         }
@@ -613,6 +885,28 @@ export function TaskFiltersBar({
           font-size: 11px;
           font-variant-numeric: tabular-nums;
           padding-right: 2px;
+        }
+        .selected-count-chip {
+          border: 1px solid var(--accent);
+          background: var(--accent-subtle);
+          color: var(--accent);
+          border-radius: var(--radius-full);
+          font-size: 11px;
+          font-weight: 600;
+          padding: 3px 8px;
+          font-variant-numeric: tabular-nums;
+        }
+        .bulk-edit-row {
+          display: flex;
+          align-items: flex-start;
+          gap: 8px;
+          padding-top: 2px;
+        }
+        .bulk-edit-controls {
+          display: inline-flex;
+          align-items: center;
+          flex-wrap: wrap;
+          gap: 6px;
         }
 
         .saved-views-row {
@@ -687,6 +981,9 @@ export function TaskFiltersBar({
           }
           .filters-summary-row {
             align-items: center;
+          }
+          .bulk-edit-row {
+            flex-direction: column;
           }
           .filters-btn {
             flex: 1;

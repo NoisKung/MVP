@@ -120,9 +120,12 @@ describe("backup restore guardrails", () => {
   it("allows force restore and clears force-required preflight", async () => {
     await seedOpenConflict();
 
-    const result = await database.importBackupPayload(createEmptyBackupPayload(), {
-      force: true,
-    });
+    const result = await database.importBackupPayload(
+      createEmptyBackupPayload(),
+      {
+        force: true,
+      },
+    );
     expect(result).toEqual({
       settings: 0,
       projects: 0,
@@ -137,5 +140,39 @@ describe("backup restore guardrails", () => {
     expect(preflightAfterRestore.open_conflicts).toBe(0);
     expect(preflightAfterRestore.pending_outbox_changes).toBe(0);
     expect(preflightAfterRestore.requires_force_restore).toBe(false);
+  });
+
+  it("includes latest backup summary counts in restore preflight", async () => {
+    await database.importBackupPayload(createEmptyBackupPayload(), {
+      force: true,
+    });
+
+    const project = await database.createProject({
+      name: `Dry-run project ${randomUUID()}`,
+    });
+    await database.createTask({
+      title: "Dry-run summary task",
+      priority: "NORMAL",
+      is_important: false,
+      project_id: project.id,
+    });
+    await database.upsertTaskTemplate({
+      name: `Dry-run template ${randomUUID()}`,
+      priority: "NORMAL",
+      is_important: false,
+    });
+
+    const exportedPayload = await database.exportBackupPayload();
+    const preflight = await database.getBackupRestorePreflight();
+    expect(preflight.has_latest_backup).toBe(true);
+    expect(preflight.latest_backup_summary).toEqual({
+      settings: exportedPayload.data.settings.length,
+      projects: exportedPayload.data.projects.length,
+      tasks: exportedPayload.data.tasks.length,
+      sessions: exportedPayload.data.sessions.length,
+      task_subtasks: exportedPayload.data.task_subtasks.length,
+      task_changelogs: exportedPayload.data.task_changelogs.length,
+      task_templates: exportedPayload.data.task_templates.length,
+    });
   });
 });

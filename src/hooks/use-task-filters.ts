@@ -12,9 +12,11 @@ import type {
 } from "@/lib/types";
 import {
   DEFAULT_TASK_VIEW_FILTERS,
+  loadActiveSavedViewIdsFromStorage,
   loadSavedTaskViewsFromStorage,
   loadTaskViewFiltersFromStorage,
   normalizeTaskFilters,
+  saveActiveSavedViewIdsToStorage,
   saveSavedTaskViewsToStorage,
   saveTaskViewFiltersToStorage,
 } from "@/lib/task-filters";
@@ -51,12 +53,6 @@ function hasFiltersApplied(
 
 type ActiveSavedViewIds = Record<TaskSortableView, string | null>;
 
-const INITIAL_ACTIVE_SAVED_VIEW_IDS: ActiveSavedViewIds = {
-  board: null,
-  today: null,
-  upcoming: null,
-};
-
 interface UseTaskFiltersResult {
   filters: TaskFilterState;
   savedViews: SavedTaskView[];
@@ -85,7 +81,7 @@ export function useTaskFilters(activeView: ViewMode): UseTaskFiltersResult {
     loadSavedTaskViewsFromStorage(),
   );
   const [activeSavedViewIds, setActiveSavedViewIds] =
-    useState<ActiveSavedViewIds>(INITIAL_ACTIVE_SAVED_VIEW_IDS);
+    useState<ActiveSavedViewIds>(() => loadActiveSavedViewIdsFromStorage());
 
   useEffect(() => {
     saveTaskViewFiltersToStorage(viewFilters);
@@ -93,6 +89,38 @@ export function useTaskFilters(activeView: ViewMode): UseTaskFiltersResult {
 
   useEffect(() => {
     saveSavedTaskViewsToStorage(savedViews);
+  }, [savedViews]);
+  useEffect(() => {
+    saveActiveSavedViewIdsToStorage(activeSavedViewIds);
+  }, [activeSavedViewIds]);
+  useEffect(() => {
+    setActiveSavedViewIds((previousIds) => {
+      const isValidForScope = (
+        scope: TaskSortableView,
+        savedViewId: string | null,
+      ): string | null => {
+        if (!savedViewId) return null;
+        const hasSavedView = savedViews.some(
+          (savedView) =>
+            savedView.scope === scope && savedView.id === savedViewId,
+        );
+        return hasSavedView ? savedViewId : null;
+      };
+
+      const normalizedIds: ActiveSavedViewIds = {
+        board: isValidForScope("board", previousIds.board),
+        today: isValidForScope("today", previousIds.today),
+        upcoming: isValidForScope("upcoming", previousIds.upcoming),
+      };
+      if (
+        normalizedIds.board === previousIds.board &&
+        normalizedIds.today === previousIds.today &&
+        normalizedIds.upcoming === previousIds.upcoming
+      ) {
+        return previousIds;
+      }
+      return normalizedIds;
+    });
   }, [savedViews]);
 
   const filters = useMemo<TaskFilterState>(() => {

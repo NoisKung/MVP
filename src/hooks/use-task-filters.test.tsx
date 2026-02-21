@@ -81,6 +81,28 @@ describe("useTaskFilters", () => {
     expect(result.current.activeSavedViewId).toBeNull();
   });
 
+  it("rehydrates active saved view id across remounts", () => {
+    const { result, unmount } = renderHook(() => useTaskFilters("board"));
+
+    act(() => {
+      result.current.setSearch("persist-view");
+    });
+    let savedView: SavedTaskView | null = null;
+    act(() => {
+      savedView = result.current.saveCurrentFiltersAsView("Persisted");
+    });
+    expect(savedView).not.toBeNull();
+    expect(result.current.activeSavedViewId).toBe(savedView?.id ?? null);
+    unmount();
+
+    const { result: rehydratedResult } = renderHook(() =>
+      useTaskFilters("board"),
+    );
+    expect(rehydratedResult.current.activeSavedViewId).toBe(
+      savedView?.id ?? null,
+    );
+  });
+
   it("clears filters back to defaults", () => {
     const { result } = renderHook(() => useTaskFilters("today"));
 

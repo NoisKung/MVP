@@ -1,6 +1,7 @@
 import type {
   SavedTaskView,
   Task,
+  TaskActiveSavedViewIds,
   TaskDueFilter,
   TaskFilterState,
   TaskPriority,
@@ -14,6 +15,8 @@ export const TASK_FILTERS_STORAGE_KEY = "solostack.task-filters";
 export const SAVED_TASK_VIEWS_STORAGE_KEY = "solostack.saved-task-views";
 export const TASK_VIEW_FILTERS_STORAGE_KEY = "solostack.task-view-filters";
 export const TASK_VIEW_SORTS_STORAGE_KEY = "solostack.task-view-sorts";
+export const TASK_ACTIVE_SAVED_VIEW_IDS_STORAGE_KEY =
+  "solostack.task-active-saved-view-ids";
 
 const DAY_IN_MILLISECONDS = 24 * 60 * 60 * 1000;
 
@@ -48,6 +51,12 @@ export const DEFAULT_TASK_VIEW_FILTERS: TaskViewFilterPreferences = {
   board: { ...DEFAULT_TASK_FILTERS, sortBy: "CREATED_DESC" },
   today: { ...DEFAULT_TASK_FILTERS, sortBy: "DUE_ASC" },
   upcoming: { ...DEFAULT_TASK_FILTERS, sortBy: "DUE_ASC" },
+};
+
+export const DEFAULT_TASK_ACTIVE_SAVED_VIEW_IDS: TaskActiveSavedViewIds = {
+  board: null,
+  today: null,
+  upcoming: null,
 };
 
 const PRIORITY_RANKING: Record<TaskPriority, number> = {
@@ -474,6 +483,52 @@ export function saveSavedTaskViewsToStorage(savedViews: SavedTaskView[]): void {
     window.localStorage.setItem(
       SAVED_TASK_VIEWS_STORAGE_KEY,
       JSON.stringify(normalizedViews),
+    );
+  } catch {
+    // Ignore storage quota and serialization errors.
+  }
+}
+
+function normalizeActiveSavedViewId(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const normalized = value.trim();
+  return normalized || null;
+}
+
+export function loadActiveSavedViewIdsFromStorage(): TaskActiveSavedViewIds {
+  if (typeof window === "undefined") {
+    return { ...DEFAULT_TASK_ACTIVE_SAVED_VIEW_IDS };
+  }
+
+  try {
+    const raw = window.localStorage.getItem(
+      TASK_ACTIVE_SAVED_VIEW_IDS_STORAGE_KEY,
+    );
+    if (!raw) return { ...DEFAULT_TASK_ACTIVE_SAVED_VIEW_IDS };
+    const parsed = JSON.parse(raw) as Partial<TaskActiveSavedViewIds>;
+    return {
+      board: normalizeActiveSavedViewId(parsed.board),
+      today: normalizeActiveSavedViewId(parsed.today),
+      upcoming: normalizeActiveSavedViewId(parsed.upcoming),
+    };
+  } catch {
+    return { ...DEFAULT_TASK_ACTIVE_SAVED_VIEW_IDS };
+  }
+}
+
+export function saveActiveSavedViewIdsToStorage(
+  activeSavedViewIds: TaskActiveSavedViewIds,
+): void {
+  if (typeof window === "undefined") return;
+  try {
+    const normalized: TaskActiveSavedViewIds = {
+      board: normalizeActiveSavedViewId(activeSavedViewIds.board),
+      today: normalizeActiveSavedViewId(activeSavedViewIds.today),
+      upcoming: normalizeActiveSavedViewId(activeSavedViewIds.upcoming),
+    };
+    window.localStorage.setItem(
+      TASK_ACTIVE_SAVED_VIEW_IDS_STORAGE_KEY,
+      JSON.stringify(normalized),
     );
   } catch {
     // Ignore storage quota and serialization errors.
