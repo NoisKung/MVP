@@ -1,6 +1,6 @@
 # SoloStack Execution Planning
 
-อัปเดตล่าสุด: 2026-02-20
+อัปเดตล่าสุด: 2026-02-22
 แหล่งข้อมูลหลัก: `IDEA.md`
 
 ## 1) Planning Intent
@@ -72,7 +72,17 @@
   - เพิ่ม preset `Desktop` และ `Mobile Beta` สำหรับ tuning เร็ว
   - sync loop รองรับ adaptive interval ตาม foreground/background visibility
   - เพิ่ม mobile-aware runtime seed สำหรับ first launch บน iOS/Android
+  - harden runtime preset detection สำหรับ mobile:
+    - รองรับ `userAgentData.mobile`
+    - รองรับ iPadOS desktop-style UA (`Macintosh`) + touch points
   - เพิ่ม `Sync Diagnostics (Session)` บน Settings เพื่อดู success rate/latency/failure streak ระหว่าง tuning
+  - เพิ่ม diagnostics ของ runtime preset source (`user_agent_data_mobile`, `user_agent_pattern`, `platform_pattern`, `ipad_touch_heuristic`, `fallback_desktop`)
+  - ผูก diagnostics snapshot เข้า conflict report export เพื่อวิเคราะห์ support ข้าม session ได้
+  - persist diagnostics history แบบ rolling ใน local DB และแนบเข้า support report payload
+  - เพิ่ม Settings UI แสดง diagnostics history ล่าสุด 5 รายการ (cross-session)
+  - เพิ่ม full-history controls (search + source/date filters + row limit) สำหรับ diagnostics triage
+  - เพิ่ม export แบบ filtered (`Export Filtered JSON`) จาก full-history view พร้อมแนบ filter metadata ในไฟล์
+  - เพิ่ม Playwright coverage สำหรับ diagnostics full-history export flow (filters + date-range validation + JSON payload)
   - เติม test coverage ของ runtime profile แล้ว (unit + Playwright)
 - คงเหลือ:
   - เตรียม mobile beta client ให้ใช้ contract + runtime profile ชุดเดียวกับ desktop
@@ -671,6 +681,7 @@ Validation Evidence:
 
 3) P3-2 Shared-Core Readiness [closed in this repo scope]
 - ปิด checklist readiness ฝั่ง shared-core/runtime contract
+- เพิ่ม source tracking ของ runtime preset detection ใน diagnostics เพื่อช่วย debug mobile auto-seed
 - สรุป artifact ที่ `docs/p3-2-mobile-beta-core-readiness-v0.1.md`
 - งานคงเหลือย้ายไป dedicated mobile client execution (นอก shared-core scope)
 
@@ -746,3 +757,37 @@ Validation Evidence:
 
 Next pending item to pull:
 - QoL Sprint C closed; pull next from P3-8 i18n expansion / rollout backlog
+
+## 17) P3-8 Incremental Update (2026-02-21)
+
+Completed in this pass:
+- เพิ่ม conflict reason localization ให้หน้า `Conflict Center` และ `Settings > Sync`:
+  - map `reason_code` จาก sync conflict เป็น i18n keys (TH/EN)
+  - ลดการแสดง raw English message ที่มาจาก backend/DB บนหน้า UI
+- เพิ่ม entity-type localization สำหรับ conflict label:
+  - map `entity_type` (`PROJECT/TASK/TASK_SUBTASK/TASK_TEMPLATE/SETTING`) เป็น label แปลตาม locale
+- เพิ่ม helper กลาง `src/lib/sync-conflict-message.ts` เพื่อใช้ร่วมกันทั้งสองหน้า
+- ปรับ timestamp formatter ใน `Settings > Sync` conflict UI ให้ใช้ app locale โดยตรง (TH/EN) แทน system locale เพื่อให้ตรงกับ `Conflict Center`
+- แปล copy ภาษาไทยใน `Settings > Sync Diagnostics` และ `Conflict Observability` เพื่อปิดจุดที่ยังเป็นอังกฤษใน flow sync/conflict
+- แปล copy ภาษาไทยเพิ่มใน `Settings > Sync Runtime/Provider` (profile labels, runtime limit labels, duration N/A, push/pull URL labels)
+- เก็บ copy ภาษาไทยเพิ่มใน `Settings > Sync` และ `Backup guardrails` (endpoint/provider hints, preflight/force-restore/dry-run wording)
+- ปรับศัพท์เทคนิคไทยให้สอดคล้องกันใน Sync (`URL ส่งข้อมูลขึ้น/ดึงข้อมูลลง`, `ขีดจำกัดการส่งขึ้น/ดึงลง`, หน่วยเวลาเป็นไทย)
+- sweep ภาษาไทยเพิ่มนอก Settings:
+  - `Conflict Center` labels (`Keep Local/Remote`, payload labels)
+  - `Command Palette` / `Shortcut Help` copy
+  - `Backup` คำว่า outbox ให้เป็นคิวขาออกที่อ่านง่ายขึ้น
+- ปรับ micro-copy ไทยที่ยังปนอังกฤษ (`Device ID`, `conflict_id`, `Markdown`, `Undo`, `E2E transport`)
+- ปรับคำสะกดไทยให้สม่ำเสมอ (`โปรเจกต์`) และแปล `diff` ในข้อความ manual merge
+- เก็บศัพท์ผสมอังกฤษในไทยเพิ่ม (`transport/outbox/push-pull`) ให้เป็นคำไทยที่สม่ำเสมอ
+- เพิ่ม governance test กันคำสะกด `โปรเจค` กลับมาใน locale ไทย
+- เพิ่ม unit tests สำหรับ helper:
+  - known reason code -> localized message
+  - unknown reason code -> raw message fallback
+  - empty reason/message -> `common.unknown` fallback
+  - known entity type -> localized label
+  - unknown entity type -> raw type fallback
+
+Validation Evidence:
+1. `npm run test -- --run src/lib/sync-conflict-message.test.ts src/lib/i18n.catalog.test.ts` passed
+2. `npm run test -- --run src/components/AppShell.test.tsx src/components/TaskCard.test.tsx src/lib/database.sessions.test.ts` passed
+3. `npm run build` passed

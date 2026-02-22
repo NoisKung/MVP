@@ -1,6 +1,6 @@
 # SoloStack Usage Guide
 
-อัปเดตล่าสุด: 2026-02-20
+อัปเดตล่าสุด: 2026-02-22
 
 ## 0) Manuals
 
@@ -60,6 +60,14 @@ Power shortcuts:
 - coverage ปัจจุบัน (TH/EN):
   - App shell + sidebar/status/autosave
   - Settings (header + language card)
+  - Settings > Sync (รวม Diagnostics + Conflict Observability)
+  - Settings > Sync Runtime/Provider labels (profile/limits/URL fields)
+  - Settings > Backup guardrails wording (preflight/force-restore/dry-run copy)
+  - Settings > Sync terminology consistency (Push/Pull + duration units in Thai)
+  - Conflict Center / Command Palette / Backup terms consistency (Local/Remote + outbox wording in Thai)
+  - Thai micro-copy cleanup for technical terms (Device ID / conflict_id / Markdown / Undo)
+  - Thai wording consistency for `โปรเจกต์` and manual merge `diff` copy
+  - Thai mixed-term cleanup (`transport`, `outbox`, `push/pull`) and keyboard phrasing (`Enter/Esc`)
   - Board
   - Today / Upcoming
   - Calendar
@@ -227,8 +235,14 @@ P3-2 runtime tuning (Settings > Sync > `Sync Runtime Profile`):
   - `Desktop Preset` (สมดุล responsiveness)
   - `Mobile Beta Preset` (ลด network/battery overhead)
 - first launch บน iOS/Android (ถ้ายังไม่เคยตั้งค่า runtime มาก่อน) จะ seed ค่าเริ่มต้นเป็น `Mobile Beta Preset` อัตโนมัติ
+- mobile preset detection รองรับทั้ง `userAgentData.mobile` และเคส iPadOS ที่รายงาน UA แบบ desktop (`Macintosh`) แต่มี touch points
 - background interval ต้องมากกว่าหรือเท่ากับ foreground interval
 - มี `Sync Diagnostics (Session)` ในหน้า Settings แสดง success rate, cycle latency, failure streak และ conflict cycles เพื่อช่วย tune mobile beta
+- diagnostics จะแสดง `Runtime preset source` ว่าตรวจจับจากอะไร (`user_agent_data_mobile`, `user_agent_pattern`, `platform_pattern`, `ipad_touch_heuristic`, `fallback_desktop`)
+- ระบบ persist diagnostics snapshots ลง local DB key `local.sync.session_diagnostics_history_v1` (history rolling สูงสุด 200 รายการ)
+- ในหน้า Settings จะมี `Diagnostics History (Latest 5)` ให้เห็น snapshot ย้อนหลังทันทีโดยไม่ต้อง export
+- กด `View Full History` เพื่อดูย้อนหลังแบบเต็ม พร้อมค้นหา, filter ตาม source, กรองช่วงวันที่ และเลือกจำนวน rows ที่ต้องการดู
+- กด `Export Filtered JSON` ในมุมมอง full history เพื่อดาวน์โหลด snapshot ตาม filter ปัจจุบัน (พร้อม metadata ของ filter/query/date-range)
 - มี `Conflict Observability` ในหน้าเดียวกัน แสดง total/open/resolved conflicts, resolution rate, median resolve time, และ retried/exported event counters
 
 Migration hardening (old -> new app identifier path):
@@ -339,6 +353,8 @@ console.log(summary);
 
 ในหน้า `Settings > Sync` และหน้า dedicated `Conflicts`:
 - แสดง open conflicts (ชนิด, entity, message, detected time)
+- `entity` และ `message` จะแปลตาม locale จาก `entity_type` และ `reason_code` ที่รู้จัก เพื่อลด raw English message ใน UI
+- `detected time` และเวลาใน timeline จะ format ตามภาษาแอป (`TH`/`EN`) เพื่อให้สอดคล้องทั้งหน้า Settings และหน้า Conflict Center
 - action ต่อรายการ:
   - `Keep Local`
   - `Keep Remote`
@@ -346,6 +362,8 @@ console.log(summary);
   - `Manual Merge` (เปิด side-by-side diff editor + merge actions + ช่อง merged content)
 - กด `Details` เพื่อดู payload (`local`/`remote`) และ timeline events ของ conflict นั้น
 - กด `Export Report` เพื่อดาวน์โหลด conflict report เป็น JSON (รวม events)
+- ไฟล์ export จะพ่วง `session_diagnostics` (รวม `runtime_preset_source`) และ metadata (`report_type`, `export_source`, `app_locale`) เพื่อช่วยวิเคราะห์ support ข้าม session
+- ไฟล์ export จะพ่วง `session_diagnostics_history` (snapshot ล่าสุดย้อนหลัง) เพื่อเทียบ trend ข้ามรอบ sync/ข้าม session
 - ทุกครั้งที่ export report ระบบจะเพิ่ม timeline event ประเภท `exported`
 - มี aggregate counters สำหรับ conflict lifecycle เพื่อช่วย monitor แนวโน้ม (resolution rate + median time-to-resolve)
 

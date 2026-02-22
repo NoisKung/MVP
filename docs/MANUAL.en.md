@@ -1,6 +1,6 @@
 # SoloStack User Manual (English)
 
-Last updated: 2026-02-19
+Last updated: 2026-02-22
 
 ## 1) Overview
 
@@ -177,6 +177,9 @@ In `Settings > Sync > Diagnostics`, you can see:
 - cycle duration
 - failure streak
 - conflict cycles
+- diagnostics history (latest 5 snapshots)
+- full history view with search, source/date filters, and row limit
+- `Export Filtered JSON` action from full history view (exports only currently filtered snapshots with filter metadata)
 - selected provider (for current sync loop)
 - provider selected events
 - runtime profile changed events
@@ -197,6 +200,9 @@ Supported actions:
   - Retry
   - Manual Merge
 - export report to JSON
+  - includes `session_diagnostics` snapshot (including `runtime_preset_source`)
+  - includes `session_diagnostics_history` (recent rolling snapshots across sessions)
+  - includes metadata: `report_type`, `export_source`, `app_locale`
 
 ## 10) Backup / Restore
 

@@ -28,6 +28,7 @@ import {
   exportSyncConflictReport,
   getBackupRestorePreflight,
   getSyncConflictObservabilityCounters,
+  getSyncSessionDiagnosticsHistory,
   importBackupPayload,
   listSyncConflicts,
   listSyncConflictEvents,
@@ -59,6 +60,7 @@ import type {
   SyncConflictObservabilityCounters,
   SyncConflictReportPayload,
   SyncConflictStatus,
+  SyncSessionDiagnosticsSnapshot,
   UpdateSyncConflictStrategyDefaultsInput,
   UpdateSyncEndpointSettingsInput,
   UpdateAppLocaleSettingInput,
@@ -100,6 +102,9 @@ const SYNC_CONFLICTS_KEY = ["sync-conflicts"] as const;
 const SYNC_CONFLICT_EVENTS_KEY = ["sync-conflict-events"] as const;
 const SYNC_CONFLICT_OBSERVABILITY_KEY = [
   "sync-conflict-observability",
+] as const;
+const SYNC_SESSION_DIAGNOSTICS_HISTORY_KEY = [
+  "sync-session-diagnostics-history",
 ] as const;
 const BACKUP_RESTORE_PREFLIGHT_KEY = ["backup-restore-preflight"] as const;
 
@@ -535,6 +540,15 @@ export function useSyncConflictObservability() {
     queryKey: SYNC_CONFLICT_OBSERVABILITY_KEY,
     queryFn: (): Promise<SyncConflictObservabilityCounters> =>
       getSyncConflictObservabilityCounters(),
+  });
+}
+
+/** Read recent sync diagnostics snapshots persisted in local settings */
+export function useSyncSessionDiagnosticsHistory(limit = 30) {
+  return useQuery({
+    queryKey: [...SYNC_SESSION_DIAGNOSTICS_HISTORY_KEY, limit],
+    queryFn: (): Promise<SyncSessionDiagnosticsSnapshot[]> =>
+      getSyncSessionDiagnosticsHistory(limit),
   });
 }
 

@@ -34,6 +34,9 @@ import type {
   SyncRuntimeProfilePreset,
   SyncRuntimeProfileSetting,
   SyncRuntimeProfileSettings,
+  SyncRuntimePresetDetectionSource,
+  SyncSessionDiagnostics,
+  SyncSessionDiagnosticsSnapshot,
   SyncRuntimeSettings,
   TaskStatus,
   TaskPriority,
@@ -170,6 +173,14 @@ const SYNC_RUNTIME_PROFILE_SETTINGS: SyncRuntimeProfileSetting[] = [
   "mobile_beta",
   "custom",
 ];
+const SYNC_RUNTIME_PRESET_DETECTION_SOURCES: SyncRuntimePresetDetectionSource[] =
+  [
+    "user_agent_data_mobile",
+    "user_agent_pattern",
+    "platform_pattern",
+    "ipad_touch_heuristic",
+    "fallback_desktop",
+  ];
 const DB_ERROR_CODES = {
   UNSUPPORTED_SYNC_ENTITY_TYPE: "DB_UNSUPPORTED_SYNC_ENTITY_TYPE",
   UNSUPPORTED_SYNC_OPERATION: "DB_UNSUPPORTED_SYNC_OPERATION",
@@ -222,6 +233,8 @@ const SYNC_SETTINGS_BACKGROUND_INTERVAL_SECONDS_KEY =
 const SYNC_SETTINGS_PUSH_LIMIT_KEY = "local.sync.push_limit";
 const SYNC_SETTINGS_PULL_LIMIT_KEY = "local.sync.pull_limit";
 const SYNC_SETTINGS_MAX_PULL_PAGES_KEY = "local.sync.max_pull_pages";
+const SYNC_SESSION_DIAGNOSTICS_HISTORY_KEY =
+  "local.sync.session_diagnostics_history_v1";
 const SYNC_RUNTIME_SETTINGS_KEYS = [
   SYNC_SETTINGS_AUTO_INTERVAL_SECONDS_KEY,
   SYNC_SETTINGS_BACKGROUND_INTERVAL_SECONDS_KEY,
@@ -251,6 +264,7 @@ const DEFAULT_SYNC_CONFLICT_STRATEGY_DEFAULTS: SyncConflictStrategyDefaults = {
 const LOCAL_ONLY_SETTING_PREFIX = "local.";
 const SYNC_CONFLICT_EVENT_MAX_PER_CONFLICT = 200;
 const SYNC_CONFLICT_EVENT_RETENTION_DAYS = 90;
+const SYNC_SESSION_DIAGNOSTICS_HISTORY_MAX = 200;
 
 interface StartupMigrationReport {
   legacy_path_detected: boolean;
@@ -1076,6 +1090,131 @@ function asSyncRuntimeProfileSetting(
   return fallback;
 }
 
+function asNullableSyncProvider(value: unknown): SyncProvider | null {
+  if (typeof value !== "string") return null;
+  if (SYNC_PROVIDERS.includes(value as SyncProvider)) {
+    return value as SyncProvider;
+  }
+  return null;
+}
+
+function asNullableSyncRuntimeProfileSetting(
+  value: unknown,
+): SyncRuntimeProfileSetting | null {
+  if (typeof value !== "string") return null;
+  if (
+    SYNC_RUNTIME_PROFILE_SETTINGS.includes(value as SyncRuntimeProfileSetting)
+  ) {
+    return value as SyncRuntimeProfileSetting;
+  }
+  return null;
+}
+
+function asSyncRuntimePresetDetectionSourceOrNull(
+  value: unknown,
+): SyncRuntimePresetDetectionSource | null {
+  if (typeof value !== "string") return null;
+  if (
+    SYNC_RUNTIME_PRESET_DETECTION_SOURCES.includes(
+      value as SyncRuntimePresetDetectionSource,
+    )
+  ) {
+    return value as SyncRuntimePresetDetectionSource;
+  }
+  return null;
+}
+
+function asNonNegativeNumber(value: unknown, fallback = 0): number {
+  if (typeof value === "number" && Number.isFinite(value)) {
+    return Math.max(0, value);
+  }
+  if (typeof value === "string" && value.trim()) {
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) {
+      return Math.max(0, parsed);
+    }
+  }
+  return Math.max(0, fallback);
+}
+
+function normalizeSyncSessionDiagnosticsObject(
+  value: unknown,
+): SyncSessionDiagnostics | null {
+  if (!isPlainObject(value)) return null;
+
+  return {
+    total_cycles: Math.max(0, asIntegerOrDefault(value.total_cycles, 0)),
+    successful_cycles: Math.max(
+      0,
+      asIntegerOrDefault(value.successful_cycles, 0),
+    ),
+    failed_cycles: Math.max(0, asIntegerOrDefault(value.failed_cycles, 0)),
+    conflict_cycles: Math.max(0, asIntegerOrDefault(value.conflict_cycles, 0)),
+    consecutive_failures: Math.max(
+      0,
+      asIntegerOrDefault(value.consecutive_failures, 0),
+    ),
+    success_rate_percent: asNonNegativeNumber(value.success_rate_percent, 0),
+    last_cycle_duration_ms: asNullableInteger(value.last_cycle_duration_ms),
+    average_cycle_duration_ms: asNullableInteger(
+      value.average_cycle_duration_ms,
+    ),
+    last_attempt_at: asNullableString(value.last_attempt_at),
+    last_success_at: asNullableString(value.last_success_at),
+    selected_provider: asNullableSyncProvider(value.selected_provider),
+    runtime_profile: asNullableSyncRuntimeProfileSetting(value.runtime_profile),
+    runtime_preset_source: asSyncRuntimePresetDetectionSourceOrNull(
+      value.runtime_preset_source,
+    ),
+    provider_selected_events: Math.max(
+      0,
+      asIntegerOrDefault(value.provider_selected_events, 0),
+    ),
+    runtime_profile_changed_events: Math.max(
+      0,
+      asIntegerOrDefault(value.runtime_profile_changed_events, 0),
+    ),
+    validation_rejected_events: Math.max(
+      0,
+      asIntegerOrDefault(value.validation_rejected_events, 0),
+    ),
+    last_warning: asNullableString(value.last_warning),
+  };
+}
+
+function normalizeSyncSessionDiagnosticsSnapshot(
+  value: unknown,
+): SyncSessionDiagnosticsSnapshot | null {
+  if (!isPlainObject(value)) return null;
+
+  const diagnostics = normalizeSyncSessionDiagnosticsObject(value.diagnostics);
+  if (!diagnostics) return null;
+
+  return {
+    captured_at: asIsoDateStringOrNow(value.captured_at),
+    diagnostics,
+  };
+}
+
+function parseSyncSessionDiagnosticsHistoryValue(
+  value: unknown,
+): SyncSessionDiagnosticsSnapshot[] {
+  if (typeof value !== "string" || !value.trim()) return [];
+
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .map((entry) => normalizeSyncSessionDiagnosticsSnapshot(entry))
+      .filter((entry): entry is SyncSessionDiagnosticsSnapshot =>
+        Boolean(entry),
+      )
+      .slice(0, SYNC_SESSION_DIAGNOSTICS_HISTORY_MAX);
+  } catch {
+    return [];
+  }
+}
+
 function normalizeSyncProviderConfigObject(
   value: unknown,
 ): Record<string, unknown> | null {
@@ -1751,6 +1890,67 @@ export async function updateSyncRuntimeSettings(
     pull_limit: pullLimit,
     max_pull_pages: maxPullPages,
   };
+}
+
+async function readSyncSessionDiagnosticsHistoryFromDb(
+  db: Database,
+): Promise<SyncSessionDiagnosticsSnapshot[]> {
+  const rows = await db.select<AppSettingRecord[]>(
+    "SELECT key, value FROM settings WHERE key = $1 LIMIT 1",
+    [SYNC_SESSION_DIAGNOSTICS_HISTORY_KEY],
+  );
+  return parseSyncSessionDiagnosticsHistoryValue(rows[0]?.value ?? null);
+}
+
+export async function getSyncSessionDiagnosticsHistory(
+  limit = 30,
+): Promise<SyncSessionDiagnosticsSnapshot[]> {
+  const db = await getDb();
+  const normalizedLimit = Math.max(1, Math.min(200, Math.trunc(limit || 30)));
+  const history = await readSyncSessionDiagnosticsHistoryFromDb(db);
+  return history.slice(0, normalizedLimit);
+}
+
+export async function appendSyncSessionDiagnosticsSnapshot(
+  diagnostics: SyncSessionDiagnostics,
+  capturedAt?: string,
+): Promise<SyncSessionDiagnosticsSnapshot[]> {
+  const db = await getDb();
+  const normalizedDiagnostics =
+    normalizeSyncSessionDiagnosticsObject(diagnostics);
+  if (!normalizedDiagnostics) {
+    return getSyncSessionDiagnosticsHistory();
+  }
+
+  const nextSnapshot: SyncSessionDiagnosticsSnapshot = {
+    captured_at: asIsoDateStringOrNow(capturedAt),
+    diagnostics: normalizedDiagnostics,
+  };
+  const nextSnapshotSignature = JSON.stringify(nextSnapshot);
+
+  await db.execute("BEGIN IMMEDIATE");
+  try {
+    const currentHistory = await readSyncSessionDiagnosticsHistoryFromDb(db);
+    const dedupedHistory = currentHistory.filter(
+      (entry) => JSON.stringify(entry) !== nextSnapshotSignature,
+    );
+    const nextHistory = [nextSnapshot, ...dedupedHistory].slice(
+      0,
+      SYNC_SESSION_DIAGNOSTICS_HISTORY_MAX,
+    );
+
+    await db.execute(
+      `INSERT INTO settings (key, value)
+           VALUES ($1, $2)
+      ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+      [SYNC_SESSION_DIAGNOSTICS_HISTORY_KEY, JSON.stringify(nextHistory)],
+    );
+    await db.execute("COMMIT");
+    return nextHistory;
+  } catch (error) {
+    await db.execute("ROLLBACK");
+    throw error;
+  }
 }
 
 async function enqueueEntityUpsert(

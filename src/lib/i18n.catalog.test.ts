@@ -24,4 +24,11 @@ describe("i18n catalog governance", () => {
       }
     }
   });
+
+  it("keeps thai terminology consistent for project wording", () => {
+    const thaiMessages = Object.values(I18N_CATALOG.th);
+    for (const message of thaiMessages) {
+      expect(message.includes("โปรเจค")).toBe(false);
+    }
+  });
 });

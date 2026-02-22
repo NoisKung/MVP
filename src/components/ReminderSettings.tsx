@@ -28,6 +28,7 @@ import {
   useExportSyncConflictReport,
   useSyncConflictEvents,
   useSyncConflictObservability,
+  useSyncSessionDiagnosticsHistory,
 } from "@/hooks/use-tasks";
 import {
   buildManualMergeInitialText,
@@ -45,6 +46,7 @@ import type {
   SyncConflictResolutionStrategy,
   SyncConflictStrategyDefaults,
   SyncProvider,
+  SyncRuntimePresetDetectionSource,
   SyncRuntimeProfilePreset,
   SyncRuntimeProfileSetting,
   SyncSessionDiagnostics,
@@ -57,6 +59,16 @@ import type {
 import { summarizeUnknownBackupPayload } from "@/lib/backup-summary";
 import { translate, useI18n } from "@/lib/i18n";
 import { localizeErrorMessage } from "@/lib/error-message";
+import {
+  localizeSyncConflictEntityLabel,
+  localizeSyncConflictMessage,
+} from "@/lib/sync-conflict-message";
+import { attachSyncSessionDiagnosticsToConflictReport } from "@/lib/sync-report";
+import {
+  buildSyncSessionDiagnosticsHistoryExportPayload,
+  filterSyncSessionDiagnosticsHistory,
+  type SyncDiagnosticsHistorySourceFilter,
+} from "@/lib/sync-diagnostics-history";
 import { ManualMergeEditor } from "./ManualMergeEditor";
 
 interface ReminderSettingsProps {
@@ -90,6 +102,7 @@ interface ReminderSettingsProps {
   syncPullLimit: number;
   syncMaxPullPages: number;
   syncRuntimePreset: SyncRuntimeProfilePreset;
+  syncRuntimePresetSource: SyncRuntimePresetDetectionSource;
   syncRuntimeProfileSetting: SyncRuntimeProfileSetting;
   syncRuntimeProfileLoading: boolean;
   syncDiagnostics: SyncSessionDiagnostics;
@@ -163,6 +176,18 @@ const SYNC_CONFLICT_DEFAULT_TYPE_VALUES: Array<
   "notes_collision",
   "validation_error",
 ];
+
+const SYNC_DIAGNOSTICS_HISTORY_SOURCE_VALUES: SyncDiagnosticsHistorySourceFilter[] =
+  [
+    "all",
+    "user_agent_data_mobile",
+    "user_agent_pattern",
+    "platform_pattern",
+    "ipad_touch_heuristic",
+    "fallback_desktop",
+  ];
+
+const SYNC_DIAGNOSTICS_HISTORY_LIMIT_VALUES = [10, 30, 50, 100] as const;
 
 function getSyncProviderCapabilities(
   locale: AppLocale,
@@ -320,6 +345,46 @@ function getRuntimeProfileLabel(
   return translate(locale, "settings.sync.runtime.profile.desktop");
 }
 
+function getRuntimePresetSourceLabel(
+  source: SyncRuntimePresetDetectionSource | null | undefined,
+  locale: AppLocale,
+): string {
+  if (source === "user_agent_data_mobile") {
+    return translate(
+      locale,
+      "settings.sync.diagnostics.runtimePresetSource.userAgentData",
+    );
+  }
+  if (source === "user_agent_pattern") {
+    return translate(
+      locale,
+      "settings.sync.diagnostics.runtimePresetSource.userAgent",
+    );
+  }
+  if (source === "platform_pattern") {
+    return translate(
+      locale,
+      "settings.sync.diagnostics.runtimePresetSource.platform",
+    );
+  }
+  if (source === "ipad_touch_heuristic") {
+    return translate(
+      locale,
+      "settings.sync.diagnostics.runtimePresetSource.iPadHeuristic",
+    );
+  }
+  if (source === "fallback_desktop") {
+    return translate(
+      locale,
+      "settings.sync.diagnostics.runtimePresetSource.fallbackDesktop",
+    );
+  }
+  return translate(
+    locale,
+    "settings.sync.diagnostics.runtimePresetSource.unknown",
+  );
+}
+
 function getErrorMessage(error: unknown, locale: AppLocale): string {
   return localizeErrorMessage(error, locale, "common.error.unableRequest");
 }
@@ -346,7 +411,7 @@ function formatSyncDateTime(value: string | null, locale: AppLocale): string {
   if (Number.isNaN(parsedDate.getTime())) {
     return translate(locale, "common.unknown");
   }
-  return new Intl.DateTimeFormat(undefined, {
+  return new Intl.DateTimeFormat(locale === "th" ? "th-TH" : "en-US", {
     dateStyle: "medium",
     timeStyle: "short",
   }).format(parsedDate);
@@ -599,6 +664,7 @@ export function ReminderSettings({
   syncPullLimit,
   syncMaxPullPages,
   syncRuntimePreset,
+  syncRuntimePresetSource,
   syncRuntimeProfileSetting,
   syncRuntimeProfileLoading,
   syncDiagnostics,
@@ -679,9 +745,31 @@ export function ReminderSettings({
     string | null
   >(null);
   const [manualMergeDraft, setManualMergeDraft] = useState("");
+  const [isDiagnosticsHistoryExpanded, setIsDiagnosticsHistoryExpanded] =
+    useState(false);
+  const [diagnosticsHistorySourceFilter, setDiagnosticsHistorySourceFilter] =
+    useState<SyncDiagnosticsHistorySourceFilter>("all");
+  const [diagnosticsHistoryDisplayLimit, setDiagnosticsHistoryDisplayLimit] =
+    useState<number>(30);
+  const [diagnosticsHistorySearchQuery, setDiagnosticsHistorySearchQuery] =
+    useState("");
+  const [diagnosticsHistoryDateFrom, setDiagnosticsHistoryDateFrom] =
+    useState("");
+  const [diagnosticsHistoryDateTo, setDiagnosticsHistoryDateTo] = useState("");
+  const [diagnosticsHistoryFeedback, setDiagnosticsHistoryFeedback] = useState<
+    string | null
+  >(null);
+  const [diagnosticsHistoryError, setDiagnosticsHistoryError] = useState<
+    string | null
+  >(null);
+  const [isDiagnosticsHistoryExporting, setIsDiagnosticsHistoryExporting] =
+    useState(false);
   const syncDiagnosticsRef = useRef<HTMLDivElement | null>(null);
   const backupPreflightRef = useRef<HTMLDivElement | null>(null);
   const backupInputRef = useRef<HTMLInputElement | null>(null);
+  const diagnosticsHistoryFallbackCapturedAtRef = useRef<string>(
+    new Date().toISOString(),
+  );
   const backupRestorePreflight = useBackupRestorePreflight();
   const exportBackup = useExportBackup();
   const exportSyncConflicts = useExportSyncConflictReport();
@@ -697,6 +785,12 @@ export function ReminderSettings({
     data: selectedConflictEvents = [],
     isLoading: isConflictEventsLoading,
   } = useSyncConflictEvents(selectedConflict?.id, 100);
+  const {
+    data: syncDiagnosticsHistory = [],
+    isLoading: isSyncDiagnosticsHistoryLoading,
+    isError: isSyncDiagnosticsHistoryError,
+    refetch: refetchSyncDiagnosticsHistory,
+  } = useSyncSessionDiagnosticsHistory(200);
   const syncConflictObservability = useSyncConflictObservability();
   const conflictObservability = syncConflictObservability.data;
   const backupPreflight = backupRestorePreflight.data;
@@ -796,6 +890,72 @@ export function ReminderSettings({
     }
     return t("settings.sync.runtime.impact.low");
   }, [runtimeDraftNumbers, t]);
+  const diagnosticsHistorySourceOptions = useMemo(
+    () =>
+      SYNC_DIAGNOSTICS_HISTORY_SOURCE_VALUES.map((value) => ({
+        value,
+        label:
+          value === "all"
+            ? t("settings.sync.diagnostics.history.filter.all")
+            : getRuntimePresetSourceLabel(value, locale),
+      })),
+    [locale, t],
+  );
+  const syncDiagnosticsHistoryFallbackSnapshot = useMemo(() => {
+    if (!isSyncDiagnosticsHistoryError) return null;
+    const hasDiagnosticsSignal =
+      syncDiagnostics.total_cycles > 0 ||
+      syncDiagnostics.provider_selected_events > 0 ||
+      syncDiagnostics.runtime_profile_changed_events > 0 ||
+      syncDiagnostics.validation_rejected_events > 0 ||
+      syncDiagnostics.runtime_preset_source !== null ||
+      syncDiagnostics.last_warning !== null;
+    if (!hasDiagnosticsSignal) return null;
+
+    return {
+      captured_at:
+        syncDiagnostics.last_attempt_at ??
+        syncDiagnostics.last_success_at ??
+        diagnosticsHistoryFallbackCapturedAtRef.current,
+      diagnostics: {
+        ...syncDiagnostics,
+      },
+    };
+  }, [isSyncDiagnosticsHistoryError, syncDiagnostics]);
+  const effectiveSyncDiagnosticsHistory = useMemo(() => {
+    if (syncDiagnosticsHistory.length > 0) {
+      return syncDiagnosticsHistory;
+    }
+    if (!syncDiagnosticsHistoryFallbackSnapshot) {
+      return syncDiagnosticsHistory;
+    }
+    return [syncDiagnosticsHistoryFallbackSnapshot];
+  }, [syncDiagnosticsHistory, syncDiagnosticsHistoryFallbackSnapshot]);
+  const syncDiagnosticsHistoryPreview = useMemo(
+    () => effectiveSyncDiagnosticsHistory.slice(0, 5),
+    [effectiveSyncDiagnosticsHistory],
+  );
+  const syncDiagnosticsHistoryFilterResult = useMemo(
+    () =>
+      filterSyncSessionDiagnosticsHistory({
+        snapshots: effectiveSyncDiagnosticsHistory,
+        sourceFilter: diagnosticsHistorySourceFilter,
+        query: diagnosticsHistorySearchQuery,
+        dateFrom: diagnosticsHistoryDateFrom,
+        dateTo: diagnosticsHistoryDateTo,
+        limit: diagnosticsHistoryDisplayLimit,
+      }),
+    [
+      diagnosticsHistoryDateFrom,
+      diagnosticsHistoryDateTo,
+      diagnosticsHistoryDisplayLimit,
+      diagnosticsHistorySearchQuery,
+      diagnosticsHistorySourceFilter,
+      effectiveSyncDiagnosticsHistory,
+    ],
+  );
+  const syncDiagnosticsHistoryDisplayed =
+    syncDiagnosticsHistoryFilterResult.items;
 
   useEffect(() => {
     void refreshPermissionState(setPermissionState);
@@ -1322,15 +1482,24 @@ export function ReminderSettings({
     setConflictError(null);
 
     try {
+      const refreshedDiagnosticsHistory = await refetchSyncDiagnosticsHistory();
       const payload = await exportSyncConflicts.mutateAsync({
         status: "all",
         limit: 1000,
         eventsPerConflict: 100,
       });
-      const reportText = JSON.stringify(payload, null, 2);
+      const supportReport = attachSyncSessionDiagnosticsToConflictReport({
+        report: payload,
+        exportSource: "settings_sync",
+        locale,
+        sessionDiagnostics: syncDiagnostics,
+        sessionDiagnosticsHistory:
+          refreshedDiagnosticsHistory.data ?? effectiveSyncDiagnosticsHistory,
+      });
+      const reportText = JSON.stringify(supportReport, null, 2);
       const blob = new Blob([reportText], { type: "application/json" });
       const url = URL.createObjectURL(blob);
-      const safeTimestamp = payload.exported_at.replace(/[:.]/g, "-");
+      const safeTimestamp = supportReport.exported_at.replace(/[:.]/g, "-");
       const filename = `solostack-conflicts-${safeTimestamp}.json`;
       const link = document.createElement("a");
       link.href = url;
@@ -1342,11 +1511,60 @@ export function ReminderSettings({
 
       setConflictFeedback(
         t("conflictCenter.feedback.exported", {
-          count: payload.total_conflicts,
+          count: supportReport.total_conflicts,
         }),
       );
     } catch (error) {
       setConflictError(getErrorMessage(error, locale));
+    }
+  };
+
+  const handleExportFilteredDiagnosticsHistory = async () => {
+    setDiagnosticsHistoryFeedback(null);
+    setDiagnosticsHistoryError(null);
+
+    if (syncDiagnosticsHistoryFilterResult.date_range_invalid) {
+      setDiagnosticsHistoryError(
+        t("settings.sync.diagnostics.history.validation.dateRange"),
+      );
+      return;
+    }
+
+    setIsDiagnosticsHistoryExporting(true);
+    try {
+      const payload = buildSyncSessionDiagnosticsHistoryExportPayload({
+        locale,
+        snapshots: effectiveSyncDiagnosticsHistory,
+        sourceFilter: diagnosticsHistorySourceFilter,
+        query: diagnosticsHistorySearchQuery,
+        dateFrom: diagnosticsHistoryDateFrom,
+        dateTo: diagnosticsHistoryDateTo,
+        limit: diagnosticsHistoryDisplayLimit,
+      });
+      const reportText = JSON.stringify(payload, null, 2);
+      const blob = new Blob([reportText], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const safeTimestamp = payload.exported_at.replace(/[:.]/g, "-");
+      const filename = `solostack-sync-diagnostics-${safeTimestamp}.json`;
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 0);
+
+      setDiagnosticsHistoryFeedback(
+        t("settings.sync.diagnostics.history.feedback.exported", {
+          count: payload.total_exported,
+        }),
+      );
+    } catch (_error) {
+      setDiagnosticsHistoryError(
+        t("settings.sync.diagnostics.history.error.export"),
+      );
+    } finally {
+      setIsDiagnosticsHistoryExporting(false);
     }
   };
 
@@ -1668,7 +1886,7 @@ export function ReminderSettings({
                       {formatConflictTypeLabel(conflict.conflict_type, locale)}
                     </span>
                     <span className="sync-conflict-entity">
-                      {conflict.entity_type}:{conflict.entity_id}
+                      {localizeSyncConflictEntityLabel(conflict, locale)}
                     </span>
                     {selectedConflictId === conflict.id && (
                       <span className="sync-conflict-selected">
@@ -1676,7 +1894,9 @@ export function ReminderSettings({
                       </span>
                     )}
                   </div>
-                  <p className="sync-conflict-message">{conflict.message}</p>
+                  <p className="sync-conflict-message">
+                    {localizeSyncConflictMessage(conflict, locale)}
+                  </p>
                   <p className="settings-row-subtitle">
                     {t("conflictCenter.meta.detected")}:{" "}
                     {formatSyncDateTime(conflict.detected_at, locale)}
@@ -1753,7 +1973,7 @@ export function ReminderSettings({
                 {t("conflictCenter.detail.title")}
               </p>
               <p className="settings-row-subtitle">
-                {selectedConflict.entity_type}:{selectedConflict.entity_id} ·{" "}
+                {localizeSyncConflictEntityLabel(selectedConflict, locale)} ·{" "}
                 {formatConflictTypeLabel(
                   selectedConflict.conflict_type,
                   locale,
@@ -2161,6 +2381,15 @@ export function ReminderSettings({
               })}
             </p>
             <p className="settings-row-subtitle">
+              {t("settings.sync.diagnostics.runtimePresetSource", {
+                source: getRuntimePresetSourceLabel(
+                  syncDiagnostics.runtime_preset_source ??
+                    syncRuntimePresetSource,
+                  locale,
+                ),
+              })}
+            </p>
+            <p className="settings-row-subtitle">
               {t("settings.sync.diagnostics.runtimeProfile", {
                 profile: getRuntimeProfileLabel(
                   syncRuntimeProfileDraft,
@@ -2231,6 +2460,276 @@ export function ReminderSettings({
                   value: syncDiagnostics.last_warning,
                 })}
               </p>
+            )}
+          </div>
+          <div className="sync-diagnostics-history-card">
+            <p className="settings-row-title">
+              {t("settings.sync.diagnostics.history.title")}
+            </p>
+            {isSyncDiagnosticsHistoryLoading ? (
+              <p className="settings-row-subtitle">
+                {t("settings.sync.diagnostics.history.loading")}
+              </p>
+            ) : syncDiagnosticsHistoryPreview.length === 0 ? (
+              <p className="settings-row-subtitle">
+                {t("settings.sync.diagnostics.history.empty")}
+              </p>
+            ) : (
+              <div className="sync-diagnostics-history-list">
+                {syncDiagnosticsHistoryPreview.map((snapshot, index) => (
+                  <div
+                    className="sync-diagnostics-history-item"
+                    key={`${snapshot.captured_at}-${index}`}
+                  >
+                    <p className="settings-row-subtitle">
+                      {t("settings.sync.diagnostics.history.capturedAt", {
+                        time: formatSyncDateTime(snapshot.captured_at, locale),
+                      })}
+                    </p>
+                    <p className="settings-row-subtitle">
+                      {t("settings.sync.diagnostics.history.snapshot", {
+                        rate: snapshot.diagnostics.success_rate_percent.toFixed(
+                          1,
+                        ),
+                        failed: snapshot.diagnostics.failed_cycles,
+                        conflicts: snapshot.diagnostics.conflict_cycles,
+                        source: getRuntimePresetSourceLabel(
+                          snapshot.diagnostics.runtime_preset_source,
+                          locale,
+                        ),
+                      })}
+                    </p>
+                  </div>
+                ))}
+              </div>
+            )}
+            {isSyncDiagnosticsHistoryError && (
+              <p className="settings-feedback settings-feedback-error">
+                {t("settings.sync.diagnostics.history.error")}
+              </p>
+            )}
+            <div className="settings-actions settings-actions-single">
+              <button
+                type="button"
+                className="settings-btn"
+                onClick={() =>
+                  setIsDiagnosticsHistoryExpanded((previous) => !previous)
+                }
+              >
+                {isDiagnosticsHistoryExpanded
+                  ? t("settings.sync.diagnostics.history.action.collapse")
+                  : t("settings.sync.diagnostics.history.action.expand")}
+              </button>
+            </div>
+            {isDiagnosticsHistoryExpanded && (
+              <div className="sync-diagnostics-history-expanded">
+                <div className="sync-diagnostics-history-controls">
+                  <label className="settings-field settings-field-wide">
+                    <span className="settings-field-label">
+                      {t("settings.sync.diagnostics.history.field.search")}
+                    </span>
+                    <input
+                      className="settings-input"
+                      type="search"
+                      value={diagnosticsHistorySearchQuery}
+                      placeholder={t(
+                        "settings.sync.diagnostics.history.placeholder.search",
+                      )}
+                      onChange={(event) =>
+                        setDiagnosticsHistorySearchQuery(event.target.value)
+                      }
+                    />
+                  </label>
+                  <label className="settings-field">
+                    <span className="settings-field-label">
+                      {t("settings.sync.diagnostics.history.field.source")}
+                    </span>
+                    <select
+                      className="settings-input settings-select"
+                      value={diagnosticsHistorySourceFilter}
+                      onChange={(event) =>
+                        setDiagnosticsHistorySourceFilter(
+                          event.target
+                            .value as SyncDiagnosticsHistorySourceFilter,
+                        )
+                      }
+                    >
+                      {diagnosticsHistorySourceOptions.map((option) => (
+                        <option value={option.value} key={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="settings-field">
+                    <span className="settings-field-label">
+                      {t("settings.sync.diagnostics.history.field.limit")}
+                    </span>
+                    <select
+                      className="settings-input settings-select"
+                      value={String(diagnosticsHistoryDisplayLimit)}
+                      onChange={(event) => {
+                        const nextValue = Number(event.target.value);
+                        if (!Number.isFinite(nextValue)) return;
+                        setDiagnosticsHistoryDisplayLimit(
+                          Math.max(1, Math.trunc(nextValue)),
+                        );
+                      }}
+                    >
+                      {SYNC_DIAGNOSTICS_HISTORY_LIMIT_VALUES.map((value) => (
+                        <option value={String(value)} key={value}>
+                          {value}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="settings-field">
+                    <span className="settings-field-label">
+                      {t("settings.sync.diagnostics.history.field.fromDate")}
+                    </span>
+                    <input
+                      className="settings-input"
+                      type="date"
+                      value={diagnosticsHistoryDateFrom}
+                      onChange={(event) =>
+                        setDiagnosticsHistoryDateFrom(event.target.value)
+                      }
+                    />
+                  </label>
+                  <label className="settings-field">
+                    <span className="settings-field-label">
+                      {t("settings.sync.diagnostics.history.field.toDate")}
+                    </span>
+                    <input
+                      className="settings-input"
+                      type="date"
+                      value={diagnosticsHistoryDateTo}
+                      onChange={(event) =>
+                        setDiagnosticsHistoryDateTo(event.target.value)
+                      }
+                    />
+                  </label>
+                </div>
+                <div className="settings-actions">
+                  <button
+                    type="button"
+                    className="settings-btn"
+                    onClick={() => {
+                      setDiagnosticsHistoryFeedback(null);
+                      setDiagnosticsHistoryError(null);
+                      setDiagnosticsHistorySourceFilter("all");
+                      setDiagnosticsHistorySearchQuery("");
+                      setDiagnosticsHistoryDateFrom("");
+                      setDiagnosticsHistoryDateTo("");
+                      setDiagnosticsHistoryDisplayLimit(30);
+                    }}
+                  >
+                    {t("settings.sync.diagnostics.history.action.clearFilters")}
+                  </button>
+                  <button
+                    type="button"
+                    className="settings-btn"
+                    onClick={() =>
+                      void handleExportFilteredDiagnosticsHistory()
+                    }
+                    disabled={
+                      isDiagnosticsHistoryExporting ||
+                      syncDiagnosticsHistoryDisplayed.length === 0 ||
+                      syncDiagnosticsHistoryFilterResult.date_range_invalid
+                    }
+                  >
+                    <Download size={14} />
+                    {isDiagnosticsHistoryExporting
+                      ? t("settings.sync.diagnostics.history.action.exporting")
+                      : t(
+                          "settings.sync.diagnostics.history.action.exportFiltered",
+                        )}
+                  </button>
+                </div>
+                {diagnosticsHistoryFeedback && (
+                  <p className="settings-feedback">
+                    {diagnosticsHistoryFeedback}
+                  </p>
+                )}
+                {diagnosticsHistoryError && (
+                  <p className="settings-feedback settings-feedback-error">
+                    {diagnosticsHistoryError}
+                  </p>
+                )}
+                {syncDiagnosticsHistoryFilterResult.date_range_invalid && (
+                  <p className="settings-feedback settings-feedback-error">
+                    {t(
+                      "settings.sync.diagnostics.history.validation.dateRange",
+                    )}
+                  </p>
+                )}
+                <p className="settings-row-subtitle sync-diagnostics-history-meta">
+                  {t("settings.sync.diagnostics.history.meta", {
+                    shown: syncDiagnosticsHistoryDisplayed.length,
+                    total: syncDiagnosticsHistoryFilterResult.total_filtered,
+                  })}
+                </p>
+                {syncDiagnosticsHistoryDisplayed.length === 0 ? (
+                  <p className="settings-row-subtitle">
+                    {t("settings.sync.diagnostics.history.emptyFiltered")}
+                  </p>
+                ) : (
+                  <div className="sync-diagnostics-history-full-list">
+                    {syncDiagnosticsHistoryDisplayed.map((snapshot, index) => {
+                      const runtimeProfileLabel =
+                        snapshot.diagnostics.runtime_profile !== null
+                          ? getRuntimeProfileLabel(
+                              snapshot.diagnostics.runtime_profile,
+                              locale,
+                            )
+                          : t("settings.sync.diagnostics.notSelectedYet");
+                      const providerLabel =
+                        snapshot.diagnostics.selected_provider !== null
+                          ? (syncProviderCapabilities[
+                              snapshot.diagnostics.selected_provider
+                            ]?.label ?? snapshot.diagnostics.selected_provider)
+                          : t("settings.sync.diagnostics.notSelectedYet");
+                      return (
+                        <div
+                          className="sync-diagnostics-history-item"
+                          key={`full-${snapshot.captured_at}-${index}`}
+                        >
+                          <p className="settings-row-subtitle">
+                            {t("settings.sync.diagnostics.history.capturedAt", {
+                              time: formatSyncDateTime(
+                                snapshot.captured_at,
+                                locale,
+                              ),
+                            })}
+                          </p>
+                          <p className="settings-row-subtitle">
+                            {t("settings.sync.diagnostics.history.snapshot", {
+                              rate: snapshot.diagnostics.success_rate_percent.toFixed(
+                                1,
+                              ),
+                              failed: snapshot.diagnostics.failed_cycles,
+                              conflicts: snapshot.diagnostics.conflict_cycles,
+                              source: getRuntimePresetSourceLabel(
+                                snapshot.diagnostics.runtime_preset_source,
+                                locale,
+                              ),
+                            })}
+                          </p>
+                          <p className="settings-row-subtitle">
+                            {t(
+                              "settings.sync.diagnostics.history.profileProvider",
+                              {
+                                profile: runtimeProfileLabel,
+                                provider: providerLabel,
+                              },
+                            )}
+                          </p>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
             )}
           </div>
           <div className="sync-observability-card">
@@ -2882,6 +3381,46 @@ export function ReminderSettings({
           margin-top: 10px;
           padding-top: 10px;
         }
+        .sync-diagnostics-history-card {
+          border-top: 1px solid var(--border-default);
+          margin-top: 10px;
+          padding-top: 10px;
+        }
+        .sync-diagnostics-history-list {
+          display: grid;
+          gap: 8px;
+          margin-top: 6px;
+        }
+        .sync-diagnostics-history-expanded {
+          border-top: 1px dashed var(--border-default);
+          margin-top: 8px;
+          padding-top: 10px;
+        }
+        .sync-diagnostics-history-controls {
+          display: grid;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 8px;
+          margin-bottom: 8px;
+        }
+        .sync-diagnostics-history-controls .settings-field-wide {
+          grid-column: 1 / -1;
+        }
+        .sync-diagnostics-history-meta {
+          margin-bottom: 8px;
+        }
+        .sync-diagnostics-history-full-list {
+          display: grid;
+          gap: 8px;
+          max-height: 280px;
+          overflow: auto;
+          padding-right: 2px;
+        }
+        .sync-diagnostics-history-item {
+          border: 1px solid var(--border-default);
+          border-radius: var(--radius-md);
+          background: var(--bg-elevated);
+          padding: 8px;
+        }
         .sync-runtime-head {
           margin-bottom: 8px;
         }
@@ -2964,6 +3503,9 @@ export function ReminderSettings({
             grid-template-columns: 1fr;
           }
           .sync-provider-grid {
+            grid-template-columns: 1fr;
+          }
+          .sync-diagnostics-history-controls {
             grid-template-columns: 1fr;
           }
           .sync-endpoint-grid {

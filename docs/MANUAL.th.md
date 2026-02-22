@@ -1,6 +1,6 @@
 # SoloStack คู่มือการใช้งาน (ภาษาไทย)
 
-อัปเดตล่าสุด: 2026-02-19
+อัปเดตล่าสุด: 2026-02-22
 
 ## 1) ภาพรวม
 
@@ -177,6 +177,9 @@ Guardrails:
 - cycle duration
 - failure streak
 - conflict cycles
+- ประวัติการวิเคราะห์ย้อนหลัง (ล่าสุด 5 รายการ)
+- มุมมองประวัติแบบเต็ม พร้อมค้นหา/กรองที่มา/กรองช่วงวันที่ และจำนวนแถว
+- ปุ่ม `Export Filtered JSON` ในมุมมองประวัติแบบเต็ม (ส่งออกเฉพาะ snapshot ที่ตรงกับตัวกรองปัจจุบัน พร้อม metadata ของตัวกรอง)
 - selected provider (ใน sync loop)
 - provider selected events
 - runtime profile changed events
@@ -197,6 +200,9 @@ Guardrails:
   - Retry
   - Manual Merge
 - Export report เป็น JSON
+  - แนบ snapshot `session_diagnostics` (รวม `runtime_preset_source`)
+  - แนบ `session_diagnostics_history` (snapshot ย้อนหลังแบบ rolling ข้าม session)
+  - แนบ metadata: `report_type`, `export_source`, `app_locale`
 
 ## 10) Backup / Restore
 

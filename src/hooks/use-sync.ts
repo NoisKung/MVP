@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
-import { getSyncCheckpoint } from "@/lib/database";
+import {
+  appendSyncSessionDiagnosticsSnapshot,
+  getSyncCheckpoint,
+} from "@/lib/database";
 import { runLocalSyncCycle } from "@/lib/sync-service";
 import { resolveSyncTransportConfig } from "@/lib/sync-transport";
 import { translate } from "@/lib/i18n";
@@ -9,6 +12,7 @@ import type { RunSyncCycleSummary } from "@/lib/sync-runner";
 import type {
   AppLocale,
   SyncProvider,
+  SyncRuntimePresetDetectionSource,
   SyncRuntimeProfileSetting,
   SyncSessionDiagnostics,
   SyncStatus,
@@ -40,6 +44,7 @@ interface UseSyncOptions {
   provider: SyncProvider;
   providerConfig?: Record<string, unknown> | null;
   runtimeProfile: SyncRuntimeProfileSetting;
+  runtimePresetSource?: SyncRuntimePresetDetectionSource | null;
   syncWriteBlocked?: boolean;
   syncWriteBlockedReason?: string | null;
   timeoutMs?: number;
@@ -83,6 +88,7 @@ interface SyncSessionDiagnosticsUpdateInput {
 interface SyncConfigurationDiagnosticsInput {
   provider: SyncProvider;
   runtimeProfile: SyncRuntimeProfileSetting;
+  runtimePresetSource: SyncRuntimePresetDetectionSource | null;
   warning: string | null;
   providerChanged: boolean;
   runtimeProfileChanged: boolean;
@@ -256,6 +262,7 @@ export function createInitialSyncSessionDiagnostics(): SyncSessionDiagnostics {
     last_success_at: null,
     selected_provider: null,
     runtime_profile: null,
+    runtime_preset_source: null,
     provider_selected_events: 0,
     runtime_profile_changed_events: 0,
     validation_rejected_events: 0,
@@ -271,6 +278,7 @@ export function applySyncConfigurationDiagnostics(
     ...previous,
     selected_provider: input.provider,
     runtime_profile: input.runtimeProfile,
+    runtime_preset_source: input.runtimePresetSource,
     provider_selected_events:
       previous.provider_selected_events + (input.providerChanged ? 1 : 0),
     runtime_profile_changed_events:
@@ -477,6 +485,7 @@ export function useSync(options: UseSyncOptions): UseSyncState {
   const lastProviderRef = useRef<SyncProvider | null>(null);
   const lastRuntimeProfileRef = useRef<SyncRuntimeProfileSetting | null>(null);
   const lastValidationEventKeyRef = useRef<string | null>(null);
+  const lastDiagnosticsPersistenceSignatureRef = useRef<string | null>(null);
 
   useEffect(() => {
     if (resolvedTransportConfig.status !== "ready") return;
@@ -511,6 +520,7 @@ export function useSync(options: UseSyncOptions): UseSyncState {
       applySyncConfigurationDiagnostics(previous, {
         provider: options.provider,
         runtimeProfile: options.runtimeProfile,
+        runtimePresetSource: options.runtimePresetSource ?? null,
         warning,
         providerChanged,
         runtimeProfileChanged,
@@ -523,6 +533,7 @@ export function useSync(options: UseSyncOptions): UseSyncState {
     lastValidationEventKeyRef.current = nextValidationEventKey;
   }, [
     options.provider,
+    options.runtimePresetSource,
     options.runtimeProfile,
     resolvedTransportConfig.status,
     resolvedTransportConfig.warning,
@@ -530,6 +541,25 @@ export function useSync(options: UseSyncOptions): UseSyncState {
     syncWriteBlockedMessage,
     runtimeValidationRejected,
   ]);
+
+  useEffect(() => {
+    const hasDiagnosticsSignal =
+      diagnostics.total_cycles > 0 ||
+      diagnostics.provider_selected_events > 0 ||
+      diagnostics.runtime_profile_changed_events > 0 ||
+      diagnostics.validation_rejected_events > 0 ||
+      diagnostics.runtime_preset_source !== null ||
+      diagnostics.last_warning !== null;
+    if (!hasDiagnosticsSignal) return;
+
+    const signature = JSON.stringify(diagnostics);
+    if (signature === lastDiagnosticsPersistenceSignatureRef.current) return;
+    lastDiagnosticsPersistenceSignatureRef.current = signature;
+
+    void appendSyncSessionDiagnosticsSnapshot(diagnostics).catch(() => {
+      // Diagnostics persistence is best-effort and must not break sync loop UX.
+    });
+  }, [diagnostics]);
 
   const runSync = useCallback(
     async (manual: boolean) => {

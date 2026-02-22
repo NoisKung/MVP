@@ -300,6 +300,13 @@ export interface MigrationDiagnosticsSetting {
   sync_write_blocked: boolean;
 }
 
+export type SyncRuntimePresetDetectionSource =
+  | "user_agent_data_mobile"
+  | "user_agent_pattern"
+  | "platform_pattern"
+  | "ipad_touch_heuristic"
+  | "fallback_desktop";
+
 export interface SyncSessionDiagnostics {
   total_cycles: number;
   successful_cycles: number;
@@ -313,6 +320,7 @@ export interface SyncSessionDiagnostics {
   last_success_at: string | null;
   selected_provider: SyncProvider | null;
   runtime_profile: SyncRuntimeProfileSetting | null;
+  runtime_preset_source: SyncRuntimePresetDetectionSource | null;
   provider_selected_events: number;
   runtime_profile_changed_events: number;
   validation_rejected_events: number;
@@ -488,6 +496,23 @@ export interface SyncConflictReportPayload {
   total_conflicts: number;
   status_filter: SyncConflictStatus | "all";
   items: SyncConflictReportItem[];
+}
+
+export type SyncConflictReportExportSource =
+  | "settings_sync"
+  | "conflict_center";
+
+export interface SyncSessionDiagnosticsSnapshot {
+  captured_at: string;
+  diagnostics: SyncSessionDiagnostics;
+}
+
+export interface SyncConflictSupportReportPayload extends SyncConflictReportPayload {
+  report_type: "sync_conflict_support";
+  export_source: SyncConflictReportExportSource;
+  app_locale: AppLocale;
+  session_diagnostics: SyncSessionDiagnostics | null;
+  session_diagnostics_history: SyncSessionDiagnosticsSnapshot[];
 }
 
 export interface SyncConflictObservabilityCounters {

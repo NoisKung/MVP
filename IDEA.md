@@ -1,6 +1,6 @@
 # SoloStack Product Roadmap
 
-อัปเดตล่าสุด: 2026-02-20
+อัปเดตล่าสุด: 2026-02-22
 
 ## Product Principles
 
@@ -304,7 +304,17 @@
   - เพิ่ม preset `Desktop` และ `Mobile Beta`
   - เพิ่ม adaptive auto-sync interval ตาม foreground/background visibility
   - เพิ่ม mobile-aware runtime seed: เปิดบน iOS/Android ครั้งแรกจะได้ค่าเริ่มต้นแบบ mobile preset อัตโนมัติ
+  - harden mobile preset detection:
+    - รองรับเคส `userAgentData.mobile`
+    - รองรับ iPadOS ที่รายงาน UA เป็น `Macintosh` แต่มี touch points
   - เพิ่ม `Sync Diagnostics (Session)` ใน Settings (success rate, latency, failure streak, conflict cycles)
+  - เพิ่ม diagnostics ของที่มา preset detection (`user_agent_data_mobile`, `user_agent_pattern`, `platform_pattern`, `ipad_touch_heuristic`, `fallback_desktop`)
+  - ผูก diagnostics snapshot เข้า `Export conflict report` เพื่อช่วย support analysis ข้าม session
+  - เพิ่ม rolling history ของ diagnostics ใน local DB + แนบ `session_diagnostics_history` ในไฟล์ report
+  - เพิ่ม UI `Diagnostics History (Latest 5)` ในหน้า Settings สำหรับตรวจย้อนหลังโดยไม่ต้อง export
+  - เพิ่ม `View Full History` พร้อม search + source/date filters + row limit ในหน้า Settings
+  - เพิ่ม `Export Filtered JSON` ใน full-history view เพื่อส่งออก snapshot ตามตัวกรอง พร้อม metadata การกรอง
+  - เพิ่ม Playwright test สำหรับ full-history export flow (validation + filter metadata)
   - เพิ่ม test coverage: unit tests (runtime normalization/visibility behavior) + Playwright flow (preset/validation)
 - กำลังทำต่อ:
   - เตรียม mobile beta client ให้ใช้ contract/runtime tuning เดียวกับ desktop
@@ -313,6 +323,7 @@
 
 - เสร็จแล้ว (shared-core ใน repo นี้):
   - lock runtime preset parity (`desktop`/`mobile_beta`) และ guardrails ใน sync loop
+  - เพิ่ม source tracking สำหรับ runtime preset detection เพื่อ debug mobile auto-seed ได้ชัดเจนขึ้น
   - ครอบคลุม test matrix ฝั่ง core/runtime profile แล้ว
   - สรุป checklist readiness ไว้ที่ `docs/p3-2-mobile-beta-core-readiness-v0.1.md`
 - คงเหลือ:
@@ -678,6 +689,48 @@
   1. `npm run test`
   2. `npm run test:e2e`
   3. `npm run build`
+
+### P3-8 Progress Update (2026-02-21)
+
+- localize conflict reason codes ใน UI:
+  - `Conflict Center`
+  - `Settings > Sync > Conflict list`
+- เพิ่ม mapping helper กลาง `reason_code -> i18n key` เพื่อลดการแสดง raw English message ในหน้า UI
+- localize `entity_type` labels ใน conflict list/detail:
+  - จากค่า raw เช่น `TASK` -> label แปลตามภาษา (`Task` / `งาน`)
+- localize timestamp ใน conflict UI:
+  - detected time และ timeline event time จะแสดงผลตาม locale ที่ผู้ใช้เลือก (`TH`/`EN`) อย่างสอดคล้องทั้ง `Conflict Center` และ `Settings > Sync`
+- แปล copy ฝั่งไทยสำหรับ `Settings > Sync Diagnostics` และ `Conflict Observability` จากอังกฤษเป็นไทย
+- แปล label ฝั่งไทยใน `Settings > Sync Runtime/Provider` เพิ่มเติม:
+  - profile values (`Desktop`, `Mobile Beta`, `Custom`)
+  - runtime fields (`Push/Pull Limit`, `Max Pull Pages`)
+  - `N/A` duration และ `Push/Pull URL` labels
+- เก็บคำแปลไทยเพิ่มใน flow `Settings > Sync` และ `Backup guardrails`:
+  - endpoint/provider/runtime diagnostics copy
+  - preflight/force-restore/dry-run copy ให้ลดการปนอังกฤษ
+- ปรับคำศัพท์ไทยให้สม่ำเสมอใน Sync:
+  - `Push/Pull URL` -> `URL ส่งข้อมูลขึ้น/ดึงข้อมูลลง`
+  - `Push/Pull limit` -> `ขีดจำกัดการส่งขึ้น/ดึงลง`
+  - หน่วยเวลา runtime (`ms/s/min/h`) -> คำไทย
+- เก็บ sweep ภาษาไทยนอก Sync เพิ่ม:
+  - `Conflict Center` (`Local/Remote` -> `ฝั่งเครื่อง/ฝั่งเซิร์ฟเวอร์`)
+  - `Command Palette`/`Shortcut Help` wording
+  - `Backup guardrails` wording (`outbox` -> คิวขาออก)
+- เก็บ micro-copy ที่ค้างอังกฤษเพิ่ม:
+  - `Device ID`, `conflict_id`, `Markdown`, `Undo`, `E2E transport` ในข้อความไทย
+- ปรับถ้อยคำไทยให้สม่ำเสมอทั้งแอป:
+  - สะกด `โปรเจกต์` ให้ตรงกัน (แทน `โปรเจค`)
+  - แปลข้อความ `diff` ใน manual merge เป็นคำไทย
+- ทำ sweep คำผสมอังกฤษในไทยเพิ่ม:
+  - `transport` -> `ช่องทางรับส่ง`
+  - `outbox` -> `คิวขาออก`
+  - `push/pull` -> `ส่งขึ้น/ดึงลง`
+  - เพิ่มถ้อยคำปุ่มเป็น `กดปุ่ม Enter/Esc`
+- เพิ่ม i18n governance test กันสะกดคำไทยย้อนกลับ (`โปรเจค`)
+- เพิ่ม unit tests สำหรับ helper เพื่อยืนยัน behavior:
+  - known reason code -> localized message
+  - unknown reason code -> fallback raw message
+  - empty reason/message -> fallback `common.unknown`
 
 ## Upgrade Plan: Old -> New (Migration Track)
 

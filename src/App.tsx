@@ -76,7 +76,7 @@ import {
   setRemindersEnabledPreference,
 } from "./lib/reminder-settings";
 import { applyTaskFilters } from "./lib/task-filters";
-import { detectSyncRuntimeProfilePreset } from "./lib/runtime-platform";
+import { detectSyncRuntimeProfilePresetWithSource } from "./lib/runtime-platform";
 import { installE2EBridge } from "./lib/e2e-bridge";
 import {
   buildSyncPullRequest,
@@ -492,7 +492,11 @@ function AppContent() {
     () => isE2ETransportModeEnabled(),
     [],
   );
-  const syncRuntimePreset = useMemo(() => detectSyncRuntimeProfilePreset(), []);
+  const runtimePresetDetection = useMemo(
+    () => detectSyncRuntimeProfilePresetWithSource(),
+    [],
+  );
+  const syncRuntimePreset = runtimePresetDetection.preset;
   const {
     activeView,
     setActiveView,
@@ -718,6 +722,7 @@ function AppContent() {
     provider: effectiveSyncProvider,
     providerConfig: effectiveSyncProviderConfig,
     runtimeProfile: effectiveSyncRuntimeProfile,
+    runtimePresetSource: runtimePresetDetection.source,
     configReady:
       e2eBridgeEnabled && e2eTransportModeEnabled
         ? true
@@ -2526,6 +2531,7 @@ function AppContent() {
       syncConflictsLoading={visibleSyncConflictsLoading}
       syncConflictResolving={visibleSyncConflictResolving}
       syncConflictStrategyDefaults={effectiveSyncConflictStrategyDefaults}
+      syncDiagnostics={sync.diagnostics}
       onResolveSyncConflict={handleResolveSyncConflict}
       onOpenSyncSettings={() => setActiveView("settings")}
     />
@@ -2577,6 +2583,7 @@ function AppContent() {
       syncPullLimit={effectiveSyncRuntimeSettings.pull_limit}
       syncMaxPullPages={effectiveSyncRuntimeSettings.max_pull_pages}
       syncRuntimePreset={syncRuntimePreset}
+      syncRuntimePresetSource={runtimePresetDetection.source}
       syncRuntimeProfileSetting={effectiveSyncRuntimeProfile}
       syncRuntimeProfileLoading={
         e2eBridgeEnabled && e2eTransportModeEnabled

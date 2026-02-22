@@ -98,6 +98,7 @@ describe("sync session diagnostics", () => {
       last_success_at: null,
       selected_provider: null,
       runtime_profile: null,
+      runtime_preset_source: null,
       provider_selected_events: 0,
       runtime_profile_changed_events: 0,
       validation_rejected_events: 0,
@@ -127,6 +128,7 @@ describe("sync session diagnostics", () => {
       last_success_at: "2026-02-17T12:00:00.000Z",
       selected_provider: null,
       runtime_profile: null,
+      runtime_preset_source: null,
       provider_selected_events: 0,
       runtime_profile_changed_events: 0,
       validation_rejected_events: 0,
@@ -174,6 +176,7 @@ describe("sync session diagnostics", () => {
       last_success_at: "2026-02-17T12:00:00.000Z",
       selected_provider: null,
       runtime_profile: null,
+      runtime_preset_source: null,
       provider_selected_events: 0,
       runtime_profile_changed_events: 0,
       validation_rejected_events: 0,
@@ -187,6 +190,7 @@ describe("sync session diagnostics", () => {
       {
         provider: "provider_neutral",
         runtimeProfile: "desktop",
+        runtimePresetSource: "fallback_desktop",
         warning: null,
         providerChanged: true,
         runtimeProfileChanged: true,
@@ -197,6 +201,7 @@ describe("sync session diagnostics", () => {
     const updated = applySyncConfigurationDiagnostics(seeded, {
       provider: "google_appdata",
       runtimeProfile: "mobile_beta",
+      runtimePresetSource: "user_agent_data_mobile",
       warning: "Push and Pull URLs must both be set.",
       providerChanged: true,
       runtimeProfileChanged: true,
@@ -205,6 +210,7 @@ describe("sync session diagnostics", () => {
 
     expect(updated.selected_provider).toBe("google_appdata");
     expect(updated.runtime_profile).toBe("mobile_beta");
+    expect(updated.runtime_preset_source).toBe("user_agent_data_mobile");
     expect(updated.provider_selected_events).toBe(2);
     expect(updated.runtime_profile_changed_events).toBe(2);
     expect(updated.validation_rejected_events).toBe(1);

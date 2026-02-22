@@ -3,8 +3,14 @@ import { AlertTriangle, Download, RefreshCw, Settings2 } from "lucide-react";
 import { translate, useI18n } from "@/lib/i18n";
 import { localizeErrorMessage } from "@/lib/error-message";
 import {
+  localizeSyncConflictEntityLabel,
+  localizeSyncConflictMessage,
+} from "@/lib/sync-conflict-message";
+import { attachSyncSessionDiagnosticsToConflictReport } from "@/lib/sync-report";
+import {
   useExportSyncConflictReport,
   useSyncConflictEvents,
+  useSyncSessionDiagnosticsHistory,
 } from "@/hooks/use-tasks";
 import {
   buildManualMergeInitialText,
@@ -18,6 +24,7 @@ import type {
   SyncConflictRecord,
   SyncConflictResolutionStrategy,
   SyncConflictStrategyDefaults,
+  SyncSessionDiagnostics,
 } from "@/lib/types";
 import { ManualMergeEditor } from "./ManualMergeEditor";
 
@@ -26,6 +33,7 @@ interface ConflictCenterViewProps {
   syncConflictsLoading: boolean;
   syncConflictResolving: boolean;
   syncConflictStrategyDefaults: SyncConflictStrategyDefaults;
+  syncDiagnostics: SyncSessionDiagnostics;
   onResolveSyncConflict: (input: ResolveSyncConflictInput) => Promise<void>;
   onOpenSyncSettings: () => void;
 }
@@ -39,7 +47,7 @@ function formatSyncDateTime(value: string | null, locale: "en" | "th"): string {
   const parsedDate = new Date(value);
   if (Number.isNaN(parsedDate.getTime()))
     return translate(locale, "common.unknown");
-  return new Intl.DateTimeFormat(undefined, {
+  return new Intl.DateTimeFormat(locale === "th" ? "th-TH" : "en-US", {
     dateStyle: "medium",
     timeStyle: "short",
   }).format(parsedDate);
@@ -107,6 +115,7 @@ export function ConflictCenterView({
   syncConflictsLoading,
   syncConflictResolving,
   syncConflictStrategyDefaults,
+  syncDiagnostics,
   onResolveSyncConflict,
   onOpenSyncSettings,
 }: ConflictCenterViewProps) {
@@ -131,6 +140,10 @@ export function ConflictCenterView({
     data: selectedConflictEvents = [],
     isLoading: isConflictEventsLoading,
   } = useSyncConflictEvents(selectedConflict?.id, 100);
+  const {
+    data: syncDiagnosticsHistory = [],
+    refetch: refetchSyncDiagnosticsHistory,
+  } = useSyncSessionDiagnosticsHistory(30);
 
   useEffect(() => {
     if (syncConflicts.length === 0) {
@@ -248,15 +261,24 @@ export function ConflictCenterView({
     setConflictError(null);
 
     try {
+      const refreshedDiagnosticsHistory = await refetchSyncDiagnosticsHistory();
       const payload = await exportSyncConflicts.mutateAsync({
         status: "all",
         limit: 1000,
         eventsPerConflict: 100,
       });
-      const reportText = JSON.stringify(payload, null, 2);
+      const supportReport = attachSyncSessionDiagnosticsToConflictReport({
+        report: payload,
+        exportSource: "conflict_center",
+        locale,
+        sessionDiagnostics: syncDiagnostics,
+        sessionDiagnosticsHistory:
+          refreshedDiagnosticsHistory.data ?? syncDiagnosticsHistory,
+      });
+      const reportText = JSON.stringify(supportReport, null, 2);
       const blob = new Blob([reportText], { type: "application/json" });
       const url = URL.createObjectURL(blob);
-      const safeTimestamp = payload.exported_at.replace(/[:.]/g, "-");
+      const safeTimestamp = supportReport.exported_at.replace(/[:.]/g, "-");
       const filename = `solostack-conflicts-${safeTimestamp}.json`;
       const link = document.createElement("a");
       link.href = url;
@@ -268,7 +290,7 @@ export function ConflictCenterView({
 
       setConflictFeedback(
         t("conflictCenter.feedback.exported", {
-          count: payload.total_conflicts,
+          count: supportReport.total_conflicts,
         }),
       );
     } catch (error) {
@@ -334,7 +356,7 @@ export function ConflictCenterView({
                     {formatConflictTypeLabel(conflict.conflict_type, locale)}
                   </span>
                   <span className="conflict-center-entity">
-                    {conflict.entity_type}:{conflict.entity_id}
+                    {localizeSyncConflictEntityLabel(conflict, locale)}
                   </span>
                   {selectedConflictId === conflict.id && (
                     <span className="conflict-center-selected">
@@ -342,7 +364,9 @@ export function ConflictCenterView({
                     </span>
                   )}
                 </div>
-                <p className="conflict-center-message">{conflict.message}</p>
+                <p className="conflict-center-message">
+                  {localizeSyncConflictMessage(conflict, locale)}
+                </p>
                 <p className="conflict-center-meta">
                   {t("conflictCenter.meta.detected")}:{" "}
                   {formatSyncDateTime(conflict.detected_at, locale)}
@@ -418,7 +442,7 @@ export function ConflictCenterView({
                 {t("conflictCenter.detail.title")}
               </p>
               <p className="conflict-center-meta">
-                {selectedConflict.entity_type}:{selectedConflict.entity_id} ·{" "}
+                {localizeSyncConflictEntityLabel(selectedConflict, locale)} ·{" "}
                 {formatConflictTypeLabel(
                   selectedConflict.conflict_type,
                   locale,
