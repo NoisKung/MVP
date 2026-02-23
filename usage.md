@@ -332,7 +332,19 @@ console.log(summary);
   - `write`
   - `remove`
 - มี capability map ต่อ provider (`google_appdata`, `onedrive_approot`) และ helper สำหรับ normalize request bounds + error shape
-- ไฟล์นี้เป็น contract layer (ยังไม่ใช่ provider implementation จริง)
+- มี managed connector stubs รุ่นแรกใน:
+  - `src/lib/sync-provider-adapters.ts`
+  - `src/lib/sync-provider-auth.ts`
+- มี factory สำหรับสร้าง adapter จาก `sync.provider_config`:
+  - `src/lib/sync-provider-adapter-factory.ts`
+- รองรับ auth header + refresh token flow ใน adapter layer และ map error เป็น shape กลาง
+- ใน `Settings > Sync`:
+  - เมื่อเลือก `google_appdata` หรือ `onedrive_approot` จะมีฟอร์ม managed connector (base URL + token/auth fields)
+  - มีปุ่ม `Test Connector` สำหรับตรวจว่า connector endpoint เข้าถึงได้ก่อนบันทึกใช้งานจริง
+- test coverage:
+  - `src/lib/sync-provider-adapters.test.ts`
+  - `src/lib/sync-provider-auth.test.ts`
+  - `src/lib/sync-provider-adapter-factory.test.ts`
 
 ## 6) Sync Status Semantics
 
@@ -429,7 +441,10 @@ read tool endpoints:
 - `POST /tools` (generic route, ส่ง `tool` ผ่าน body)
 
 audit log baseline:
-- MCP จะเขียน structured log ต่อ 1 tool call ลง stdout (event `mcp.tool_call`)
+- MCP จะเขียน structured log ต่อ 1 tool call (event `mcp.tool_call`)
+- mode:
+  - `stdout` (default)
+  - `file` (daily JSONL + retention pruning)
 - payload หลัก: `request_id`, `tool`, `ok`, `status_code`, `error_code`, `duration_ms`
 
 config env vars:
@@ -445,10 +460,21 @@ config env vars:
 - `SOLOSTACK_MCP_TIMEOUT_GUARD_ENABLED`
 - `SOLOSTACK_MCP_TIMEOUT_STRATEGY`
 - `SOLOSTACK_MCP_TOOL_TIMEOUT_MS`
+- `SOLOSTACK_MCP_AUDIT_SINK` (`stdout|file`)
+- `SOLOSTACK_MCP_AUDIT_LOG_DIR`
+- `SOLOSTACK_MCP_AUDIT_RETENTION_DAYS`
 
 load/perf matrix baseline:
 - รัน `npm run mcp:load-matrix`
 - output ที่ `docs/mcp-load-matrix-v0.1.md`
+
+hosted staging matrix:
+- รัน `npm run mcp:load-matrix:hosted` (กำหนด `SOLOSTACK_MCP_HOSTED_BASE_URL` และ token ตาม environment)
+- output ที่ `docs/mcp-load-matrix-hosted-staging-v0.1.md`
+
+compare hosted vs local baseline:
+- รัน `npm run mcp:load-matrix:compare`
+- output ที่ `docs/mcp-load-matrix-hosted-compare-v0.1.md`
 
 รายละเอียดเพิ่มเติม: `mcp-solostack/README.md`
 

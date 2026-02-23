@@ -23,6 +23,12 @@ export function createMcpLogger(input) {
     "mcp-solostack";
   const logLevel =
     (typeof input?.log_level === "string" && input.log_level) || "info";
+  const auditSink =
+    input?.audit_sink &&
+    typeof input.audit_sink === "object" &&
+    typeof input.audit_sink.write === "function"
+      ? input.audit_sink
+      : null;
 
   function write(level, message, metadata = null) {
     if (!shouldLog(logLevel, level)) return;
@@ -42,10 +48,21 @@ export function createMcpLogger(input) {
     info: (message, metadata = null) => write("info", message, metadata),
     warn: (message, metadata = null) => write("warn", message, metadata),
     error: (message, metadata = null) => write("error", message, metadata),
-    auditToolCall: (metadata = null) =>
-      write("info", "MCP tool call completed.", {
+    auditToolCall: (metadata = null) => {
+      const auditPayload = {
         event: "mcp.tool_call",
         ...asOptionalPlainObject(metadata),
-      }),
+      };
+      write("info", "MCP tool call completed.", auditPayload);
+      if (!auditSink) return;
+      try {
+        auditSink.write(auditPayload);
+      } catch (error) {
+        write("warn", "Unable to write MCP audit sink payload.", {
+          event: "mcp.audit_sink_failed",
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    },
   };
 }

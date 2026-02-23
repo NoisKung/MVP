@@ -1,6 +1,6 @@
 # SoloStack Execution Planning
 
-อัปเดตล่าสุด: 2026-02-22
+อัปเดตล่าสุด: 2026-02-23
 แหล่งข้อมูลหลัก: `IDEA.md`
 
 ## 1) Planning Intent
@@ -21,7 +21,7 @@
 - P3-1: Sync Foundation + Desktop Beta
 - P3-2: Mobile Sync Beta (shared-core readiness)
 - P3-3: Conflict Center + Recovery (baseline implementation started)
-- P3-8: i18n TH/EN foundation
+- P3-8: i18n TH/EN foundation [closed in current scope]
 
 ## 3) Strategic Goals (Q1-Q2 2026)
 
@@ -66,7 +66,7 @@
 - End-to-end sync flow desktop <-> mobile
 - Sync SLA ระดับ beta สำหรับใช้งานจริงภายในทีม
 
-### Current Implementation Snapshot (2026-02-17)
+### Current Implementation Snapshot (2026-02-23)
 - เสร็จแล้ว:
   - เพิ่ม `Sync Runtime Profile` ใน Settings เพื่อปรับ foreground/background interval และ push/pull limits ผ่าน UI
   - เพิ่ม preset `Desktop` และ `Mobile Beta` สำหรับ tuning เร็ว
@@ -84,9 +84,9 @@
   - เพิ่ม export แบบ filtered (`Export Filtered JSON`) จาก full-history view พร้อมแนบ filter metadata ในไฟล์
   - เพิ่ม Playwright coverage สำหรับ diagnostics full-history export flow (filters + date-range validation + JSON payload)
   - เติม test coverage ของ runtime profile แล้ว (unit + Playwright)
-- คงเหลือ:
-  - เตรียม mobile beta client ให้ใช้ contract + runtime profile ชุดเดียวกับ desktop
-  - ยืนยัน desktop<->mobile flow กับ dedicated mobile client builds
+- ปิดแล้ว:
+  - dedicated mobile client ใช้ contract + runtime profile ชุดเดียวกับ desktop แล้ว
+  - desktop<->mobile flow validated กับ dedicated mobile client builds แล้ว
 
 ### Exit Criteria
 - data model ไม่ drift ระหว่าง client
@@ -124,8 +124,10 @@
   - Playwright coverage สำหรับ restore preflight/force flow
   - Playwright coverage สำหรับ conflict retry confirmation + re-resolve matrix
   - Playwright coverage สำหรับ retry failed sync (transport failure -> retry success)
+  - integration coverage สำหรับ resolve replay + idempotent retry (closed)
+  - transport-backed E2E สำหรับ corrected replay -> `Synced` (closed)
 - คงเหลือ:
-  - integration coverage สำหรับ resolve replay + idempotent retry
+  - ไม่มีงานค้างใน repo scope ของ P3-3
 
 ### Exit Criteria
 - ผู้ใช้แก้ conflict หลัก (`field_conflict`, `delete_vs_update`, `notes_collision`) ได้จาก UI โดยไม่แตะ DB
@@ -189,15 +191,19 @@ Google Drive (`appDataFolder`) vs OneDrive (`approot`) ในมุม SoloStack
 - เพิ่ม integration fixture สำหรับ provider error mapping (`rate_limit`, `unauthorized`, `unavailable`)
 - เพิ่ม observability fields ต่อ connector (`provider`, `latency_ms`, `http_status`, `retry_after_ms`)
 
-### Current Progress (2026-02-18)
+### Current Progress (2026-02-23)
 
 - เสร็จแล้ว:
   - comparative spike snapshot (Google vs OneDrive) พร้อม recommendation สำหรับ pilot
   - connector adapter contract v0.1 ใน `src/lib/sync-connector-contract.ts`
+  - provider implementation stubs (`google_appdata` / `onedrive_approot`) ใน `src/lib/sync-provider-adapters.ts`
+  - token refresh helper + auth header flow ใน `src/lib/sync-provider-auth.ts`
+  - settings UI สำหรับ managed connector + connection test flow (`src/components/ReminderSettings.tsx`)
+  - adapter factory สำหรับแปลง `provider_config` <-> managed connector adapter (`src/lib/sync-provider-adapter-factory.ts`)
+  - connector integration tests กับ fixture responses (`src/lib/sync-provider-adapters.test.ts`)
 - คงเหลือ:
-  - provider implementation stubs (Google/OneDrive)
-  - token storage + refresh flow integration
-  - connector integration tests กับ fixture responses
+  - wire adapter stubs เข้ากับ managed transport path จริงเมื่อ backend endpoint พร้อม
+  - ผูก secure token store policy ตาม platform (desktop/mobile) ก่อนเปิด external beta
 
 ## Phase F: P3-6 MCP Server for SoloStack
 
@@ -220,7 +226,7 @@ Google Drive (`appDataFolder`) vs OneDrive (`approot`) ในมุม SoloStack
 - ไม่มี direct DB corruption case จาก MCP read path
 - Query ที่หนักมี guardrails (limit/timeout/rate-limit) และไม่ทำให้ UI lag
 
-### Current Progress (2026-02-18)
+### Current Progress (2026-02-23)
 
 - เสร็จแล้ว:
   - local MCP skeleton + health/config loader (`mcp-solostack/server.mjs`, `mcp-solostack/config.mjs`)
@@ -233,9 +239,15 @@ Google Drive (`appDataFolder`) vs OneDrive (`approot`) ในมุม SoloStack
   - เพิ่ม load/perf matrix baseline สำหรับ small/medium fixture (`docs/mcp-load-matrix-v0.1.md`)
   - เอกสาร agent playbook และ AWS hosted profile baseline
   - hardening snapshot v0.1 (`docs/mcp-hardening-report-v0.1.md`)
+  - ตัดสินใจ audit sink/retention baseline:
+    - file sink รายวัน + retention 30 วัน
+    - env config สำหรับ audit sink (`SOLOSTACK_MCP_AUDIT_*`)
+  - เพิ่ม hosted matrix tooling:
+    - `npm run mcp:load-matrix:hosted`
+    - `npm run mcp:load-matrix:compare`
 - คงเหลือ:
-  - ทำซ้ำ load/perf matrix ใน hosted staging เพื่อเทียบกับ local baseline
-  - ตัดสินใจ sink/retention สำหรับ audit log ใน hosted profile
+  - ทำซ้ำ load/perf matrix ใน hosted staging จริง และแนบ compare report
+  - ship audit sink เข้า centralized backend (CloudWatch/S3/OpenSearch) ตาม environment policy
 
 ## 5) Workstream Breakdown (P3-1 Priority)
 
@@ -683,7 +695,7 @@ Validation Evidence:
 - ปิด checklist readiness ฝั่ง shared-core/runtime contract
 - เพิ่ม source tracking ของ runtime preset detection ใน diagnostics เพื่อช่วย debug mobile auto-seed
 - สรุป artifact ที่ `docs/p3-2-mobile-beta-core-readiness-v0.1.md`
-- งานคงเหลือย้ายไป dedicated mobile client execution (นอก shared-core scope)
+- งาน dedicated mobile client execution ปิดแล้ว และยืนยัน real-device flow ตามเป้าหมาย P3-2
 
 Validation Evidence:
 1. `cargo check` (src-tauri) passed
@@ -756,7 +768,7 @@ Validation Evidence:
 11. `npm run build` passed
 
 Next pending item to pull:
-- QoL Sprint C closed; pull next from P3-8 i18n expansion / rollout backlog
+- QoL Sprint D และ P3-8 closed; pull next from P3-5 connector implementation / P3-6 hosted hardening
 
 ## 17) P3-8 Incremental Update (2026-02-21)
 
@@ -791,3 +803,10 @@ Validation Evidence:
 1. `npm run test -- --run src/lib/sync-conflict-message.test.ts src/lib/i18n.catalog.test.ts` passed
 2. `npm run test -- --run src/components/AppShell.test.tsx src/components/TaskCard.test.tsx src/lib/database.sessions.test.ts` passed
 3. `npm run build` passed
+
+## 18) P3-8 Closure Update (2026-02-23)
+
+- ปิด `P3-8 i18n expansion / rollout backlog` ใน scope ปัจจุบันแล้ว
+- สถานะเปลี่ยนเป็น closed และดึงงานคิวถัดไปเป็น:
+  - `P3-5`: provider connector implementation
+  - `P3-6`: hosted hardening (load/perf matrix + audit log retention decision)

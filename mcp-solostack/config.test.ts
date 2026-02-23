@@ -20,6 +20,9 @@ describe("mcp-solostack config loader", () => {
       timeout_guard_enabled: false,
       timeout_strategy: "soft",
       tool_timeout_ms: 2000,
+      audit_sink: "stdout",
+      audit_log_directory: "mcp-solostack/audit",
+      audit_retention_days: 30,
       db_path: null,
     });
   });
@@ -38,6 +41,9 @@ describe("mcp-solostack config loader", () => {
       SOLOSTACK_MCP_TIMEOUT_GUARD_ENABLED: "true",
       SOLOSTACK_MCP_TIMEOUT_STRATEGY: "worker_hard",
       SOLOSTACK_MCP_TOOL_TIMEOUT_MS: "2500",
+      SOLOSTACK_MCP_AUDIT_SINK: "file",
+      SOLOSTACK_MCP_AUDIT_LOG_DIR: "/tmp/mcp-audit",
+      SOLOSTACK_MCP_AUDIT_RETENTION_DAYS: "14",
     });
 
     expect(config).toMatchObject({
@@ -53,6 +59,9 @@ describe("mcp-solostack config loader", () => {
       timeout_guard_enabled: true,
       timeout_strategy: "worker_hard",
       tool_timeout_ms: 2500,
+      audit_sink: "file",
+      audit_log_directory: "/tmp/mcp-audit",
+      audit_retention_days: 14,
     });
     expect(getMcpSafeConfigSummary(config)).toEqual({
       host: "0.0.0.0",
@@ -66,6 +75,9 @@ describe("mcp-solostack config loader", () => {
       timeout_guard_enabled: true,
       timeout_strategy: "worker_hard",
       tool_timeout_ms: 2500,
+      audit_sink: "file",
+      audit_log_directory: "/tmp/mcp-audit",
+      audit_retention_days: 14,
       db_path_set: true,
     });
   });
@@ -112,5 +124,17 @@ describe("mcp-solostack config loader", () => {
         SOLOSTACK_MCP_TIMEOUT_STRATEGY: "hard_cancel",
       }),
     ).toThrow("SOLOSTACK_MCP_TIMEOUT_STRATEGY must be one of");
+
+    expect(() =>
+      loadMcpConfigFromEnv({
+        SOLOSTACK_MCP_AUDIT_SINK: "kinesis",
+      }),
+    ).toThrow("SOLOSTACK_MCP_AUDIT_SINK must be one of");
+
+    expect(() =>
+      loadMcpConfigFromEnv({
+        SOLOSTACK_MCP_AUDIT_RETENTION_DAYS: "0",
+      }),
+    ).toThrow("SOLOSTACK_MCP_AUDIT_RETENTION_DAYS must be between");
   });
 });

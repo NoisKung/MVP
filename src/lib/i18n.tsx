@@ -678,6 +678,30 @@ const TRANSLATIONS = {
     "settings.sync.provider.endpointMode.managed": "Managed",
     "settings.sync.provider.endpointMode.custom": "Custom",
     "settings.sync.provider.save": "Save Provider",
+    "settings.sync.provider.managed.title": "Managed Connector Settings",
+    "settings.sync.provider.managed.desc":
+      "Optional pilot settings for managed connector gateway and OAuth tokens.",
+    "settings.sync.provider.managed.baseUrl": "Connector Base URL",
+    "settings.sync.provider.managed.baseUrlPlaceholder":
+      "https://connector.example.com",
+    "settings.sync.provider.managed.accessToken": "Access Token",
+    "settings.sync.provider.managed.tokenType": "Token Type",
+    "settings.sync.provider.managed.refreshToken": "Refresh Token",
+    "settings.sync.provider.managed.refreshUrl": "Token Refresh URL",
+    "settings.sync.provider.managed.expiresAt": "Access Token Expires At (ISO)",
+    "settings.sync.provider.managed.expiresAtPlaceholder":
+      "2026-01-01T00:00:00.000Z",
+    "settings.sync.provider.managed.scope": "OAuth Scope",
+    "settings.sync.provider.managed.clientId": "Client ID",
+    "settings.sync.provider.managed.clientSecret": "Client Secret",
+    "settings.sync.provider.managed.test.action": "Test Connector",
+    "settings.sync.provider.managed.test.testing": "Testing Connector...",
+    "settings.sync.provider.managed.test.feedback.success":
+      "{provider} connector is reachable.",
+    "settings.sync.provider.managed.test.error.unsupported":
+      "Selected provider does not support managed connector testing.",
+    "settings.sync.provider.managed.test.error.notConfigured":
+      "Set connector base URL before testing.",
     "settings.sync.provider.feedback.saved": "Sync provider was saved.",
     "settings.sync.provider.endpointModeHint.managed":
       "Managed provider selected (custom URLs are still used in current build).",
@@ -1602,6 +1626,31 @@ const TRANSLATIONS = {
     "settings.sync.provider.endpointMode.managed": "จัดการโดยระบบ",
     "settings.sync.provider.endpointMode.custom": "กำหนดเอง",
     "settings.sync.provider.save": "บันทึกผู้ให้บริการ",
+    "settings.sync.provider.managed.title": "การตั้งค่า Managed Connector",
+    "settings.sync.provider.managed.desc":
+      "การตั้งค่าทดลองสำหรับเกตเวย์ตัวเชื่อมต่อแบบระบบจัดการและโทเค็น OAuth",
+    "settings.sync.provider.managed.baseUrl": "Base URL ของ Connector",
+    "settings.sync.provider.managed.baseUrlPlaceholder":
+      "https://connector.example.com",
+    "settings.sync.provider.managed.accessToken": "Access Token",
+    "settings.sync.provider.managed.tokenType": "ประเภทโทเค็น",
+    "settings.sync.provider.managed.refreshToken": "Refresh Token",
+    "settings.sync.provider.managed.refreshUrl": "URL รีเฟรชโทเค็น",
+    "settings.sync.provider.managed.expiresAt":
+      "เวลาหมดอายุ Access Token (ISO)",
+    "settings.sync.provider.managed.expiresAtPlaceholder":
+      "2026-01-01T00:00:00.000Z",
+    "settings.sync.provider.managed.scope": "OAuth Scope",
+    "settings.sync.provider.managed.clientId": "Client ID",
+    "settings.sync.provider.managed.clientSecret": "Client Secret",
+    "settings.sync.provider.managed.test.action": "ทดสอบ Connector",
+    "settings.sync.provider.managed.test.testing": "กำลังทดสอบ Connector...",
+    "settings.sync.provider.managed.test.feedback.success":
+      "เชื่อมต่อ {provider} connector ได้",
+    "settings.sync.provider.managed.test.error.unsupported":
+      "ผู้ให้บริการที่เลือกไม่รองรับการทดสอบ managed connector",
+    "settings.sync.provider.managed.test.error.notConfigured":
+      "โปรดตั้งค่า Connector Base URL ก่อนทดสอบ",
     "settings.sync.provider.feedback.saved": "บันทึกผู้ให้บริการซิงก์แล้ว",
     "settings.sync.provider.endpointModeHint.managed":
       "เลือกผู้ให้บริการแบบระบบจัดการแล้ว (รุ่นปัจจุบันยังใช้ URL แบบกำหนดเองอยู่)",

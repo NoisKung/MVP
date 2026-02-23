@@ -1,5 +1,6 @@
 import { createServer } from "node:http";
 import { createMcpRequestHandler } from "./app.mjs";
+import { createFileAuditSink } from "./audit-sink.mjs";
 import { getMcpSafeConfigSummary, loadMcpConfigFromEnv } from "./config.mjs";
 import { createMcpLogger } from "./logger.mjs";
 import { createToolExecutor } from "./tool-executor.mjs";
@@ -34,9 +35,17 @@ async function closeServer(server) {
 
 async function main() {
   const config = loadMcpConfigFromEnv(process.env);
+  const auditSink =
+    config.audit_sink === "file"
+      ? createFileAuditSink({
+          directory_path: config.audit_log_directory,
+          retention_days: config.audit_retention_days,
+        })
+      : null;
   const logger = createMcpLogger({
     service_name: config.service_name,
     log_level: config.log_level,
+    audit_sink: auditSink,
   });
   const toolExecutor = createToolExecutor(config);
   const startedAtMs = Date.now();

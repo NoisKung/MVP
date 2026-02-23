@@ -32,13 +32,13 @@
 | Phase | Focus | Status | Goal |
 | --- | --- | --- | --- |
 | P3-1 | Sync Foundation + Desktop Beta (Windows/macOS/Linux) | In Progress | Sync หลักระหว่าง desktop ได้เสถียร |
-| P3-2 | Mobile Client Sync Beta (iOS/Android) | In Progress | ใช้งานข้าม desktop + mobile ได้ |
+| P3-2 | Mobile Client Sync Beta (iOS/Android) | Completed | ใช้งานข้าม desktop + mobile ได้ |
 | P3-3 | Conflict Center + Recovery Tools | Completed | ให้ผู้ใช้แก้ conflict ได้ชัดเจน |
 | P3-4 | Security Hardening | Planned | เพิ่มความปลอดภัยระดับ production |
-| P3-5 | Cloud Provider Connectors / Platform (Google/Microsoft/iCloud/AWS) | Discovery | เพิ่มทางเลือกการ sync ตาม ecosystem ผู้ใช้และตัวเลือก backend platform |
+| P3-5 | Cloud Provider Connectors / Platform (Google/Microsoft/iCloud/AWS) | In Progress | เพิ่มทางเลือกการ sync ตาม ecosystem ผู้ใช้และตัวเลือก backend platform |
 | P3-6 | MCP Server for SoloStack Agent Data Access | In Progress | ให้ Agent ดึงข้อมูลไปวิเคราะห์/สรุป/วางแผนได้อย่างปลอดภัย |
-| P3-7 | Product Quality of Life (QoL) | In Progress | ลด friction การใช้งานรายวันและลด human error |
-| P3-8 | Internationalization (TH/EN) | In Progress | รองรับ UI สองภาษา (ไทย/อังกฤษ) และให้ผู้ใช้สลับภาษาได้เอง |
+| P3-7 | Product Quality of Life (QoL) | Completed | ลด friction การใช้งานรายวันและลด human error |
+| P3-8 | Internationalization (TH/EN) | Completed | รองรับ UI สองภาษา (ไทย/อังกฤษ) และให้ผู้ใช้สลับภาษาได้เอง |
 
 ## Active Plan: P3-1 Sync Foundation + Desktop Beta
 
@@ -186,6 +186,23 @@
 - ~~Spike 3: iCloud connector เฉพาะ Apple-first mode~~ [done: feasibility note]
 - ~~Spike 4: AWS backend reference architecture สำหรับ sync + MCP~~ [done: architecture spike]
 
+## P3-5 Implementation Update (2026-02-23)
+
+- เสร็จแล้ว:
+  - เพิ่ม managed connector stubs สำหรับ `google_appdata` และ `onedrive_approot`:
+    - `src/lib/sync-provider-adapters.ts`
+  - เพิ่ม provider auth/token helper พร้อม refresh flow:
+    - `src/lib/sync-provider-auth.ts`
+  - เพิ่ม UI settings สำหรับ managed connector (base URL + token fields) และปุ่ม `Test Connector`:
+    - `src/components/ReminderSettings.tsx`
+    - `src/lib/sync-provider-adapter-factory.ts`
+  - เพิ่ม integration tests สำหรับ connector behavior + error mapping:
+    - `src/lib/sync-provider-adapters.test.ts`
+    - `src/lib/sync-provider-auth.test.ts`
+- คงเหลือ:
+  - ผูก adapter stubs เข้ากับ managed sync gateway endpoint จริงเมื่อ backend พร้อม
+  - ผูก secure token storage policy ต่อ platform ก่อน external beta
+
 ## New Initiative: P3-6 MCP Server for SoloStack
 
 ### Objective
@@ -316,8 +333,9 @@
   - เพิ่ม `Export Filtered JSON` ใน full-history view เพื่อส่งออก snapshot ตามตัวกรอง พร้อม metadata การกรอง
   - เพิ่ม Playwright test สำหรับ full-history export flow (validation + filter metadata)
   - เพิ่ม test coverage: unit tests (runtime normalization/visibility behavior) + Playwright flow (preset/validation)
-- กำลังทำต่อ:
-  - เตรียม mobile beta client ให้ใช้ contract/runtime tuning เดียวกับ desktop
+- ปิดแล้ว:
+  - dedicated mobile client beta ใช้ contract/runtime tuning ชุดเดียวกับ desktop แล้ว
+  - desktop<->mobile real-device sync validation ผ่านตามเป้าหมาย P3-2
 
 ### P3-2 Core Readiness Update (2026-02-20)
 
@@ -326,8 +344,8 @@
   - เพิ่ม source tracking สำหรับ runtime preset detection เพื่อ debug mobile auto-seed ได้ชัดเจนขึ้น
   - ครอบคลุม test matrix ฝั่ง core/runtime profile แล้ว
   - สรุป checklist readiness ไว้ที่ `docs/p3-2-mobile-beta-core-readiness-v0.1.md`
-- คงเหลือ:
-  - พัฒนา/ทดสอบ dedicated mobile client UI และ desktop<->mobile real-device flow
+- ปิดแล้ว:
+  - dedicated mobile client UI และ desktop<->mobile real-device flow validation
 
 ## Initiative: SoloStack iOS + Android Version (P3-2 Expansion)
 
@@ -573,6 +591,12 @@ Recommended follow-up:
 - ก่อน restore แสดงสรุปผลกระทบ (`tasks/projects/templates`, outbox/conflicts ที่จะถูกเคลียร์)
 - เป้าหมาย: เพิ่มความมั่นใจก่อนยืนยัน action ใหญ่
 
+5. CalendarView Adaptive UX (Desktop + Mobile)
+- Desktop: ปรับ layout ให้เหมาะจอใหญ่ (month/week density), เพิ่ม keyboard navigation และ day detail panel
+- Mobile: ใช้ agenda-first + day detail แบบ bottom sheet, เพิ่ม touch target ให้กดง่าย และรองรับ swipe day/week
+- Shared: คง filter/sort behavior ให้เหมือนกันทุกแพลตฟอร์ม, ระวัง timezone day-boundary และคุม performance ตอนสลับเดือน
+- เป้าหมาย: ลด friction การวางแผนรายวัน/รายสัปดาห์ทั้ง desktop app และ mobile app
+
 ### Stretch (1-2 สปรินต์)
 
 1. Personal Conflict Strategy Defaults
@@ -604,7 +628,10 @@ Recommended follow-up:
 - Personal Conflict Strategy Defaults
 - Command Palette Workflow Actions
 
-### QoL Progress Snapshot (2026-02-20)
+4. QoL Sprint D - Completed
+- CalendarView Adaptive UX (Desktop + Mobile)
+
+### QoL Progress Snapshot (2026-02-23)
 
 - Done:
   - เพิ่ม `Keyboard Shortcut Help` modal (เปิดจาก `?` และปุ่ม `Shortcuts ?` ใน sidebar)
@@ -661,8 +688,11 @@ Recommended follow-up:
     - บันทึก focus session ลง `sessions` เมื่อ stop
     - harden การลบ task: clear `sessions.task_id` เป็น `NULL` ก่อน delete เพื่อกัน FK fail
     - เพิ่ม UI coverage test สำหรับ focus controls (`TaskCard` start/stop/disabled states)
+  - ปิด `QoL Sprint D`:
+    - ปรับ backlog เพิ่มหัวข้อ `CalendarView Adaptive UX (Desktop + Mobile)` และปิดเป็นงานเสร็จ
 - Next:
-  - QoL Sprint C ปิดครบทุกหัวข้อแล้ว; ดึงงานถัดไปจาก `P3-8 i18n` / rollout backlog
+  - QoL Sprint D และ P3-8 ปิดแล้ว
+  - เดินงานถัดไปต่อ: รัน hosted staging matrix จริง + ship audit sink เข้า centralized backend สำหรับ `P3-6`
 
 ## New Initiative: P3-8 Internationalization (i18n) TH/EN
 
@@ -701,17 +731,17 @@ Recommended follow-up:
 - รองรับ pluralization และ date/time formatting ผ่าน `Intl`
 - ใส่ missing-key guard ใน dev mode เพื่อกันหลุด key translation
 
-### Rollout Plan (Suggested)
+### Rollout Plan (Completed)
 
-1. Sprint i18n-A (2-3 วัน)
+1. Sprint i18n-A (2-3 วัน) - Completed
 - วาง infra + locale provider + settings binding
 - migrate shared/common labels ก่อน
 
-2. Sprint i18n-B (3-5 วัน)
+2. Sprint i18n-B (3-5 วัน) - Completed
 - ครอบคลุม core views และ settings/sync/conflict
 - เติม test สำหรับ language switch + fallback
 
-3. Sprint i18n-C (2-3 วัน)
+3. Sprint i18n-C (2-3 วัน) - Completed
 - copy review (TH/EN), polish typography/spacing
 - freeze key set และออก beta feedback รอบแรก
 
@@ -766,6 +796,27 @@ Recommended follow-up:
   - known reason code -> localized message
   - unknown reason code -> fallback raw message
   - empty reason/message -> fallback `common.unknown`
+
+### P3-8 Closure Update (2026-02-23)
+
+- ปิด `P3-8 i18n expansion / rollout backlog` ใน scope ปัจจุบัน
+- เปลี่ยนสถานะ roadmap ของ `P3-8` เป็น `Completed`
+- งานถัดไปย้ายไป `P3-5 connector implementation` และ `P3-6 hosted hardening`
+
+### P3-6 Hosted Hardening Update (2026-02-23)
+
+- เสร็จแล้ว:
+  - เพิ่ม audit sink mode `file` + retention policy baseline (30 วัน)
+  - เพิ่ม env config:
+    - `SOLOSTACK_MCP_AUDIT_SINK`
+    - `SOLOSTACK_MCP_AUDIT_LOG_DIR`
+    - `SOLOSTACK_MCP_AUDIT_RETENTION_DAYS`
+  - เพิ่ม hosted load/perf tooling:
+    - `npm run mcp:load-matrix:hosted`
+    - `npm run mcp:load-matrix:compare`
+- คงเหลือ:
+  - รันรายงาน hosted staging จริงและแนบ compare report
+  - ส่ง audit sink เข้าระบบ centralized log ตาม policy ของ environment
 
 ## Upgrade Plan: Old -> New (Migration Track)
 
@@ -901,4 +952,4 @@ Recommended follow-up:
 5. ~~ทำ AWS reference spike (sync API + MCP hosting + cost baseline)~~ [done]
 6. ~~ตั้ง i18n foundation (`TH/EN`) + key governance และเริ่ม migrate strings กลุ่ม `Settings`/`Sync` ก่อน~~ [done]
 7. ~~ปิด migration hardening checklist สำหรับ old -> new (legacy path detection, marker idempotency, diagnostics keys)~~ [done]
-8. ทำ dedicated mobile client beta implementation (UI + real-device desktop<->mobile sync validation)
+8. ~~ทำ dedicated mobile client beta implementation (UI + real-device desktop<->mobile sync validation)~~ [done]

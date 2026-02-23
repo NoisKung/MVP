@@ -69,6 +69,14 @@ import {
   filterSyncSessionDiagnosticsHistory,
   type SyncDiagnosticsHistorySourceFilter,
 } from "@/lib/sync-diagnostics-history";
+import {
+  createManagedSyncConnectorAdapterFromSettings,
+  extractManagedConnectorDraftFromProviderConfig,
+  mergeManagedConnectorDraftIntoProviderConfig,
+  supportsManagedConnectorAdapter,
+  type SyncProviderManagedConnectorDraft,
+} from "@/lib/sync-provider-adapter-factory";
+import type { SyncProviderAuthState } from "@/lib/sync-provider-auth";
 import { ManualMergeEditor } from "./ManualMergeEditor";
 
 interface ReminderSettingsProps {
@@ -701,6 +709,10 @@ export function ReminderSettings({
   const [backupError, setBackupError] = useState<string | null>(null);
   const [syncProviderDraft, setSyncProviderDraft] =
     useState<SyncProvider>("provider_neutral");
+  const [managedConnectorDraft, setManagedConnectorDraft] =
+    useState<SyncProviderManagedConnectorDraft>(() =>
+      extractManagedConnectorDraftFromProviderConfig(syncProviderConfig),
+    );
   const [syncPushUrlDraft, setSyncPushUrlDraft] = useState<string>("");
   const [syncPullUrlDraft, setSyncPullUrlDraft] = useState<string>("");
   const [syncRuntimeProfileDraft, setSyncRuntimeProfileDraft] =
@@ -723,6 +735,13 @@ export function ReminderSettings({
   const [syncProviderError, setSyncProviderError] = useState<string | null>(
     null,
   );
+  const [syncProviderTestFeedback, setSyncProviderTestFeedback] = useState<
+    string | null
+  >(null);
+  const [syncProviderTestError, setSyncProviderTestError] = useState<
+    string | null
+  >(null);
+  const [syncProviderTesting, setSyncProviderTesting] = useState(false);
   const [syncRuntimeFeedback, setSyncRuntimeFeedback] = useState<string | null>(
     null,
   );
@@ -804,6 +823,13 @@ export function ReminderSettings({
       syncProviderCapabilities.provider_neutral,
     [syncProviderCapabilities, syncProviderDraft],
   );
+  const providerSupportsManagedConnector = useMemo(
+    () => supportsManagedConnectorAdapter(syncProviderDraft),
+    [syncProviderDraft],
+  );
+  const shouldShowManagedConnectorSettings =
+    selectedProviderCapability.endpointMode === "managed" &&
+    providerSupportsManagedConnector;
   const runtimeProfileOptions = useMemo(
     () =>
       SYNC_RUNTIME_PROFILE_OPTION_VALUES.map((value) => ({
@@ -968,6 +994,12 @@ export function ReminderSettings({
   useEffect(() => {
     setSyncProviderDraft(syncProvider);
   }, [syncProvider]);
+
+  useEffect(() => {
+    setManagedConnectorDraft(
+      extractManagedConnectorDraftFromProviderConfig(syncProviderConfig),
+    );
+  }, [syncProviderConfig]);
 
   useEffect(() => {
     setSyncPushUrlDraft(syncPushUrl ?? "");
@@ -1278,18 +1310,54 @@ export function ReminderSettings({
     setSyncMaxPullPagesDraft(String(defaults.max_pull_pages));
   };
 
+  const handleChangeManagedConnectorField = (
+    field: keyof SyncProviderManagedConnectorDraft,
+    value: string,
+  ) => {
+    setSyncProviderFeedback(null);
+    setSyncProviderError(null);
+    setSyncProviderTestFeedback(null);
+    setSyncProviderTestError(null);
+    setManagedConnectorDraft((previous) => ({
+      ...previous,
+      [field]: value,
+    }));
+  };
+
+  const applyRefreshedManagedAuthState = (nextAuth: SyncProviderAuthState) => {
+    setManagedConnectorDraft((previous) => ({
+      ...previous,
+      access_token: nextAuth.access_token ?? "",
+      token_type: nextAuth.token_type ?? "Bearer",
+      refresh_token: nextAuth.refresh_token ?? "",
+      token_refresh_url: nextAuth.token_refresh_url ?? "",
+      expires_at: nextAuth.expires_at ?? "",
+      scope: nextAuth.scope ?? "",
+      client_id: nextAuth.client_id ?? "",
+      client_secret: nextAuth.client_secret ?? "",
+    }));
+  };
+
   const handleSaveSyncProvider = async () => {
     setSyncProviderFeedback(null);
     setSyncProviderError(null);
+    setSyncProviderTestFeedback(null);
+    setSyncProviderTestError(null);
 
     const providerCapability =
       syncProviderCapabilities[syncProviderDraft] ??
       syncProviderCapabilities.provider_neutral;
-    const nextProviderConfig: Record<string, unknown> = {
+    let nextProviderConfig: Record<string, unknown> = {
       ...(syncProviderConfig ?? {}),
       endpoint_mode: providerCapability.endpointMode,
       auth_requirement: providerCapability.authRequirement,
     };
+    if (providerSupportsManagedConnector) {
+      nextProviderConfig = mergeManagedConnectorDraftIntoProviderConfig({
+        existingProviderConfig: nextProviderConfig,
+        draft: managedConnectorDraft,
+      });
+    }
 
     try {
       await onSaveSyncProviderSettings({
@@ -1299,6 +1367,55 @@ export function ReminderSettings({
       setSyncProviderFeedback(t("settings.sync.provider.feedback.saved"));
     } catch (error) {
       setSyncProviderError(getErrorMessage(error, locale));
+    }
+  };
+
+  const handleTestManagedConnector = async () => {
+    setSyncProviderFeedback(null);
+    setSyncProviderError(null);
+    setSyncProviderTestFeedback(null);
+    setSyncProviderTestError(null);
+
+    if (!providerSupportsManagedConnector) {
+      setSyncProviderTestError(
+        t("settings.sync.provider.managed.test.error.unsupported"),
+      );
+      return;
+    }
+
+    const providerConfigForTest = mergeManagedConnectorDraftIntoProviderConfig({
+      existingProviderConfig: syncProviderConfig,
+      draft: managedConnectorDraft,
+    });
+    const adapter = createManagedSyncConnectorAdapterFromSettings({
+      provider: syncProviderDraft,
+      providerConfig: providerConfigForTest,
+      onAuthRefresh: (nextAuth) => {
+        applyRefreshedManagedAuthState(nextAuth);
+      },
+    });
+
+    if (!adapter) {
+      setSyncProviderTestError(
+        t("settings.sync.provider.managed.test.error.notConfigured"),
+      );
+      return;
+    }
+
+    setSyncProviderTesting(true);
+    try {
+      await adapter.list({ limit: 1, timeout_ms: 10_000 });
+      const providerLabel =
+        syncProviderCapabilities[syncProviderDraft]?.label ?? syncProviderDraft;
+      setSyncProviderTestFeedback(
+        t("settings.sync.provider.managed.test.feedback.success", {
+          provider: providerLabel,
+        }),
+      );
+    } catch (error) {
+      setSyncProviderTestError(getErrorMessage(error, locale));
+    } finally {
+      setSyncProviderTesting(false);
     }
   };
 
@@ -2074,6 +2191,8 @@ export function ReminderSettings({
                 onChange={(event) => {
                   setSyncProviderFeedback(null);
                   setSyncProviderError(null);
+                  setSyncProviderTestFeedback(null);
+                  setSyncProviderTestError(null);
                   setSyncProviderDraft(event.target.value as SyncProvider);
                 }}
                 disabled={syncProviderSaving || syncProviderLoading}
@@ -2115,12 +2234,242 @@ export function ReminderSettings({
             </div>
           </div>
 
-          <div className="settings-actions settings-actions-single">
+          {shouldShowManagedConnectorSettings && (
+            <div className="sync-provider-capability-card">
+              <p className="settings-row-title">
+                {t("settings.sync.provider.managed.title")}
+              </p>
+              <p className="settings-row-subtitle">
+                {t("settings.sync.provider.managed.desc")}
+              </p>
+              <div className="sync-provider-managed-grid">
+                <label className="settings-field">
+                  <span className="settings-field-label">
+                    {t("settings.sync.provider.managed.baseUrl")}
+                  </span>
+                  <input
+                    className="settings-input"
+                    type="url"
+                    inputMode="url"
+                    autoComplete="off"
+                    spellCheck={false}
+                    placeholder={t(
+                      "settings.sync.provider.managed.baseUrlPlaceholder",
+                    )}
+                    value={managedConnectorDraft.base_url}
+                    onChange={(event) =>
+                      handleChangeManagedConnectorField(
+                        "base_url",
+                        event.target.value,
+                      )
+                    }
+                    disabled={
+                      syncProviderSaving ||
+                      syncProviderLoading ||
+                      syncProviderTesting
+                    }
+                  />
+                </label>
+                <label className="settings-field">
+                  <span className="settings-field-label">
+                    {t("settings.sync.provider.managed.tokenType")}
+                  </span>
+                  <input
+                    className="settings-input"
+                    type="text"
+                    autoComplete="off"
+                    spellCheck={false}
+                    value={managedConnectorDraft.token_type}
+                    onChange={(event) =>
+                      handleChangeManagedConnectorField(
+                        "token_type",
+                        event.target.value,
+                      )
+                    }
+                    disabled={
+                      syncProviderSaving ||
+                      syncProviderLoading ||
+                      syncProviderTesting
+                    }
+                  />
+                </label>
+                <label className="settings-field settings-field-wide">
+                  <span className="settings-field-label">
+                    {t("settings.sync.provider.managed.accessToken")}
+                  </span>
+                  <input
+                    className="settings-input"
+                    type="text"
+                    autoComplete="off"
+                    spellCheck={false}
+                    value={managedConnectorDraft.access_token}
+                    onChange={(event) =>
+                      handleChangeManagedConnectorField(
+                        "access_token",
+                        event.target.value,
+                      )
+                    }
+                    disabled={
+                      syncProviderSaving ||
+                      syncProviderLoading ||
+                      syncProviderTesting
+                    }
+                  />
+                </label>
+                <label className="settings-field settings-field-wide">
+                  <span className="settings-field-label">
+                    {t("settings.sync.provider.managed.refreshToken")}
+                  </span>
+                  <input
+                    className="settings-input"
+                    type="text"
+                    autoComplete="off"
+                    spellCheck={false}
+                    value={managedConnectorDraft.refresh_token}
+                    onChange={(event) =>
+                      handleChangeManagedConnectorField(
+                        "refresh_token",
+                        event.target.value,
+                      )
+                    }
+                    disabled={
+                      syncProviderSaving ||
+                      syncProviderLoading ||
+                      syncProviderTesting
+                    }
+                  />
+                </label>
+                <label className="settings-field settings-field-wide">
+                  <span className="settings-field-label">
+                    {t("settings.sync.provider.managed.refreshUrl")}
+                  </span>
+                  <input
+                    className="settings-input"
+                    type="url"
+                    inputMode="url"
+                    autoComplete="off"
+                    spellCheck={false}
+                    value={managedConnectorDraft.token_refresh_url}
+                    onChange={(event) =>
+                      handleChangeManagedConnectorField(
+                        "token_refresh_url",
+                        event.target.value,
+                      )
+                    }
+                    disabled={
+                      syncProviderSaving ||
+                      syncProviderLoading ||
+                      syncProviderTesting
+                    }
+                  />
+                </label>
+                <label className="settings-field">
+                  <span className="settings-field-label">
+                    {t("settings.sync.provider.managed.expiresAt")}
+                  </span>
+                  <input
+                    className="settings-input"
+                    type="text"
+                    autoComplete="off"
+                    spellCheck={false}
+                    placeholder={t(
+                      "settings.sync.provider.managed.expiresAtPlaceholder",
+                    )}
+                    value={managedConnectorDraft.expires_at}
+                    onChange={(event) =>
+                      handleChangeManagedConnectorField(
+                        "expires_at",
+                        event.target.value,
+                      )
+                    }
+                    disabled={
+                      syncProviderSaving ||
+                      syncProviderLoading ||
+                      syncProviderTesting
+                    }
+                  />
+                </label>
+                <label className="settings-field">
+                  <span className="settings-field-label">
+                    {t("settings.sync.provider.managed.scope")}
+                  </span>
+                  <input
+                    className="settings-input"
+                    type="text"
+                    autoComplete="off"
+                    spellCheck={false}
+                    value={managedConnectorDraft.scope}
+                    onChange={(event) =>
+                      handleChangeManagedConnectorField(
+                        "scope",
+                        event.target.value,
+                      )
+                    }
+                    disabled={
+                      syncProviderSaving ||
+                      syncProviderLoading ||
+                      syncProviderTesting
+                    }
+                  />
+                </label>
+                <label className="settings-field">
+                  <span className="settings-field-label">
+                    {t("settings.sync.provider.managed.clientId")}
+                  </span>
+                  <input
+                    className="settings-input"
+                    type="text"
+                    autoComplete="off"
+                    spellCheck={false}
+                    value={managedConnectorDraft.client_id}
+                    onChange={(event) =>
+                      handleChangeManagedConnectorField(
+                        "client_id",
+                        event.target.value,
+                      )
+                    }
+                    disabled={
+                      syncProviderSaving ||
+                      syncProviderLoading ||
+                      syncProviderTesting
+                    }
+                  />
+                </label>
+                <label className="settings-field">
+                  <span className="settings-field-label">
+                    {t("settings.sync.provider.managed.clientSecret")}
+                  </span>
+                  <input
+                    className="settings-input"
+                    type="password"
+                    autoComplete="off"
+                    spellCheck={false}
+                    value={managedConnectorDraft.client_secret}
+                    onChange={(event) =>
+                      handleChangeManagedConnectorField(
+                        "client_secret",
+                        event.target.value,
+                      )
+                    }
+                    disabled={
+                      syncProviderSaving ||
+                      syncProviderLoading ||
+                      syncProviderTesting
+                    }
+                  />
+                </label>
+              </div>
+            </div>
+          )}
+
+          <div className="settings-actions">
             <button
               type="button"
               className="settings-btn settings-btn-primary settings-btn-provider"
               onClick={() => void handleSaveSyncProvider()}
-              disabled={syncProviderSaving || syncProviderLoading}
+              disabled={
+                syncProviderSaving || syncProviderLoading || syncProviderTesting
+              }
             >
               <span className="settings-btn-label">
                 {syncProviderSaving
@@ -2128,6 +2477,24 @@ export function ReminderSettings({
                   : t("settings.sync.provider.save")}
               </span>
             </button>
+            {shouldShowManagedConnectorSettings && (
+              <button
+                type="button"
+                className="settings-btn"
+                onClick={() => void handleTestManagedConnector()}
+                disabled={
+                  syncProviderSaving ||
+                  syncProviderLoading ||
+                  syncProviderTesting
+                }
+              >
+                <span className="settings-btn-label">
+                  {syncProviderTesting
+                    ? t("settings.sync.provider.managed.test.testing")
+                    : t("settings.sync.provider.managed.test.action")}
+                </span>
+              </button>
+            )}
           </div>
 
           {syncProviderFeedback && (
@@ -2136,6 +2503,14 @@ export function ReminderSettings({
           {syncProviderError && (
             <p className="settings-feedback settings-feedback-error">
               {syncProviderError}
+            </p>
+          )}
+          {syncProviderTestFeedback && (
+            <p className="settings-feedback">{syncProviderTestFeedback}</p>
+          )}
+          {syncProviderTestError && (
+            <p className="settings-feedback settings-feedback-error">
+              {syncProviderTestError}
             </p>
           )}
         </div>
@@ -3364,6 +3739,12 @@ export function ReminderSettings({
           gap: 8px;
           margin-bottom: 8px;
         }
+        .sync-provider-managed-grid {
+          display: grid;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 8px;
+          margin-top: 8px;
+        }
         .sync-provider-capability-card {
           border: 1px solid var(--border-default);
           border-radius: var(--radius-md);
@@ -3441,6 +3822,9 @@ export function ReminderSettings({
           flex-direction: column;
           gap: 4px;
         }
+        .settings-field-wide {
+          grid-column: 1 / -1;
+        }
         .settings-field-label {
           font-size: 11px;
           font-weight: 600;
@@ -3503,6 +3887,9 @@ export function ReminderSettings({
             grid-template-columns: 1fr;
           }
           .sync-provider-grid {
+            grid-template-columns: 1fr;
+          }
+          .sync-provider-managed-grid {
             grid-template-columns: 1fr;
           }
           .sync-diagnostics-history-controls {
