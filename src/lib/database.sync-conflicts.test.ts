@@ -481,6 +481,102 @@ describe("database sync conflict persistence", () => {
     expect(matchingRows[0]?.idempotency_key).toBe(expectedIdempotencyKey);
   });
 
+  it("keeps retry resolution idempotent and skips repeated replay after retry-resolve", async () => {
+    const incomingIdempotencyKey = `incoming-retry-idempotent-${randomUUID()}`;
+    const entityId = `task-retry-idempotent-${randomUUID()}`;
+    const resolvedByDevice = "device-retry-idempotent";
+
+    const conflictChange = createIncomingTaskChange({
+      entity_id: entityId,
+      idempotency_key: incomingIdempotencyKey,
+      payload: {
+        description: "missing title to trigger conflict",
+      },
+    });
+    expect(await database.applyIncomingSyncChange(conflictChange)).toBe(
+      "conflict",
+    );
+
+    const conflict = (
+      await database.listSyncConflicts({
+        status: "open",
+        limit: 500,
+      })
+    ).find(
+      (item) =>
+        item.entity_id === entityId &&
+        item.incoming_idempotency_key === incomingIdempotencyKey,
+    );
+    expect(conflict).toBeTruthy();
+
+    await database.resolveSyncConflict({
+      conflict_id: conflict!.id,
+      strategy: "retry",
+      resolved_by_device: resolvedByDevice,
+    });
+    await database.resolveSyncConflict({
+      conflict_id: conflict!.id,
+      strategy: "retry",
+      resolved_by_device: resolvedByDevice,
+    });
+
+    const outboxRows = await database.listSyncOutboxChanges(1000);
+    const expectedEntityId = `local.sync.conflict_resolution.${conflict!.id}`;
+    const matchingRows = outboxRows.filter(
+      (row) =>
+        row.entity_type === "SETTING" && row.entity_id === expectedEntityId,
+    );
+    expect(matchingRows).toHaveLength(1);
+    expect(matchingRows[0]?.idempotency_key).toBe(
+      createSyncIdempotencyKey(
+        resolvedByDevice,
+        `conflict-resolution:${conflict!.id}:retry`,
+      ),
+    );
+
+    const replayAppliedChange = createIncomingTaskChange({
+      entity_id: entityId,
+      idempotency_key: incomingIdempotencyKey,
+      payload: {
+        title: "Recovered title from replay",
+      },
+    });
+    expect(await database.applyIncomingSyncChange(replayAppliedChange)).toBe(
+      "applied",
+    );
+
+    const replayRepeatedChange = createIncomingTaskChange({
+      entity_id: entityId,
+      idempotency_key: incomingIdempotencyKey,
+      payload: {
+        title: "Recovered title from replay",
+      },
+    });
+    expect(await database.applyIncomingSyncChange(replayRepeatedChange)).toBe(
+      "applied",
+    );
+
+    const resolvedConflict = await database.getSyncConflict(conflict!.id);
+    expect(resolvedConflict?.status).toBe("resolved");
+    expect(resolvedConflict?.resolution_strategy).toBe("retry");
+    expect(resolvedConflict?.resolved_by_device).toBe("device-remote");
+
+    const events = await database.listSyncConflictEvents(conflict!.id, 200);
+    const incomingAppliedResolvedEvents = events.filter(
+      (item) =>
+        item.event_type === "resolved" &&
+        item.event_payload_json?.includes("incoming_change_applied"),
+    );
+    expect(incomingAppliedResolvedEvents).toHaveLength(1);
+
+    const repeatedIncomingRetryEvents = events.filter(
+      (item) =>
+        item.event_type === "retried" &&
+        item.event_payload_json?.includes("incoming_change_repeated"),
+    );
+    expect(repeatedIncomingRetryEvents).toHaveLength(0);
+  });
+
   it("retains only latest conflict events within policy window", async () => {
     const change = createIncomingTaskChange({
       payload: {

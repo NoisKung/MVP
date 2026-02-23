@@ -1,6 +1,6 @@
 # SoloStack Product Roadmap
 
-อัปเดตล่าสุด: 2026-02-22
+อัปเดตล่าสุด: 2026-02-23
 
 ## Product Principles
 
@@ -469,8 +469,43 @@
   - Playwright coverage สำหรับ conflict retry confirmation + re-resolve matrix
   - Playwright coverage สำหรับ resolve strategy matrix (`Keep Local`, `Keep Remote`, `Manual Merge`) และ sync success path
   - integration coverage สำหรับ idempotent retry/resolve replay
+  - เพิ่ม integration test สำหรับ `retry ซ้ำ` + `incoming replay ซ้ำ` เพื่อยืนยันว่า
+    - resolution outbox ยังเป็น idempotent (ไม่แตกเป็นหลายแถว)
+    - replay ที่แก้แล้ว resolve conflict ได้
+    - replay ซ้ำหลัง resolve ไม่ทำให้เกิด side effect ซ้ำใน conflict timeline
+  - เพิ่ม transport-backed E2E สำหรับ flow `Retry` ที่ต้องรอ corrected replay แล้วกลับ `Synced`
   - unit coverage สำหรับ restore guardrails (force-required preflight + blocked restore + force restore success)
   - quality gates ปัจจุบันของ repo ผ่าน (`test`, `test:e2e`, `build`)
+
+### Security Analysis: Resolve Replay + Idempotent Retry (2026-02-23)
+
+Threat surface ที่วิเคราะห์:
+- replay change เดิมซ้ำหลายครั้งจาก transport/backend
+- ผู้ใช้กด `Retry` ซ้ำหลายครั้งบน conflict เดิม
+- event log โตเร็วจาก conflict ที่ถูก replay บ่อย
+- payload conflict/report ที่อาจมีข้อมูลละเอียดเกินจำเป็น
+
+Current controls (implemented):
+- dedupe ฝั่ง conflict identity ด้วย `incoming_idempotency_key` แบบ `UNIQUE` ใน `sync_conflicts`
+- dedupe ฝั่ง resolution outbox ด้วย deterministic idempotency key:
+  - key shape: `conflict-resolution:<conflict_id>:<strategy>`
+  - เขียน `sync_outbox` ผ่าน `ON CONFLICT(idempotency_key) DO UPDATE`
+- guard replay หลัง conflict ถูก `resolved/ignored`:
+  - incoming key เดิมจะถูก `skip` และบันทึก event `retried` พร้อมเหตุผล `incoming_change_repeated`
+- จำกัดการเติบโตของ timeline:
+  - เก็บสูงสุด 200 events ต่อ conflict
+  - retention 90 วัน
+- เพิ่ม integration + E2E coverage สำหรับ retry/replay path เพื่อลด regression risk
+
+Residual risks / next hardening:
+- replay เดิมที่เป็น payload เดิมสามารถถูก apply ซ้ำได้ในบางกรณี LWW-equal (ไม่กระทบ conflict state แต่มี write ซ้ำ)
+- ยังไม่มี cryptographic integrity/checksum ของ incoming payload ที่ผูกกับ idempotency key จากฝั่ง server
+- export report เป็นข้อมูลเชิง support ที่ควรพิจารณา redaction policy เพิ่มก่อนขยาย beta ภายนอก
+
+Recommended follow-up:
+1. เพิ่ม optional replay guard cache สำหรับ applied incoming key ระยะสั้น (ลด write ซ้ำจาก replay storm)
+2. เพิ่ม server-side signature/validation policy สำหรับ idempotency envelope
+3. นิยาม redaction rules สำหรับ conflict/report export (เช่น masking fields ที่อาจมีข้อมูลอ่อนไหว)
 
 ### Initial Milestones (Suggested)
 
