@@ -200,10 +200,17 @@ Google Drive (`appDataFolder`) vs OneDrive (`approot`) ในมุม SoloStack
   - token refresh helper + auth header flow ใน `src/lib/sync-provider-auth.ts`
   - settings UI สำหรับ managed connector + connection test flow (`src/components/ReminderSettings.tsx`)
   - adapter factory สำหรับแปลง `provider_config` <-> managed connector adapter (`src/lib/sync-provider-adapter-factory.ts`)
+  - managed transport wiring ใน resolver (managed connector path มาก่อน endpoint custom) (`src/lib/sync-transport.ts`)
+  - managed transport resolver tests (`src/lib/sync-transport.test.ts`)
+  - secure token storage policy v0.2:
+    - redact sensitive token fields ออกจาก persisted `provider_config`
+    - persist managed auth ผ่าน OS keychain บน Tauri desktop (best-effort)
+    - fallback เป็น in-memory session auth สำหรับ runtime อื่น
+    - policy marker `managed_auth_storage_policy`
+    - tests (`src/lib/sync-provider-token-policy.test.ts`, `src/lib/database.migration.test.ts`, `src/lib/sync-provider-secure-store.test.ts`)
   - connector integration tests กับ fixture responses (`src/lib/sync-provider-adapters.test.ts`)
 - คงเหลือ:
-  - wire adapter stubs เข้ากับ managed transport path จริงเมื่อ backend endpoint พร้อม
-  - ผูก secure token store policy ตาม platform (desktop/mobile) ก่อนเปิด external beta
+  - ขยาย secure keystore persistence ให้ครบ mobile targets (iOS/Android) และยืนยัน real-device behavior ก่อน external beta
 
 ## Phase F: P3-6 MCP Server for SoloStack
 
@@ -242,12 +249,17 @@ Google Drive (`appDataFolder`) vs OneDrive (`approot`) ในมุม SoloStack
   - ตัดสินใจ audit sink/retention baseline:
     - file sink รายวัน + retention 30 วัน
     - env config สำหรับ audit sink (`SOLOSTACK_MCP_AUDIT_*`)
+  - เพิ่ม centralized audit sink mode `http`:
+    - ส่ง `POST` ต่อ event ไป external endpoint
+    - รองรับ timeout + optional bearer token
+    - env config: `SOLOSTACK_MCP_AUDIT_HTTP_URL`, `SOLOSTACK_MCP_AUDIT_HTTP_TIMEOUT_MS`, `SOLOSTACK_MCP_AUDIT_HTTP_AUTH_TOKEN`
   - เพิ่ม hosted matrix tooling:
     - `npm run mcp:load-matrix:hosted`
     - `npm run mcp:load-matrix:compare`
 - คงเหลือ:
   - ทำซ้ำ load/perf matrix ใน hosted staging จริง และแนบ compare report
-  - ship audit sink เข้า centralized backend (CloudWatch/S3/OpenSearch) ตาม environment policy
+  - blocker ปัจจุบันใน workspace นี้: ยังไม่มี `SOLOSTACK_MCP_HOSTED_BASE_URL` / `SOLOSTACK_MCP_HOSTED_AUTH_TOKEN` สำหรับรัน matrix จริง
+  - ผูก env ของ `http` sink เข้ากับ centralized backend (CloudWatch/S3/OpenSearch bridge) และยืนยัน delivery/error-rate ตาม environment policy
 
 ## 5) Workstream Breakdown (P3-1 Priority)
 

@@ -196,12 +196,20 @@
   - เพิ่ม UI settings สำหรับ managed connector (base URL + token fields) และปุ่ม `Test Connector`:
     - `src/components/ReminderSettings.tsx`
     - `src/lib/sync-provider-adapter-factory.ts`
+  - ผูก managed connector adapter เข้ากับ sync transport resolver แล้ว (เลือก path managed ก่อน endpoint custom):
+    - `src/lib/sync-transport.ts`
+    - `src/lib/sync-transport.test.ts`
+  - เพิ่ม secure token storage policy v0.2:
+    - redaction ของ `managed_auth` sensitive fields ก่อน persist
+    - เก็บ token ผ่าน OS keychain บน Tauri desktop (best-effort)
+    - fallback เป็น session-only สำหรับ runtime อื่น
+    - เพิ่ม storage policy marker ใน config (`managed_auth_storage_policy`)
+    - เพิ่ม tests: `src/lib/sync-provider-token-policy.test.ts`, `src/lib/database.migration.test.ts`, `src/lib/sync-provider-secure-store.test.ts`
   - เพิ่ม integration tests สำหรับ connector behavior + error mapping:
     - `src/lib/sync-provider-adapters.test.ts`
     - `src/lib/sync-provider-auth.test.ts`
 - คงเหลือ:
-  - ผูก adapter stubs เข้ากับ managed sync gateway endpoint จริงเมื่อ backend พร้อม
-  - ผูก secure token storage policy ต่อ platform ก่อน external beta
+  - ขยาย secure keystore persistence ให้ครบ mobile targets (iOS/Android) และทดสอบ real-device matrix ก่อน external beta
 
 ## New Initiative: P3-6 MCP Server for SoloStack
 
@@ -814,9 +822,17 @@ Recommended follow-up:
   - เพิ่ม hosted load/perf tooling:
     - `npm run mcp:load-matrix:hosted`
     - `npm run mcp:load-matrix:compare`
+  - เพิ่ม centralized audit sink mode `http`:
+    - ส่ง `POST` ต่อ event ไป external endpoint
+    - รองรับ timeout + optional bearer token
+    - env config:
+      - `SOLOSTACK_MCP_AUDIT_HTTP_URL`
+      - `SOLOSTACK_MCP_AUDIT_HTTP_TIMEOUT_MS`
+      - `SOLOSTACK_MCP_AUDIT_HTTP_AUTH_TOKEN`
 - คงเหลือ:
   - รันรายงาน hosted staging จริงและแนบ compare report
-  - ส่ง audit sink เข้าระบบ centralized log ตาม policy ของ environment
+  - blocker ปัจจุบันใน workspace นี้: ยังไม่มี `SOLOSTACK_MCP_HOSTED_BASE_URL` / `SOLOSTACK_MCP_HOSTED_AUTH_TOKEN`
+  - ผูกค่า env ของ `http` sink เข้ากับ staging/prod และยืนยัน delivery/error-rate ตาม policy ของ environment
 
 ## Upgrade Plan: Old -> New (Migration Track)
 
