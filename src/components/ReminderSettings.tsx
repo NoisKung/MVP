@@ -470,6 +470,104 @@ function normalizeUrlDraft(value: string): string | null {
   return normalized || null;
 }
 
+const LOCALHOST_SYNC_SERVER_BASE_URL = "http://127.0.0.1:8787";
+const SYNC_PUSH_PATH_SUFFIX = "/v1/sync/push";
+const SYNC_PULL_PATH_SUFFIX = "/v1/sync/pull";
+
+function extractServerBaseHostWithoutScheme(value: string): string {
+  const normalized = value.trim().replace(/^\/\//u, "");
+  if (!normalized) return "";
+  const hostWithMaybePort = normalized.split(/[/?#]/u, 1)[0] ?? "";
+  if (!hostWithMaybePort) return "";
+  if (hostWithMaybePort.startsWith("[")) {
+    const closingBracketIndex = hostWithMaybePort.indexOf("]");
+    if (closingBracketIndex === -1) return hostWithMaybePort.toLowerCase();
+    return hostWithMaybePort.slice(0, closingBracketIndex + 1).toLowerCase();
+  }
+  const hostWithoutPort = hostWithMaybePort.split(":", 1)[0] ?? "";
+  return hostWithoutPort.toLowerCase();
+}
+
+function isLikelyLocalNetworkHost(host: string): boolean {
+  if (!host) return false;
+  if (
+    host === "localhost" ||
+    host === "[::1]" ||
+    host === "::1" ||
+    host.endsWith(".local")
+  ) {
+    return true;
+  }
+  if (/^127(?:\.\d{1,3}){3}$/u.test(host)) return true;
+  if (/^10(?:\.\d{1,3}){3}$/u.test(host)) return true;
+  if (/^192\.168(?:\.\d{1,3}){2}$/u.test(host)) return true;
+
+  const private172RangeMatch = /^172\.(\d{1,3})(?:\.\d{1,3}){2}$/u.exec(host);
+  if (private172RangeMatch) {
+    const secondOctet = Number(private172RangeMatch[1]);
+    if (
+      Number.isFinite(secondOctet) &&
+      secondOctet >= 16 &&
+      secondOctet <= 31
+    ) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function ensureServerBaseScheme(value: string): string {
+  if (/^[a-z][a-z\d+.-]*:\/\//iu.test(value)) return value;
+  const normalized = value.trim().replace(/^\/\//u, "");
+  if (!normalized) return normalized;
+
+  const host = extractServerBaseHostWithoutScheme(normalized);
+  const scheme = isLikelyLocalNetworkHost(host) ? "http://" : "https://";
+  return `${scheme}${normalized}`;
+}
+
+function normalizeServerBaseUrlDraft(value: string): string | null {
+  const normalized = value.trim();
+  if (!normalized) return null;
+  return ensureServerBaseScheme(normalized).replace(/\/+$/u, "");
+}
+
+function buildSyncEndpointUrlsFromServerBase(serverBaseUrl: string): {
+  push_url: string;
+  pull_url: string;
+} {
+  const normalizedBase = serverBaseUrl.replace(/\/+$/u, "");
+  return {
+    push_url: `${normalizedBase}${SYNC_PUSH_PATH_SUFFIX}`,
+    pull_url: `${normalizedBase}${SYNC_PULL_PATH_SUFFIX}`,
+  };
+}
+
+function deriveSyncServerBaseUrlFromEndpoints(input: {
+  push_url: string | null | undefined;
+  pull_url: string | null | undefined;
+}): string {
+  if (!input.push_url || !input.pull_url) return "";
+  if (!isValidHttpUrl(input.push_url) || !isValidHttpUrl(input.pull_url)) {
+    return "";
+  }
+  const pushUrl = new URL(input.push_url);
+  const pullUrl = new URL(input.pull_url);
+  if (pushUrl.origin !== pullUrl.origin) return "";
+  if (
+    !pushUrl.pathname.endsWith(SYNC_PUSH_PATH_SUFFIX) ||
+    !pullUrl.pathname.endsWith(SYNC_PULL_PATH_SUFFIX)
+  ) {
+    return "";
+  }
+
+  const pushPrefix = pushUrl.pathname.slice(0, -SYNC_PUSH_PATH_SUFFIX.length);
+  const pullPrefix = pullUrl.pathname.slice(0, -SYNC_PULL_PATH_SUFFIX.length);
+  if (pushPrefix !== pullPrefix) return "";
+
+  return `${pushUrl.origin}${pushPrefix}`.replace(/\/+$/u, "");
+}
+
 function isValidHttpUrl(value: string): boolean {
   try {
     const parsed = new URL(value);
@@ -713,6 +811,8 @@ export function ReminderSettings({
     useState<SyncProviderManagedConnectorDraft>(() =>
       extractManagedConnectorDraftFromProviderConfig(syncProviderConfig),
     );
+  const [syncServerBaseUrlDraft, setSyncServerBaseUrlDraft] =
+    useState<string>("");
   const [syncPushUrlDraft, setSyncPushUrlDraft] = useState<string>("");
   const [syncPullUrlDraft, setSyncPullUrlDraft] = useState<string>("");
   const [syncRuntimeProfileDraft, setSyncRuntimeProfileDraft] =
@@ -1002,12 +1102,17 @@ export function ReminderSettings({
   }, [syncProviderConfig]);
 
   useEffect(() => {
-    setSyncPushUrlDraft(syncPushUrl ?? "");
-  }, [syncPushUrl]);
-
-  useEffect(() => {
-    setSyncPullUrlDraft(syncPullUrl ?? "");
-  }, [syncPullUrl]);
+    const nextPushUrl = syncPushUrl ?? "";
+    const nextPullUrl = syncPullUrl ?? "";
+    setSyncPushUrlDraft(nextPushUrl);
+    setSyncPullUrlDraft(nextPullUrl);
+    setSyncServerBaseUrlDraft(
+      deriveSyncServerBaseUrlFromEndpoints({
+        push_url: nextPushUrl,
+        pull_url: nextPullUrl,
+      }),
+    );
+  }, [syncPullUrl, syncPushUrl]);
 
   useEffect(() => {
     setSyncRuntimeProfileDraft(syncRuntimeProfileSetting);
@@ -1239,6 +1344,38 @@ export function ReminderSettings({
   const handleOpenBackupFilePicker = () => {
     if (isBackupBusy) return;
     backupInputRef.current?.click();
+  };
+
+  const handleApplyServerBaseUrl = () => {
+    setSyncConfigFeedback(null);
+    setSyncConfigError(null);
+
+    const normalizedServerBaseUrl = normalizeServerBaseUrlDraft(
+      syncServerBaseUrlDraft,
+    );
+    if (!normalizedServerBaseUrl || !isValidHttpUrl(normalizedServerBaseUrl)) {
+      setSyncConfigError(t("settings.sync.config.error.invalidServerBase"));
+      return;
+    }
+
+    const nextEndpoints = buildSyncEndpointUrlsFromServerBase(
+      normalizedServerBaseUrl,
+    );
+    setSyncServerBaseUrlDraft(normalizedServerBaseUrl);
+    setSyncPushUrlDraft(nextEndpoints.push_url);
+    setSyncPullUrlDraft(nextEndpoints.pull_url);
+    setSyncConfigFeedback(t("settings.sync.config.feedback.serverApplied"));
+  };
+
+  const handleUseLocalhostServerPreset = () => {
+    setSyncServerBaseUrlDraft(LOCALHOST_SYNC_SERVER_BASE_URL);
+    const nextEndpoints = buildSyncEndpointUrlsFromServerBase(
+      LOCALHOST_SYNC_SERVER_BASE_URL,
+    );
+    setSyncPushUrlDraft(nextEndpoints.push_url);
+    setSyncPullUrlDraft(nextEndpoints.pull_url);
+    setSyncConfigError(null);
+    setSyncConfigFeedback(t("settings.sync.config.feedback.localhostApplied"));
   };
 
   const handleSaveSyncSettings = async () => {
@@ -2242,6 +2379,9 @@ export function ReminderSettings({
               <p className="settings-row-subtitle">
                 {t("settings.sync.provider.managed.desc")}
               </p>
+              <p className="settings-row-subtitle">
+                {t("settings.sync.provider.managed.securityHint")}
+              </p>
               <div className="sync-provider-managed-grid">
                 <label className="settings-field">
                   <span className="settings-field-label">
@@ -2523,6 +2663,48 @@ export function ReminderSettings({
                 : t("settings.sync.provider.endpointModeHint.custom"),
           })}
         </p>
+
+        <div className="sync-endpoint-server-card">
+          <label className="settings-field settings-field-wide">
+            <span className="settings-field-label">
+              {t("settings.sync.provider.serverBaseUrl")}
+            </span>
+            <input
+              className="settings-input"
+              type="url"
+              inputMode="url"
+              autoComplete="off"
+              spellCheck={false}
+              placeholder={t("settings.sync.provider.serverBaseUrlPlaceholder")}
+              value={syncServerBaseUrlDraft}
+              onChange={(event) =>
+                setSyncServerBaseUrlDraft(event.target.value)
+              }
+              disabled={syncConfigSaving || syncProviderLoading}
+            />
+          </label>
+          <p className="settings-row-subtitle">
+            {t("settings.sync.provider.serverHelper")}
+          </p>
+          <div className="settings-actions">
+            <button
+              type="button"
+              className="settings-btn"
+              onClick={handleApplyServerBaseUrl}
+              disabled={syncConfigSaving || syncProviderLoading}
+            >
+              {t("settings.sync.provider.serverApply")}
+            </button>
+            <button
+              type="button"
+              className="settings-btn"
+              onClick={handleUseLocalhostServerPreset}
+              disabled={syncConfigSaving || syncProviderLoading}
+            >
+              {t("settings.sync.provider.serverUseLocalhost")}
+            </button>
+          </div>
+        </div>
 
         <div className="sync-endpoint-grid">
           <label className="settings-field">
@@ -3815,6 +3997,13 @@ export function ReminderSettings({
           display: grid;
           grid-template-columns: repeat(2, minmax(0, 1fr));
           gap: 8px;
+          margin-bottom: 10px;
+        }
+        .sync-endpoint-server-card {
+          border: 1px solid var(--border-default);
+          border-radius: var(--radius-md);
+          background: var(--bg-surface);
+          padding: 8px;
           margin-bottom: 10px;
         }
         .settings-field {

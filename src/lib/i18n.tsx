@@ -666,9 +666,15 @@ const TRANSLATIONS = {
       "Push URL must be a valid http(s) URL.",
     "settings.sync.config.error.invalidPull":
       "Pull URL must be a valid http(s) URL.",
+    "settings.sync.config.error.invalidServerBase":
+      "Server base URL must be a valid http(s) URL.",
     "settings.sync.config.feedback.saved": "Sync endpoints were saved.",
     "settings.sync.config.feedback.cleared":
       "Sync endpoints were cleared. App is now local-only.",
+    "settings.sync.config.feedback.serverApplied":
+      "Server base URL was applied to Push/Pull endpoints.",
+    "settings.sync.config.feedback.localhostApplied":
+      "Applied localhost preset (127.0.0.1:8787) to Push/Pull endpoints.",
     "settings.sync.provider.title": "Sync Provider",
     "settings.sync.provider.desc":
       "Select provider from UI. Core sync contract remains provider-neutral.",
@@ -681,6 +687,8 @@ const TRANSLATIONS = {
     "settings.sync.provider.managed.title": "Managed Connector Settings",
     "settings.sync.provider.managed.desc":
       "Optional pilot settings for managed connector gateway and OAuth tokens.",
+    "settings.sync.provider.managed.securityHint":
+      "Sensitive tokens are redacted from SQLite/backup. On Tauri desktop, tokens are stored in OS secure keystore; other runtimes fall back to session-only memory.",
     "settings.sync.provider.managed.baseUrl": "Connector Base URL",
     "settings.sync.provider.managed.baseUrlPlaceholder":
       "https://connector.example.com",
@@ -707,6 +715,13 @@ const TRANSLATIONS = {
       "Managed provider selected (custom URLs are still used in current build).",
     "settings.sync.provider.endpointModeHint.custom":
       "Custom endpoints required.",
+    "settings.sync.provider.serverBaseUrl": "Server Base URL",
+    "settings.sync.provider.serverBaseUrlPlaceholder":
+      "http://127.0.0.1:8787 or https://sync.example.com",
+    "settings.sync.provider.serverHelper":
+      "Set one server URL, then apply to auto-fill Push/Pull. Scheme is optional (localhost/LAN defaults to http, others default to https).",
+    "settings.sync.provider.serverApply": "Apply Server URL",
+    "settings.sync.provider.serverUseLocalhost": "Use Localhost Preset",
     "settings.sync.provider.pushUrl": "Push URL",
     "settings.sync.provider.pullUrl": "Pull URL",
     "settings.sync.provider.pushPlaceholder":
@@ -1614,9 +1629,15 @@ const TRANSLATIONS = {
       "URL ส่งข้อมูลขึ้นต้องเป็น URL แบบ http(s) ที่ถูกต้อง",
     "settings.sync.config.error.invalidPull":
       "URL ดึงข้อมูลลงต้องเป็น URL แบบ http(s) ที่ถูกต้อง",
+    "settings.sync.config.error.invalidServerBase":
+      "Server Base URL ต้องเป็น URL แบบ http(s) ที่ถูกต้อง",
     "settings.sync.config.feedback.saved": "บันทึกปลายทางซิงก์แล้ว",
     "settings.sync.config.feedback.cleared":
       "ล้างปลายทางซิงก์แล้ว แอปจะทำงานแบบเฉพาะเครื่อง",
+    "settings.sync.config.feedback.serverApplied":
+      "นำ Server Base URL ไปเติมปลายทางส่งขึ้น/ดึงลงให้อัตโนมัติแล้ว",
+    "settings.sync.config.feedback.localhostApplied":
+      "เติมค่า localhost preset (127.0.0.1:8787) ให้ปลายทางส่งขึ้น/ดึงลงแล้ว",
     "settings.sync.provider.title": "ผู้ให้บริการซิงก์",
     "settings.sync.provider.desc":
       "เลือกผู้ให้บริการจากหน้าแอป โดยสัญญาการซิงก์หลักยังคงไม่ผูกผู้ให้บริการ",
@@ -1629,6 +1650,8 @@ const TRANSLATIONS = {
     "settings.sync.provider.managed.title": "การตั้งค่า Managed Connector",
     "settings.sync.provider.managed.desc":
       "การตั้งค่าทดลองสำหรับเกตเวย์ตัวเชื่อมต่อแบบระบบจัดการและโทเค็น OAuth",
+    "settings.sync.provider.managed.securityHint":
+      "โทเค็นที่อ่อนไหวจะไม่บันทึกลง SQLite/backup และใน Tauri Desktop จะเก็บใน secure keystore ของระบบปฏิบัติการ (runtime อื่นจะ fallback เป็นหน่วยความจำเฉพาะ session)",
     "settings.sync.provider.managed.baseUrl": "Base URL ของ Connector",
     "settings.sync.provider.managed.baseUrlPlaceholder":
       "https://connector.example.com",
@@ -1656,6 +1679,13 @@ const TRANSLATIONS = {
       "เลือกผู้ให้บริการแบบระบบจัดการแล้ว (รุ่นปัจจุบันยังใช้ URL แบบกำหนดเองอยู่)",
     "settings.sync.provider.endpointModeHint.custom":
       "ต้องใช้ปลายทางแบบกำหนดเอง",
+    "settings.sync.provider.serverBaseUrl": "Server Base URL",
+    "settings.sync.provider.serverBaseUrlPlaceholder":
+      "http://127.0.0.1:8787 หรือ https://sync.example.com",
+    "settings.sync.provider.serverHelper":
+      "ตั้ง URL ของ server ครั้งเดียวแล้วกด Apply เพื่อเติม URL ส่งขึ้น/ดึงลงอัตโนมัติ (ไม่จำเป็นต้องใส่ scheme: localhost/LAN จะใช้ http, host อื่นจะใช้ https)",
+    "settings.sync.provider.serverApply": "Apply Server URL",
+    "settings.sync.provider.serverUseLocalhost": "ใช้ Localhost Preset",
     "settings.sync.provider.pushUrl": "URL ส่งข้อมูลขึ้น",
     "settings.sync.provider.pullUrl": "URL ดึงข้อมูลลง",
     "settings.sync.provider.pushPlaceholder":
