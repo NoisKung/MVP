@@ -48,8 +48,10 @@ Result summary:
 
 ## 5) Recommended Next Steps
 
-1. รัน `npm run mcp:load-matrix:hosted:preflight` เพื่อเช็ก env/health ก่อนรันจริง
-2. รัน `npm run mcp:load-matrix:hosted` กับ endpoint staging จริง
-3. รัน `npm run mcp:load-matrix:compare` แล้วแนบ report เข้า PR/release notes
+1. รัน `npm run mcp:load-matrix:hosted:pipeline` (รวม preflight -> hosted -> compare)
+2. หรือรันแบบ manual:
+   - `npm run mcp:load-matrix:hosted:preflight`
+   - `npm run mcp:load-matrix:hosted`
+   - `npm run mcp:load-matrix:compare`
 4. ส่ง file audit sink เข้า centralized sink (CloudWatch/S3) ตาม retention policy ของ environment
 5. ถ้าใช้ `http` sink ให้ผูก `SOLOSTACK_MCP_AUDIT_HTTP_URL` และตรวจ delivery/error-rate บน staging ก่อน production

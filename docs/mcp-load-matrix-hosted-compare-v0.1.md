@@ -10,6 +10,9 @@ Baseline profile: medium
 ## Notes
 
 - No comparable matrix rows found between baseline and hosted report files.
-- Generate hosted matrix first, then re-run compare:
+- Preferred path:
+  - `npm run mcp:load-matrix:hosted:pipeline`
+- Manual path:
+  - `npm run mcp:load-matrix:hosted:preflight`
   - `npm run mcp:load-matrix:hosted`
   - `npm run mcp:load-matrix:compare`

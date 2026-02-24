@@ -260,6 +260,7 @@ Google Drive (`appDataFolder`) vs OneDrive (`approot`) ในมุม SoloStack
     - env config: `SOLOSTACK_MCP_AUDIT_HTTP_URL`, `SOLOSTACK_MCP_AUDIT_HTTP_TIMEOUT_MS`, `SOLOSTACK_MCP_AUDIT_HTTP_AUTH_TOKEN`
   - เพิ่ม hosted matrix tooling:
     - `npm run mcp:load-matrix:hosted:preflight`
+    - `npm run mcp:load-matrix:hosted:pipeline`
     - `npm run mcp:load-matrix:hosted`
     - `npm run mcp:load-matrix:compare`
 - คงเหลือ:

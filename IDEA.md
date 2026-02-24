@@ -826,6 +826,7 @@ Recommended follow-up:
     - `SOLOSTACK_MCP_AUDIT_RETENTION_DAYS`
   - เพิ่ม hosted load/perf tooling:
     - `npm run mcp:load-matrix:hosted:preflight`
+    - `npm run mcp:load-matrix:hosted:pipeline`
     - `npm run mcp:load-matrix:hosted`
     - `npm run mcp:load-matrix:compare`
   - เพิ่ม centralized audit sink mode `http`:

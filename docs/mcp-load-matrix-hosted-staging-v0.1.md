@@ -6,6 +6,9 @@ Status: Pending hosted staging run
 ## How to Generate
 
 ```bash
+npm run mcp:load-matrix:hosted:pipeline
+
+# or manual sequence:
 npm run mcp:load-matrix:hosted:preflight
 
 SOLOSTACK_MCP_HOSTED_BASE_URL=https://<hosted-endpoint> \
@@ -16,6 +19,7 @@ npm run mcp:load-matrix:hosted
 Default output:
 - `docs/mcp-load-matrix-hosted-preflight-v0.1.md`
 - `docs/mcp-load-matrix-hosted-staging-v0.1.md`
+- `docs/mcp-load-matrix-hosted-pipeline-v0.1.md`
 
 ## Notes
 

@@ -118,6 +118,15 @@ npm run mcp:load-matrix:hosted:preflight
 output default:
 - `docs/mcp-load-matrix-hosted-preflight-v0.1.md`
 
+Hosted pipeline (preflight -> hosted matrix -> compare):
+
+```bash
+npm run mcp:load-matrix:hosted:pipeline
+```
+
+output default:
+- `docs/mcp-load-matrix-hosted-pipeline-v0.1.md`
+
 Compare hosted vs local baseline:
 
 ```bash
