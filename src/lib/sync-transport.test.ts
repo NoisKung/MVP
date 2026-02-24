@@ -173,6 +173,104 @@ describe("sync-transport", () => {
     expect(resolved.warning).toContain("connector is not configured");
   });
 
+  it("resolves managed provider as ready via connector settings and executes push/pull RPC", async () => {
+    const pushResponsePayload = {
+      accepted: [],
+      rejected: [],
+      server_cursor: "cursor-1",
+      server_time: "2026-02-23T00:00:00.000Z",
+    };
+    const pullResponsePayload = {
+      server_cursor: "cursor-2",
+      server_time: "2026-02-23T00:00:01.000Z",
+      changes: [],
+      has_more: false,
+    };
+
+    const fetchMock = vi
+      .fn()
+      .mockImplementation(async (url: string | URL, init?: RequestInit) => {
+        const method = (init?.method ?? "GET").toUpperCase();
+        const href = typeof url === "string" ? url : url.toString();
+
+        if (method === "PUT") {
+          return new Response(
+            JSON.stringify({
+              etag: "request-etag",
+            }),
+            { status: 200 },
+          );
+        }
+
+        if (method === "GET") {
+          const rawKey = href.split("/google/appdata/files/")[1] ?? "";
+          const decodedKey = decodeURIComponent(rawKey);
+          if (decodedKey.includes("/responses/push-")) {
+            return new Response(
+              JSON.stringify({
+                content: JSON.stringify(pushResponsePayload),
+                etag: "response-push",
+              }),
+              { status: 200 },
+            );
+          }
+          if (decodedKey.includes("/responses/pull-")) {
+            return new Response(
+              JSON.stringify({
+                content: JSON.stringify(pullResponsePayload),
+                etag: "response-pull",
+              }),
+              { status: 200 },
+            );
+          }
+        }
+
+        if (method === "DELETE") {
+          return new Response("", { status: 204 });
+        }
+
+        return new Response(
+          JSON.stringify({
+            message: "unexpected request",
+          }),
+          { status: 500 },
+        );
+      });
+    vi.stubGlobal("fetch", fetchMock);
+
+    const resolved = resolveSyncTransportConfig({
+      provider: "google_appdata",
+      providerConfig: {
+        managed_base_url: "https://connector.example.com",
+        managed_auth: {
+          access_token: "access-1",
+          token_type: "Bearer",
+        },
+      },
+      pushUrl: null,
+      pullUrl: null,
+    });
+
+    expect(resolved.status).toBe("ready");
+    expect(resolved.transport).toBeTruthy();
+
+    const pushResult = await resolved.transport!.push({ test: "push" });
+    const pullResult = await resolved.transport!.pull({ test: "pull" });
+    expect(pushResult).toEqual(pushResponsePayload);
+    expect(pullResult).toEqual(pullResponsePayload);
+
+    const writeCalls = fetchMock.mock.calls.filter(
+      ([, init]) =>
+        ((init as RequestInit | undefined)?.method ?? "GET") === "PUT",
+    );
+    expect(writeCalls.length).toBeGreaterThanOrEqual(2);
+    const firstWriteHeaders = writeCalls[0][1] as RequestInit;
+    expect(firstWriteHeaders.headers).toBeInstanceOf(Headers);
+    expect((firstWriteHeaders.headers as Headers).get("authorization")).toBe(
+      "Bearer access-1",
+    );
+  });
+
   it("returns provider_unavailable when managed provider is flagged unavailable", () => {
     const resolved = resolveSyncTransportConfig({
       provider: "onedrive_approot",

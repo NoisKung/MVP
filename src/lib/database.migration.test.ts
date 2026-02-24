@@ -379,6 +379,78 @@ describe("database migration", () => {
     expect(runtimeProfile.runtime_profile).toBe("custom");
   });
 
+  it("redacts managed auth from provider config and keeps secure policy marker", async () => {
+    const namespace = `provider-session-auth-${randomUUID()}`;
+    const database = await loadDatabaseModule({
+      namespace,
+      preseed: "none",
+    });
+
+    const updatedProvider = await database.updateSyncProviderSettings({
+      provider: "google_appdata",
+      provider_config: {
+        endpoint_mode: "managed",
+        managed_base_url: "https://connector.example.com",
+        managed_auth: {
+          access_token: "access-1",
+          token_type: "Bearer",
+          refresh_token: "refresh-1",
+          token_refresh_url: "https://auth.example.com/token",
+          expires_at: "2026-02-23T10:00:00.000Z",
+          scope: "drive.appdata",
+          client_id: "client-id",
+          client_secret: "client-secret",
+        },
+      },
+    });
+
+    const runtimeAuth =
+      (updatedProvider.provider_config?.managed_auth as
+        | Record<string, unknown>
+        | undefined) ?? {};
+    expect(runtimeAuth.access_token).toBe("access-1");
+    expect(runtimeAuth.refresh_token).toBe("refresh-1");
+    expect(runtimeAuth.client_secret).toBe("client-secret");
+
+    const exportedBackup = await database.exportBackupPayload();
+    const providerConfigSetting = exportedBackup.data.settings.find(
+      (setting) => setting.key === "local.sync.provider_config",
+    );
+    expect(providerConfigSetting).toBeTruthy();
+    const persistedProviderConfig = JSON.parse(
+      providerConfigSetting!.value,
+    ) as {
+      managed_auth?: Record<string, unknown>;
+      managed_auth_storage_policy?: string;
+    };
+    expect(persistedProviderConfig.managed_auth).toBeTruthy();
+    expect(
+      persistedProviderConfig.managed_auth?.access_token ?? null,
+    ).toBeNull();
+    expect(
+      persistedProviderConfig.managed_auth?.refresh_token ?? null,
+    ).toBeNull();
+    expect(
+      persistedProviderConfig.managed_auth?.client_secret ?? null,
+    ).toBeNull();
+    expect(persistedProviderConfig.managed_auth_storage_policy ?? "").toContain(
+      "secure_keystore",
+    );
+
+    const restartedDatabase = await loadDatabaseModule({
+      namespace,
+      preseed: "none",
+    });
+    const readAfterRestart = await restartedDatabase.getSyncProviderSettings();
+    const readAfterRestartAuth =
+      (readAfterRestart.provider_config?.managed_auth as
+        | Record<string, unknown>
+        | undefined) ?? {};
+    expect(readAfterRestartAuth.access_token ?? null).toBeNull();
+    expect(readAfterRestartAuth.refresh_token ?? null).toBeNull();
+    expect(readAfterRestartAuth.client_secret ?? null).toBeNull();
+  });
+
   it("keeps provider/runtime/checkpoint/outbox stable across restart", async () => {
     const namespace = `restart-stability-${randomUUID()}`;
     const database = await loadDatabaseModule({
@@ -428,13 +500,15 @@ describe("database migration", () => {
     });
 
     const provider = await restartedDatabase.getSyncProviderSettings();
-    expect(provider).toEqual({
-      provider: "google_appdata",
-      provider_config: {
-        endpoint_mode: "managed",
-        managed_available: true,
-      },
+    expect(provider.provider).toBe("google_appdata");
+    expect(provider.provider_config).toMatchObject({
+      endpoint_mode: "managed",
+      managed_available: true,
     });
+    expect(
+      (provider.provider_config as Record<string, unknown>)
+        .managed_auth_storage_policy,
+    ).toBe("desktop_secure_keystore");
     const runtimeProfile =
       await restartedDatabase.getSyncRuntimeProfileSettings("desktop");
     expect(runtimeProfile.runtime_profile).toBe("mobile_beta");

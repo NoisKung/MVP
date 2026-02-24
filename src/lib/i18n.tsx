@@ -688,7 +688,7 @@ const TRANSLATIONS = {
     "settings.sync.provider.managed.desc":
       "Optional pilot settings for managed connector gateway and OAuth tokens.",
     "settings.sync.provider.managed.securityHint":
-      "Sensitive tokens are redacted from SQLite/backup. On Tauri desktop, tokens are stored in OS secure keystore; other runtimes fall back to session-only memory.",
+      "Sensitive tokens are redacted from SQLite/backup. On Tauri desktop/iOS/Android, tokens are stored in OS secure keystore; other runtimes fall back to session-only memory.",
     "settings.sync.provider.managed.baseUrl": "Connector Base URL",
     "settings.sync.provider.managed.baseUrlPlaceholder":
       "https://connector.example.com",
@@ -1651,7 +1651,7 @@ const TRANSLATIONS = {
     "settings.sync.provider.managed.desc":
       "การตั้งค่าทดลองสำหรับเกตเวย์ตัวเชื่อมต่อแบบระบบจัดการและโทเค็น OAuth",
     "settings.sync.provider.managed.securityHint":
-      "โทเค็นที่อ่อนไหวจะไม่บันทึกลง SQLite/backup และใน Tauri Desktop จะเก็บใน secure keystore ของระบบปฏิบัติการ (runtime อื่นจะ fallback เป็นหน่วยความจำเฉพาะ session)",
+      "โทเค็นที่อ่อนไหวจะไม่บันทึกลง SQLite/backup และใน Tauri desktop/iOS/Android จะเก็บใน secure keystore ของระบบปฏิบัติการ (runtime อื่นจะ fallback เป็นหน่วยความจำเฉพาะ session)",
     "settings.sync.provider.managed.baseUrl": "Base URL ของ Connector",
     "settings.sync.provider.managed.baseUrlPlaceholder":
       "https://connector.example.com",
