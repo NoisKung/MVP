@@ -16,6 +16,7 @@
     "mvp-cli": "node --no-warnings scripts/mvp-cli.mjs",
     "mcp:dev": "node --no-warnings mcp-solostack/server.mjs",
     "mcp:load-matrix": "node --no-warnings scripts/mcp-load-matrix.mjs",
+    "mcp:load-matrix:hosted:preflight": "node --no-warnings scripts/mcp-load-matrix-hosted-preflight.mjs",
     "mcp:load-matrix:hosted": "node --no-warnings scripts/mcp-load-matrix-hosted.mjs",
     "mcp:load-matrix:compare": "node --no-warnings scripts/mcp-load-matrix-compare.mjs"
   },

@@ -109,6 +109,15 @@ npm run mcp:load-matrix:hosted
 output default:
 - `docs/mcp-load-matrix-hosted-staging-v0.1.md`
 
+Hosted staging preflight (env + health probe):
+
+```bash
+npm run mcp:load-matrix:hosted:preflight
+```
+
+output default:
+- `docs/mcp-load-matrix-hosted-preflight-v0.1.md`
+
 Compare hosted vs local baseline:
 
 ```bash
