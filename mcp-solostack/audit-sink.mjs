@@ -29,9 +29,7 @@ function formatIsoDay(value) {
 }
 
 function parseDayFromAuditFilename(filename) {
-  const match = filename.match(
-    /^mcp-tool-call-(\d{4}-\d{2}-\d{2})\.log$/u,
-  );
+  const match = filename.match(/^mcp-tool-call-(\d{4}-\d{2}-\d{2})\.log$/u);
   if (!match) return null;
   return match[1] ?? null;
 }
@@ -39,6 +37,29 @@ function parseDayFromAuditFilename(filename) {
 function parseDayStartMs(day) {
   const parsed = Date.parse(`${day}T00:00:00.000Z`);
   return Number.isFinite(parsed) ? parsed : null;
+}
+
+function normalizeHttpUrl(value) {
+  if (typeof value !== "string") return null;
+  const normalized = value.trim();
+  if (!normalized) return null;
+  try {
+    const parsed = new URL(normalized);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      return null;
+    }
+    return parsed.toString();
+  } catch {
+    return null;
+  }
+}
+
+function normalizeHttpTimeoutMs(value) {
+  if (typeof value !== "number" || !Number.isFinite(value)) return 3000;
+  const normalized = Math.floor(value);
+  if (normalized < 100) return 100;
+  if (normalized > 60_000) return 60_000;
+  return normalized;
 }
 
 export function createFileAuditSink(input = {}) {
@@ -67,7 +88,9 @@ export function createFileAuditSink(input = {}) {
 
   function write(eventPayload) {
     const eventObject =
-      eventPayload && typeof eventPayload === "object" && !Array.isArray(eventPayload)
+      eventPayload &&
+      typeof eventPayload === "object" &&
+      !Array.isArray(eventPayload)
         ? eventPayload
         : {};
     const nowMs = now();
@@ -91,5 +114,75 @@ export function createFileAuditSink(input = {}) {
     retention_days: retentionDays,
     write,
     prune,
+  };
+}
+
+export function createHttpAuditSink(input = {}) {
+  const url = normalizeHttpUrl(input.url);
+  if (!url) {
+    throw new Error("audit http sink requires a valid http(s) URL.");
+  }
+
+  const authToken =
+    typeof input.auth_token === "string" && input.auth_token.trim()
+      ? input.auth_token.trim()
+      : null;
+  const timeoutMs = normalizeHttpTimeoutMs(input.timeout_ms);
+  const onError =
+    typeof input.on_error === "function" ? input.on_error : () => {};
+  const now = typeof input.now === "function" ? input.now : () => Date.now();
+  const fetchImpl =
+    typeof input.fetch_impl === "function" ? input.fetch_impl : fetch;
+
+  function write(eventPayload) {
+    const eventObject =
+      eventPayload &&
+      typeof eventPayload === "object" &&
+      !Array.isArray(eventPayload)
+        ? eventPayload
+        : {};
+    const payload = {
+      timestamp_iso: new Date(now()).toISOString(),
+      ...eventObject,
+    };
+
+    const controller = new AbortController();
+    const timeoutHandle = setTimeout(() => controller.abort(), timeoutMs);
+    void fetchImpl(url, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        ...(authToken
+          ? {
+              authorization: `Bearer ${authToken}`,
+            }
+          : {}),
+      },
+      body: JSON.stringify(payload),
+      signal: controller.signal,
+    })
+      .then((response) => {
+        if (!response.ok) {
+          onError(
+            new Error(
+              `audit http sink rejected with status ${response.status}`,
+            ),
+            payload,
+          );
+        }
+      })
+      .catch((error) => {
+        onError(error, payload);
+      })
+      .finally(() => {
+        clearTimeout(timeoutHandle);
+      });
+  }
+
+  return {
+    mode: "http",
+    url,
+    timeout_ms: timeoutMs,
+    write,
   };
 }

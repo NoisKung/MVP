@@ -112,6 +112,27 @@ function buildReport(input) {
   return lines.join("\n");
 }
 
+function buildPendingReport(input) {
+  return [
+    "# MCP Hosted vs Local Baseline Comparison v0.1",
+    "",
+    `Date: ${new Date().toISOString().slice(0, 10)}`,
+    "Status: Pending hosted staging report",
+    "",
+    `Baseline file: ${input.baselineFile}`,
+    `Hosted file: ${input.hostedFile}`,
+    `Baseline profile: ${input.baselineProfile}`,
+    "",
+    "## Notes",
+    "",
+    "- No comparable matrix rows found between baseline and hosted report files.",
+    "- Generate hosted matrix first, then re-run compare:",
+    "  - `npm run mcp:load-matrix:hosted`",
+    "  - `npm run mcp:load-matrix:compare`",
+    "",
+  ].join("\n");
+}
+
 function main() {
   const args = parseArgs(process.argv.slice(2));
   const baselineRows = parseMatrixRows(readFileSync(args.baseline, "utf8"));
@@ -128,9 +149,15 @@ function main() {
     baselineByTool.has(tool),
   );
   if (comparableTools.length === 0) {
-    throw new Error(
-      "No comparable tools found between baseline and hosted reports.",
-    );
+    const pendingMarkdown = buildPendingReport({
+      baselineFile: args.baseline,
+      hostedFile: args.hosted,
+      baselineProfile: args.baselineProfile,
+    });
+    writeFileSync(args.out, pendingMarkdown, "utf8");
+    // eslint-disable-next-line no-console
+    console.log(`Hosted comparison report generated (pending): ${args.out}`);
+    return;
   }
 
   const rows = comparableTools

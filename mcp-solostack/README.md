@@ -58,6 +58,7 @@ Tool endpoints require `SOLOSTACK_MCP_DB_PATH` to point to a valid SQLite file.
 Audit sink modes:
 - `stdout` (default): log ผ่าน console/stdout
 - `file`: เขียน JSONL ไฟล์แบบรายวัน (`mcp-tool-call-YYYY-MM-DD.log`) พร้อม retention pruning
+- `http`: ส่ง audit event ไป centralized endpoint แบบ `POST` JSON ต่อ event
 
 Guardrails runtime:
 - rate limit ต่อ `/tools*` (ปิดโดย default)
@@ -79,9 +80,12 @@ Guardrails runtime:
 - `SOLOSTACK_MCP_TIMEOUT_GUARD_ENABLED` (`true|false`, default: `false`)
 - `SOLOSTACK_MCP_TIMEOUT_STRATEGY` (`soft|worker_hard`, default: `soft`)
 - `SOLOSTACK_MCP_TOOL_TIMEOUT_MS` (`100..60000`, default: `2000`)
-- `SOLOSTACK_MCP_AUDIT_SINK` (`stdout|file`, default: `stdout`)
+- `SOLOSTACK_MCP_AUDIT_SINK` (`stdout|file|http`, default: `stdout`)
 - `SOLOSTACK_MCP_AUDIT_LOG_DIR` (default: `mcp-solostack/audit`)
 - `SOLOSTACK_MCP_AUDIT_RETENTION_DAYS` (`1..3650`, default: `30`)
+- `SOLOSTACK_MCP_AUDIT_HTTP_URL` (required เมื่อ `SOLOSTACK_MCP_AUDIT_SINK=http`)
+- `SOLOSTACK_MCP_AUDIT_HTTP_TIMEOUT_MS` (`100..60000`, default: `3000`)
+- `SOLOSTACK_MCP_AUDIT_HTTP_AUTH_TOKEN` (optional bearer token)
 
 ## Load Matrix
 

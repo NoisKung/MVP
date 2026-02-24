@@ -11,6 +11,7 @@ Scope: `mcp-solostack` read-only runtime baseline
 - Structured error envelope with stable codes (`INVALID_ARGUMENT`, `NOT_FOUND`, `INTERNAL_ERROR`)
 - Audit logging baseline for every tool call (`event = mcp.tool_call`)
 - Audit sink mode `file` พร้อม daily JSONL + retention pruning
+- เพิ่ม audit sink mode `http` สำหรับส่ง event เข้า centralized endpoint โดยตรง
 - In-memory rate limiter สำหรับ `/tools*` (fixed window, configurable)
 - Timeout guard แบบ configurable:
   - `soft` (duration-based post-check)
@@ -50,3 +51,4 @@ Result summary:
 1. รัน `npm run mcp:load-matrix:hosted` กับ endpoint staging จริง
 2. รัน `npm run mcp:load-matrix:compare` แล้วแนบ report เข้า PR/release notes
 3. ส่ง file audit sink เข้า centralized sink (CloudWatch/S3) ตาม retention policy ของ environment
+4. ถ้าใช้ `http` sink ให้ผูก `SOLOSTACK_MCP_AUDIT_HTTP_URL` และตรวจ delivery/error-rate บน staging ก่อน production
