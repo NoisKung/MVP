@@ -1,42 +1,11 @@
 import { writeFileSync } from "node:fs";
-
-function asOptionalString(value) {
-  if (typeof value !== "string") return null;
-  const normalized = value.trim();
-  return normalized || null;
-}
-
-function parseOptionalHttpUrl(value) {
-  const normalized = asOptionalString(value);
-  if (!normalized) {
-    return {
-      value: null,
-      valid: false,
-      reason: "missing",
-    };
-  }
-  try {
-    const parsed = new URL(normalized);
-    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-      return {
-        value: null,
-        valid: false,
-        reason: "invalid_protocol",
-      };
-    }
-    return {
-      value: parsed.toString(),
-      valid: true,
-      reason: null,
-    };
-  } catch {
-    return {
-      value: null,
-      valid: false,
-      reason: "invalid_url",
-    };
-  }
-}
+import {
+  DEFAULT_HOSTED_PROFILE_CONFIG_PATH,
+  asOptionalString,
+  isLocalhostHostedUrl,
+  normalizeHostedBaseUrl,
+  resolveHostedProfileSettings,
+} from "./mcp-hosted-profile.mjs";
 
 function parseBoundedInt(value, fallback, min, max) {
   const normalized = asOptionalString(value);
@@ -73,12 +42,14 @@ function parseBoundedInt(value, fallback, min, max) {
 function parseArgs(argv) {
   const args = {
     out: "docs/mcp-load-matrix-hosted-preflight-v0.1.md",
-    baseUrl: process.env.SOLOSTACK_MCP_HOSTED_BASE_URL ?? "",
-    authToken: process.env.SOLOSTACK_MCP_HOSTED_AUTH_TOKEN ?? "",
-    auditSink: process.env.SOLOSTACK_MCP_AUDIT_SINK ?? "stdout",
-    auditRetentionDays: process.env.SOLOSTACK_MCP_AUDIT_RETENTION_DAYS ?? "",
-    auditHttpUrl: process.env.SOLOSTACK_MCP_AUDIT_HTTP_URL ?? "",
-    auditHttpTimeoutMs: process.env.SOLOSTACK_MCP_AUDIT_HTTP_TIMEOUT_MS ?? "",
+    configPath: DEFAULT_HOSTED_PROFILE_CONFIG_PATH,
+    profileName: "",
+    baseUrl: "",
+    authToken: "",
+    auditSink: "",
+    auditRetentionDays: "",
+    auditHttpUrl: "",
+    auditHttpTimeoutMs: "",
     skipHealthProbe: false,
   };
 
@@ -91,6 +62,16 @@ function parseArgs(argv) {
     }
     if (token === "--base-url") {
       args.baseUrl = argv[index + 1] ?? args.baseUrl;
+      index += 1;
+      continue;
+    }
+    if (token === "--config") {
+      args.configPath = argv[index + 1] ?? args.configPath;
+      index += 1;
+      continue;
+    }
+    if (token === "--profile") {
+      args.profileName = argv[index + 1] ?? args.profileName;
       index += 1;
       continue;
     }
@@ -216,6 +197,9 @@ function buildReport(input) {
     "",
     `Date: ${new Date().toISOString().slice(0, 10)}`,
     `Status: ${input.ready ? "Ready for hosted matrix run" : "Pending configuration"}`,
+    `Profile: ${input.profileLabel}`,
+    `Endpoint type: ${input.endpointTypeLabel}`,
+    `Config path: ${input.configPathLabel}`,
     "",
     "## Check Matrix",
     "",
@@ -271,24 +255,63 @@ function buildReport(input) {
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
-  const normalizedBaseUrl = parseOptionalHttpUrl(args.baseUrl);
-  const normalizedAuditHttpUrl = parseOptionalHttpUrl(args.auditHttpUrl);
-  const normalizedAuthToken = asOptionalString(args.authToken);
+  const profileSettings = resolveHostedProfileSettings({
+    configPath: args.configPath,
+    profileName: args.profileName,
+    baseUrl: args.baseUrl,
+    authToken: args.authToken,
+    skipHealthProbe: args.skipHealthProbe,
+  });
+  if (profileSettings.config_parse_error) {
+    throw new Error(
+      `Invalid hosted profile config (${profileSettings.config_path}): ${profileSettings.config_parse_error}`,
+    );
+  }
+  if (
+    profileSettings.selected_profile &&
+    !profileSettings.selected_profile_found
+  ) {
+    throw new Error(
+      `Hosted profile "${profileSettings.selected_profile}" was not found in ${profileSettings.config_path}.`,
+    );
+  }
+
+  const normalizedBaseUrl = normalizeHostedBaseUrl(profileSettings.base_url);
+  const normalizedAuditHttpUrl = normalizeHostedBaseUrl(
+    asOptionalString(args.auditHttpUrl) ??
+      process.env.SOLOSTACK_MCP_AUDIT_HTTP_URL ??
+      "",
+  );
+  const normalizedAuthToken = asOptionalString(profileSettings.auth_token);
   const normalizedAuditSink = (
-    asOptionalString(args.auditSink) ?? "stdout"
+    asOptionalString(args.auditSink) ??
+    process.env.SOLOSTACK_MCP_AUDIT_SINK ??
+    "stdout"
   ).toLowerCase();
   const normalizedAuditHttpTimeout = parseBoundedInt(
-    args.auditHttpTimeoutMs,
+    asOptionalString(args.auditHttpTimeoutMs) ??
+      process.env.SOLOSTACK_MCP_AUDIT_HTTP_TIMEOUT_MS ??
+      "",
     3000,
     100,
     60_000,
   );
   const normalizedAuditRetentionDays = parseBoundedInt(
-    args.auditRetentionDays,
+    asOptionalString(args.auditRetentionDays) ??
+      process.env.SOLOSTACK_MCP_AUDIT_RETENTION_DAYS ??
+      "",
     30,
     1,
     3650,
   );
+
+  const endpointType =
+    normalizedBaseUrl.valid && normalizedBaseUrl.value
+      ? isLocalhostHostedUrl(normalizedBaseUrl.value)
+        ? "localhost"
+        : "cloud"
+      : "cloud";
+  const authRequired = endpointType === "cloud";
 
   const checks = [];
 
@@ -298,7 +321,7 @@ async function main() {
       required: true,
       ok: normalizedBaseUrl.valid,
       detail: normalizedBaseUrl.valid
-        ? normalizedBaseUrl.value
+        ? `${normalizedBaseUrl.value}${normalizedBaseUrl.inferred_scheme ? ` (inferred ${normalizedBaseUrl.inferred_scheme}://)` : ""}`
         : "Missing or invalid SOLOSTACK_MCP_HOSTED_BASE_URL.",
       action:
         "Set SOLOSTACK_MCP_HOSTED_BASE_URL to http(s) endpoint and re-run preflight.",
@@ -308,13 +331,18 @@ async function main() {
   checks.push(
     buildCheck({
       name: "Hosted auth token",
-      required: true,
-      ok: Boolean(normalizedAuthToken),
-      detail: normalizedAuthToken
-        ? "Token is set."
-        : "Missing SOLOSTACK_MCP_HOSTED_AUTH_TOKEN.",
-      action:
-        "Set SOLOSTACK_MCP_HOSTED_AUTH_TOKEN for staging/protected endpoint validation.",
+      required: authRequired,
+      ok: authRequired ? Boolean(normalizedAuthToken) : true,
+      detail: authRequired
+        ? normalizedAuthToken
+          ? "Token is set."
+          : "Missing SOLOSTACK_MCP_HOSTED_AUTH_TOKEN."
+        : normalizedAuthToken
+          ? "Token is set (optional for localhost endpoint)."
+          : "Token is optional for localhost endpoint.",
+      action: authRequired
+        ? "Set SOLOSTACK_MCP_HOSTED_AUTH_TOKEN for cloud/staging endpoint validation."
+        : "Optional: set auth token when local gateway enforces auth.",
     }),
   );
 
@@ -399,7 +427,7 @@ async function main() {
     await probeHostedHealth({
       baseUrl: normalizedBaseUrl.value,
       authToken: normalizedAuthToken,
-      skipHealthProbe: args.skipHealthProbe,
+      skipHealthProbe: profileSettings.skip_health_probe,
     }),
   );
 
@@ -407,6 +435,9 @@ async function main() {
   const markdown = buildReport({
     ready,
     checks,
+    profileLabel: profileSettings.selected_profile ?? "direct",
+    endpointTypeLabel: endpointType,
+    configPathLabel: profileSettings.config_path,
     baseUrlLabel: normalizedBaseUrl.value ?? "not_set",
     authTokenLabel: normalizedAuthToken ? "set" : "not_set",
     auditSinkLabel: normalizedAuditSink,

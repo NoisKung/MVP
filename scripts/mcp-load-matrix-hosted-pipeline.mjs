@@ -1,11 +1,9 @@
 import { spawnSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
-
-function asOptionalString(value) {
-  if (typeof value !== "string") return null;
-  const normalized = value.trim();
-  return normalized || null;
-}
+import {
+  DEFAULT_HOSTED_PROFILE_CONFIG_PATH,
+  asOptionalString,
+} from "./mcp-hosted-profile.mjs";
 
 function parseArgs(argv) {
   const args = {
@@ -15,9 +13,11 @@ function parseArgs(argv) {
     pipelineOut: "docs/mcp-load-matrix-hosted-pipeline-v0.1.md",
     baseline: "docs/mcp-load-matrix-v0.1.md",
     baselineProfile: "medium",
-    baseUrl: process.env.SOLOSTACK_MCP_HOSTED_BASE_URL ?? "",
-    authToken: process.env.SOLOSTACK_MCP_HOSTED_AUTH_TOKEN ?? "",
-    iterations: process.env.SOLOSTACK_MCP_HOSTED_ITERATIONS ?? "",
+    configPath: DEFAULT_HOSTED_PROFILE_CONFIG_PATH,
+    profileName: "",
+    baseUrl: "",
+    authToken: "",
+    iterations: "",
     skipHealthProbe: false,
   };
 
@@ -58,6 +58,16 @@ function parseArgs(argv) {
       index += 1;
       continue;
     }
+    if (token === "--config") {
+      args.configPath = argv[index + 1] ?? args.configPath;
+      index += 1;
+      continue;
+    }
+    if (token === "--profile") {
+      args.profileName = argv[index + 1] ?? args.profileName;
+      index += 1;
+      continue;
+    }
     if (token === "--auth-token") {
       args.authToken = argv[index + 1] ?? args.authToken;
       index += 1;
@@ -84,12 +94,7 @@ function renderCodeBlock(value) {
 
 function runNodeScript(scriptPath, scriptArgs) {
   const startedAt = Date.now();
-  const command = [
-    "node",
-    "--no-warnings",
-    scriptPath,
-    ...scriptArgs,
-  ];
+  const command = ["node", "--no-warnings", scriptPath, ...scriptArgs];
   const result = spawnSync(command[0], command.slice(1), {
     encoding: "utf8",
     stdio: "pipe",
@@ -118,7 +123,9 @@ function buildReport(input) {
   ];
 
   for (const step of input.steps) {
-    lines.push(`| ${step.name} | ${step.result.exitCode} | ${step.result.durationMs} |`);
+    lines.push(
+      `| ${step.name} | ${step.result.exitCode} | ${step.result.durationMs} |`,
+    );
   }
 
   lines.push("");
@@ -126,8 +133,12 @@ function buildReport(input) {
   lines.push("");
   lines.push(`- \`SOLOSTACK_MCP_HOSTED_BASE_URL\`: ${input.baseUrlLabel}`);
   lines.push(`- \`SOLOSTACK_MCP_HOSTED_AUTH_TOKEN\`: ${input.authTokenLabel}`);
+  lines.push(`- \`profile\`: ${input.profileLabel}`);
+  lines.push(`- \`config_path\`: ${input.configPathLabel}`);
   lines.push(`- \`iterations\`: ${input.iterationsLabel}`);
-  lines.push(`- \`skip_health_probe\`: ${input.skipHealthProbe ? "true" : "false"}`);
+  lines.push(
+    `- \`skip_health_probe\`: ${input.skipHealthProbe ? "true" : "false"}`,
+  );
   lines.push("");
   lines.push("## Detail");
   lines.push("");
@@ -150,9 +161,7 @@ function buildReport(input) {
   if (!input.success) {
     lines.push("## Next Actions");
     lines.push("");
-    lines.push(
-      "1. Resolve failures in the first non-zero step above.",
-    );
+    lines.push("1. Resolve failures in the first non-zero step above.");
     lines.push(
       "2. Re-run `npm run mcp:load-matrix:hosted:pipeline` after environment is ready.",
     );
@@ -165,6 +174,12 @@ function buildReport(input) {
 function main() {
   const args = parseArgs(process.argv.slice(2));
   const sharedHostedArgs = [];
+  if (asOptionalString(args.configPath)) {
+    sharedHostedArgs.push("--config", args.configPath);
+  }
+  if (asOptionalString(args.profileName)) {
+    sharedHostedArgs.push("--profile", args.profileName);
+  }
   if (asOptionalString(args.baseUrl)) {
     sharedHostedArgs.push("--base-url", args.baseUrl);
   }
@@ -172,28 +187,23 @@ function main() {
     sharedHostedArgs.push("--auth-token", args.authToken);
   }
 
-  const preflightArgs = [
-    "--out",
-    args.preflightOut,
-    ...sharedHostedArgs,
-  ];
+  const preflightArgs = ["--out", args.preflightOut, ...sharedHostedArgs];
   if (args.skipHealthProbe) {
     preflightArgs.push("--skip-health-probe");
   }
   const preflightStep = {
     name: "Preflight",
-    result: runNodeScript("scripts/mcp-load-matrix-hosted-preflight.mjs", preflightArgs),
+    result: runNodeScript(
+      "scripts/mcp-load-matrix-hosted-preflight.mjs",
+      preflightArgs,
+    ),
   };
 
   const steps = [preflightStep];
   let success = preflightStep.result.exitCode === 0;
 
   if (success) {
-    const hostedArgs = [
-      "--out",
-      args.hostedOut,
-      ...sharedHostedArgs,
-    ];
+    const hostedArgs = ["--out", args.hostedOut, ...sharedHostedArgs];
     if (asOptionalString(args.iterations)) {
       hostedArgs.push("--iterations", args.iterations);
     }
@@ -227,9 +237,22 @@ function main() {
   const report = buildReport({
     success,
     steps,
-    baseUrlLabel: asOptionalString(args.baseUrl) ?? "not_set",
-    authTokenLabel: asOptionalString(args.authToken) ? "set" : "not_set",
-    iterationsLabel: asOptionalString(args.iterations) ?? "default",
+    baseUrlLabel:
+      asOptionalString(args.baseUrl) ??
+      asOptionalString(process.env.SOLOSTACK_MCP_HOSTED_BASE_URL) ??
+      "not_set",
+    authTokenLabel:
+      (asOptionalString(args.authToken) ??
+      asOptionalString(process.env.SOLOSTACK_MCP_HOSTED_AUTH_TOKEN))
+        ? "set"
+        : "not_set",
+    profileLabel: asOptionalString(args.profileName) ?? "auto",
+    configPathLabel:
+      asOptionalString(args.configPath) ?? DEFAULT_HOSTED_PROFILE_CONFIG_PATH,
+    iterationsLabel:
+      asOptionalString(args.iterations) ??
+      asOptionalString(process.env.SOLOSTACK_MCP_HOSTED_ITERATIONS) ??
+      "default",
     skipHealthProbe: args.skipHealthProbe,
   });
   writeFileSync(args.pipelineOut, report, "utf8");

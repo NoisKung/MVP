@@ -2,6 +2,9 @@
 
 Date: 2026-02-24
 Status: Pending configuration
+Profile: direct
+Endpoint type: cloud
+Config path: mcp-solostack/hosted-profiles.json
 
 ## Check Matrix
 
@@ -17,7 +20,7 @@ Status: Pending configuration
 ## Next Actions
 
 1. Hosted base URL: Set SOLOSTACK_MCP_HOSTED_BASE_URL to http(s) endpoint and re-run preflight.
-2. Hosted auth token: Set SOLOSTACK_MCP_HOSTED_AUTH_TOKEN for staging/protected endpoint validation.
+2. Hosted auth token: Set SOLOSTACK_MCP_HOSTED_AUTH_TOKEN for cloud/staging endpoint validation.
 3. Hosted health probe (/health): Set base URL and re-run preflight.
 
 ## Environment Snapshot

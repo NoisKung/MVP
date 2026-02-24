@@ -1,14 +1,22 @@
 import { writeFileSync } from "node:fs";
 import { randomUUID } from "node:crypto";
+import {
+  DEFAULT_HOSTED_PROFILE_CONFIG_PATH,
+  normalizeHostedBaseUrl,
+  resolveHostedProfileSettings,
+  isLocalhostHostedUrl,
+} from "./mcp-hosted-profile.mjs";
 
 const DEFAULT_WEEK_START = "2025-01-06T00:00:00.000Z";
 
 function parseArgs(argv) {
   const args = {
     out: "docs/mcp-load-matrix-hosted-staging-v0.1.md",
-    baseUrl: process.env.SOLOSTACK_MCP_HOSTED_BASE_URL ?? "",
-    authToken: process.env.SOLOSTACK_MCP_HOSTED_AUTH_TOKEN ?? "",
-    iterations: 30,
+    configPath: DEFAULT_HOSTED_PROFILE_CONFIG_PATH,
+    profileName: "",
+    baseUrl: "",
+    authToken: "",
+    iterations: "",
   };
 
   for (let index = 0; index < argv.length; index += 1) {
@@ -23,16 +31,23 @@ function parseArgs(argv) {
       index += 1;
       continue;
     }
+    if (token === "--config") {
+      args.configPath = argv[index + 1] ?? args.configPath;
+      index += 1;
+      continue;
+    }
+    if (token === "--profile") {
+      args.profileName = argv[index + 1] ?? args.profileName;
+      index += 1;
+      continue;
+    }
     if (token === "--auth-token") {
       args.authToken = argv[index + 1] ?? args.authToken;
       index += 1;
       continue;
     }
     if (token === "--iterations") {
-      const parsed = Number(argv[index + 1]);
-      if (Number.isFinite(parsed) && parsed >= 3) {
-        args.iterations = Math.floor(parsed);
-      }
+      args.iterations = argv[index + 1] ?? args.iterations;
       index += 1;
     }
   }
@@ -144,6 +159,9 @@ function buildReport(input) {
     "# MCP Hosted Load Matrix v0.1",
     "",
     `Date: ${new Date().toISOString().slice(0, 10)}`,
+    `Profile: ${input.profileName}`,
+    `Endpoint type: ${input.endpointType}`,
+    `Config path: ${input.configPath}`,
     `Hosted base URL: ${input.baseUrl}`,
     `Iterations per tool: ${input.iterations}`,
     "",
@@ -163,7 +181,9 @@ function buildReport(input) {
   lines.push("## Notes");
   lines.push("");
   lines.push("- วัดผ่าน HTTP hosted endpoint (`POST /tools/<tool>`)");
-  lines.push("- duration ใช้ค่า max ระหว่าง server meta และ wall-clock ที่ฝั่ง client");
+  lines.push(
+    "- duration ใช้ค่า max ระหว่าง server meta และ wall-clock ที่ฝั่ง client",
+  );
   lines.push(
     "- ใช้รายงานนี้เปรียบเทียบกับ `docs/mcp-load-matrix-v0.1.md` ด้วยสคริปต์ compare",
   );
@@ -174,16 +194,41 @@ function buildReport(input) {
 
 async function main() {
   const args = parseArgs(process.argv.slice(2));
-  const baseUrl = args.baseUrl.trim();
-  if (!baseUrl) {
+  const profileSettings = resolveHostedProfileSettings({
+    configPath: args.configPath,
+    profileName: args.profileName,
+    baseUrl: args.baseUrl,
+    authToken: args.authToken,
+    iterations: args.iterations,
+  });
+  if (profileSettings.config_parse_error) {
+    throw new Error(
+      `Invalid hosted profile config (${profileSettings.config_path}): ${profileSettings.config_parse_error}`,
+    );
+  }
+  if (
+    profileSettings.selected_profile &&
+    !profileSettings.selected_profile_found
+  ) {
+    throw new Error(
+      `Hosted profile "${profileSettings.selected_profile}" was not found in ${profileSettings.config_path}.`,
+    );
+  }
+
+  const normalizedBaseUrl = normalizeHostedBaseUrl(profileSettings.base_url);
+  if (!normalizedBaseUrl.valid || !normalizedBaseUrl.value) {
     throw new Error(
       "Missing hosted base URL. Use --base-url or SOLOSTACK_MCP_HOSTED_BASE_URL.",
     );
   }
+  const baseUrl = normalizedBaseUrl.value;
+  const endpointType = isLocalhostHostedUrl(baseUrl) ? "localhost" : "cloud";
+  const authToken = profileSettings.auth_token;
+  const iterations = profileSettings.iterations;
 
   const sampleTaskId = await discoverSampleTaskId({
     baseUrl,
-    authToken: args.authToken,
+    authToken,
   });
 
   const scenarios = [
@@ -216,8 +261,8 @@ async function main() {
   for (const scenario of scenarios) {
     const row = await runScenario({
       baseUrl,
-      authToken: args.authToken,
-      iterations: args.iterations,
+      authToken,
+      iterations,
       tool: scenario.tool,
       args: scenario.args,
     });
@@ -225,8 +270,11 @@ async function main() {
   }
 
   const markdown = buildReport({
+    profileName: profileSettings.selected_profile ?? "direct",
+    endpointType,
+    configPath: profileSettings.config_path,
     baseUrl,
-    iterations: args.iterations,
+    iterations,
     rows,
   });
   writeFileSync(args.out, markdown, "utf8");

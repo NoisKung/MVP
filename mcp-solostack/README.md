@@ -104,6 +104,24 @@ npm run mcp:load-matrix
 output default:
 - `docs/mcp-load-matrix-v0.1.md`
 
+Hosted profile config (user-editable):
+
+1. สร้างไฟล์ config ของตัวเองจากตัวอย่าง:
+
+```bash
+cp mcp-solostack/hosted-profiles.example.json mcp-solostack/hosted-profiles.json
+```
+
+2. ปรับค่า profile ให้ตรง environment:
+- `localhost`:
+  - `base_url`: เช่น `127.0.0.1:8787` (สคริปต์จะ infer เป็น `http://`)
+  - `auth_token`: optional
+- `cloud`:
+  - `base_url`: เช่น `https://mcp.example.com`
+  - `auth_token_env`: เช่น `SOLOSTACK_MCP_HOSTED_AUTH_TOKEN`
+
+3. ถ้าใช้ไฟล์คนละ path ให้ระบุ `--config <path>` เพิ่มในคำสั่ง
+
 Hosted staging load matrix:
 
 ```bash
@@ -121,6 +139,13 @@ Hosted staging preflight (env + health probe):
 npm run mcp:load-matrix:hosted:preflight
 ```
 
+หรือเลือก profile:
+
+```bash
+npm run mcp:load-matrix:hosted:preflight -- --profile localhost
+npm run mcp:load-matrix:hosted:preflight -- --profile cloud
+```
+
 output default:
 - `docs/mcp-load-matrix-hosted-preflight-v0.1.md`
 
@@ -128,6 +153,13 @@ Hosted pipeline (preflight -> hosted matrix -> compare):
 
 ```bash
 npm run mcp:load-matrix:hosted:pipeline
+```
+
+หรือเลือก profile:
+
+```bash
+npm run mcp:load-matrix:hosted:pipeline -- --profile localhost
+npm run mcp:load-matrix:hosted:pipeline -- --profile cloud
 ```
 
 output default:

@@ -264,6 +264,7 @@ Google Drive (`appDataFolder`) vs OneDrive (`approot`) ในมุม SoloStack
     - `npm run mcp:load-matrix:hosted:pipeline`
     - `npm run mcp:load-matrix:hosted`
     - `npm run mcp:load-matrix:compare`
+    - user-editable profile config (`localhost`/`cloud`) ผ่าน `mcp-solostack/hosted-profiles.json`
 - คงเหลือ:
   - ทำซ้ำ load/perf matrix ใน hosted staging จริง และแนบ compare report
   - blocker ปัจจุบันใน workspace นี้: ยังไม่มี `SOLOSTACK_MCP_HOSTED_BASE_URL` / `SOLOSTACK_MCP_HOSTED_AUTH_TOKEN` สำหรับรัน matrix จริง

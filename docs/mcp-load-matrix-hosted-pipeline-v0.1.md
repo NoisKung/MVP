@@ -7,12 +7,14 @@ Status: FAIL
 
 | Step | Exit Code | Duration (ms) |
 | --- | ---: | ---: |
-| Preflight | 1 | 70 |
+| Preflight | 1 | 76 |
 
 ## Environment Snapshot
 
 - `SOLOSTACK_MCP_HOSTED_BASE_URL`: not_set
 - `SOLOSTACK_MCP_HOSTED_AUTH_TOKEN`: not_set
+- `profile`: auto
+- `config_path`: mcp-solostack/hosted-profiles.json
 - `iterations`: default
 - `skip_health_probe`: false
 
@@ -20,7 +22,7 @@ Status: FAIL
 
 ### Preflight
 
-Command: `node --no-warnings scripts/mcp-load-matrix-hosted-preflight.mjs --out docs/mcp-load-matrix-hosted-preflight-v0.1.md`
+Command: `node --no-warnings scripts/mcp-load-matrix-hosted-preflight.mjs --out docs/mcp-load-matrix-hosted-preflight-v0.1.md --config mcp-solostack/hosted-profiles.json`
 
 Exit code: 1
 

@@ -39,6 +39,7 @@ Result summary:
 - MCP test suite passed (`config`, `app`, `tools`, `logger`, `tool-executor`)
 - load/perf matrix baseline ถูก generate ที่ `docs/mcp-load-matrix-v0.1.md`
 - เพิ่ม hosted load tooling:
+  - profile config user-editable (`mcp-solostack/hosted-profiles.json`) รองรับ `localhost` และ `cloud`
   - `npm run mcp:load-matrix:hosted`
   - `npm run mcp:load-matrix:compare`
 - Build passed on current branch
