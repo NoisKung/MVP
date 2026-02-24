@@ -204,13 +204,16 @@ Google Drive (`appDataFolder`) vs OneDrive (`approot`) ในมุม SoloStack
   - managed transport resolver tests (`src/lib/sync-transport.test.ts`)
   - secure token storage policy v0.2:
     - redact sensitive token fields ออกจาก persisted `provider_config`
-    - persist managed auth ผ่าน OS keychain บน Tauri desktop (best-effort)
+    - persist managed auth ผ่าน secure keystore บน Tauri desktop/iOS/Android (best-effort)
     - fallback เป็น in-memory session auth สำหรับ runtime อื่น
     - policy marker `managed_auth_storage_policy`
     - tests (`src/lib/sync-provider-token-policy.test.ts`, `src/lib/database.migration.test.ts`, `src/lib/sync-provider-secure-store.test.ts`)
+  - เพิ่ม secure store self-test command + Settings action สำหรับ verify read/write/delete แบบไม่ทับ token จริง:
+    - Rust command: `run_sync_provider_secure_store_self_test`
+    - Settings action: `Verify Secure Store`
   - connector integration tests กับ fixture responses (`src/lib/sync-provider-adapters.test.ts`)
 - คงเหลือ:
-  - ขยาย secure keystore persistence ให้ครบ mobile targets (iOS/Android) และยืนยัน real-device behavior ก่อน external beta
+  - ยืนยัน real-device matrix ของ secure keystore บน iOS/Android และเก็บหลักฐานก่อน external beta
 
 ## Phase F: P3-6 MCP Server for SoloStack
 

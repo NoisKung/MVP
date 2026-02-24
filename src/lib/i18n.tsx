@@ -710,6 +710,16 @@ const TRANSLATIONS = {
       "Selected provider does not support managed connector testing.",
     "settings.sync.provider.managed.test.error.notConfigured":
       "Set connector base URL before testing.",
+    "settings.sync.provider.managed.secureStoreTest.action":
+      "Verify Secure Store",
+    "settings.sync.provider.managed.secureStoreTest.testing":
+      "Verifying Secure Store...",
+    "settings.sync.provider.managed.secureStoreTest.feedback.success":
+      "Secure store self-test passed ({backend}).",
+    "settings.sync.provider.managed.secureStoreTest.error.unavailable":
+      "Secure store is unavailable in this runtime ({backend}).",
+    "settings.sync.provider.managed.secureStoreTest.error.failed":
+      "Secure store self-test failed ({backend}): {detail}",
     "settings.sync.provider.feedback.saved": "Sync provider was saved.",
     "settings.sync.provider.endpointModeHint.managed":
       "Managed provider selected (custom URLs are still used in current build).",
@@ -1674,6 +1684,16 @@ const TRANSLATIONS = {
       "ผู้ให้บริการที่เลือกไม่รองรับการทดสอบ managed connector",
     "settings.sync.provider.managed.test.error.notConfigured":
       "โปรดตั้งค่า Connector Base URL ก่อนทดสอบ",
+    "settings.sync.provider.managed.secureStoreTest.action":
+      "ตรวจสอบ Secure Store",
+    "settings.sync.provider.managed.secureStoreTest.testing":
+      "กำลังตรวจสอบ Secure Store...",
+    "settings.sync.provider.managed.secureStoreTest.feedback.success":
+      "การทดสอบ Secure Store ผ่าน ({backend})",
+    "settings.sync.provider.managed.secureStoreTest.error.unavailable":
+      "Secure Store ไม่พร้อมใช้งานใน runtime นี้ ({backend})",
+    "settings.sync.provider.managed.secureStoreTest.error.failed":
+      "การทดสอบ Secure Store ล้มเหลว ({backend}): {detail}",
     "settings.sync.provider.feedback.saved": "บันทึกผู้ให้บริการซิงก์แล้ว",
     "settings.sync.provider.endpointModeHint.managed":
       "เลือกผู้ให้บริการแบบระบบจัดการแล้ว (รุ่นปัจจุบันยังใช้ URL แบบกำหนดเองอยู่)",

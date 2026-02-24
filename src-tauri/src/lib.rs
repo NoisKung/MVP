@@ -30,6 +30,8 @@ const LEGACY_BUNDLE_IDENTIFIER: &str = "com.antigravity.solostack";
 const DATABASE_FILENAME: &str = "solostack.db";
 const STARTUP_MIGRATION_MARKER_FILENAME: &str = "startup-migration-v1.json";
 const SYNC_PROVIDER_AUTH_SERVICE: &str = "com.solutionsstudio.solostack.sync-provider-auth";
+const SYNC_PROVIDER_AUTH_SELF_TEST_ACCOUNT: &str = "sync-provider-secure-store-self-test";
+const SYNC_PROVIDER_AUTH_SELF_TEST_PAYLOAD: &str = "solostack-secure-store-self-test";
 #[cfg(target_os = "android")]
 const ANDROID_SYNC_PROVIDER_SECURE_STORE_CLASS: &str = "com.solutionsstudio.solostack.SyncProviderSecureStore";
 #[cfg(target_os = "android")]
@@ -53,6 +55,18 @@ struct StartupMigrationMarkerPayload {
     destination_db_path: String,
 }
 
+#[derive(Clone, Serialize)]
+struct SyncProviderSecureStoreSelfTestResult {
+    runtime: String,
+    backend: String,
+    available: bool,
+    write_ok: bool,
+    read_ok: bool,
+    delete_ok: bool,
+    roundtrip_ok: bool,
+    detail: Option<String>,
+}
+
 struct StartupMigrationState(Mutex<StartupMigrationReport>);
 
 #[tauri::command]
@@ -74,6 +88,26 @@ fn normalize_sync_provider_identifier(provider: &str) -> Result<String, String> 
     Ok(normalized_provider.to_string())
 }
 
+fn build_secure_store_self_test_result(
+    backend: &str,
+    available: bool,
+    write_ok: bool,
+    read_ok: bool,
+    delete_ok: bool,
+    detail: Option<String>,
+) -> SyncProviderSecureStoreSelfTestResult {
+    SyncProviderSecureStoreSelfTestResult {
+        runtime: "tauri".to_string(),
+        backend: backend.to_string(),
+        available,
+        write_ok,
+        read_ok,
+        delete_ok,
+        roundtrip_ok: available && write_ok && read_ok && delete_ok,
+        detail,
+    }
+}
+
 #[cfg(any(
     target_os = "macos",
     target_os = "windows",
@@ -85,6 +119,71 @@ fn create_sync_provider_auth_entry(provider: &str) -> Result<Entry, String> {
     let account = format!("sync-provider::{normalized_provider}");
     Entry::new(SYNC_PROVIDER_AUTH_SERVICE, &account)
         .map_err(|error| format!("create keyring entry failed: {error}"))
+}
+
+#[cfg(any(
+    target_os = "macos",
+    target_os = "windows",
+    target_os = "linux",
+    target_os = "ios"
+))]
+fn run_native_secure_store_self_test() -> SyncProviderSecureStoreSelfTestResult {
+    let entry = match Entry::new(
+        SYNC_PROVIDER_AUTH_SERVICE,
+        SYNC_PROVIDER_AUTH_SELF_TEST_ACCOUNT,
+    ) {
+        Ok(value) => value,
+        Err(error) => {
+            return build_secure_store_self_test_result(
+                "keyring",
+                false,
+                false,
+                false,
+                false,
+                Some(format!("create keyring entry failed: {error}")),
+            );
+        }
+    };
+
+    let mut detail: Option<String> = None;
+    let write_ok = match entry.set_password(SYNC_PROVIDER_AUTH_SELF_TEST_PAYLOAD) {
+        Ok(()) => true,
+        Err(error) => {
+            detail = Some(format!("write failed: {error}"));
+            false
+        }
+    };
+
+    let read_ok = if write_ok {
+        match entry.get_password() {
+            Ok(password) => {
+                if password == SYNC_PROVIDER_AUTH_SELF_TEST_PAYLOAD {
+                    true
+                } else {
+                    detail = Some("read payload mismatch".to_string());
+                    false
+                }
+            }
+            Err(error) => {
+                detail = Some(format!("read failed: {error}"));
+                false
+            }
+        }
+    } else {
+        false
+    };
+
+    let delete_ok = match entry.delete_credential() {
+        Ok(()) => true,
+        Err(error) => {
+            if detail.is_none() {
+                detail = Some(format!("delete failed: {error}"));
+            }
+            false
+        }
+    };
+
+    build_secure_store_self_test_result("keyring", true, write_ok, read_ok, delete_ok, detail)
 }
 
 #[cfg(target_os = "android")]
@@ -236,6 +335,84 @@ fn delete_auth_from_android_secure_store(
     }
 }
 
+#[cfg(target_os = "android")]
+fn run_android_secure_store_self_test(
+    window: tauri::WebviewWindow,
+) -> SyncProviderSecureStoreSelfTestResult {
+    let provider = "__sync_provider_secure_store_self_test__".to_string();
+    let payload = SYNC_PROVIDER_AUTH_SELF_TEST_PAYLOAD.to_string();
+    let result = run_android_secure_store_call(window, move |env, activity| {
+        let mut detail: Option<String> = None;
+
+        let write_ok = match write_auth_to_android_secure_store(
+            env,
+            activity,
+            &provider,
+            &payload,
+        ) {
+            Ok(()) => true,
+            Err(error) => {
+                detail = Some(error);
+                false
+            }
+        };
+
+        let read_ok = if write_ok {
+            match read_auth_from_android_secure_store(env, activity, &provider) {
+                Ok(Some(value)) => {
+                    if value == payload {
+                        true
+                    } else {
+                        detail = Some("read payload mismatch".to_string());
+                        false
+                    }
+                }
+                Ok(None) => {
+                    detail = Some("read payload missing".to_string());
+                    false
+                }
+                Err(error) => {
+                    detail = Some(error);
+                    false
+                }
+            }
+        } else {
+            false
+        };
+
+        let delete_ok = match delete_auth_from_android_secure_store(env, activity, &provider) {
+            Ok(()) => true,
+            Err(error) => {
+                if detail.is_none() {
+                    detail = Some(error);
+                }
+                false
+            }
+        };
+
+        Ok((write_ok, read_ok, delete_ok, detail))
+    });
+
+    match result {
+        Ok((write_ok, read_ok, delete_ok, detail)) => build_secure_store_self_test_result(
+            "android_encrypted_shared_prefs",
+            true,
+            write_ok,
+            read_ok,
+            delete_ok,
+            detail,
+        ),
+        Err(error) => build_secure_store_self_test_result(
+            "android_encrypted_shared_prefs",
+            false,
+            false,
+            false,
+            false,
+            Some(error),
+        ),
+    }
+}
+
 #[tauri::command]
 fn get_sync_provider_secure_auth(
     window: tauri::WebviewWindow,
@@ -373,6 +550,44 @@ fn delete_sync_provider_secure_auth(
         let _ = window;
         let _ = provider;
         Ok(())
+    }
+}
+
+#[tauri::command]
+fn run_sync_provider_secure_store_self_test(
+    window: tauri::WebviewWindow,
+) -> SyncProviderSecureStoreSelfTestResult {
+    #[cfg(any(
+        target_os = "macos",
+        target_os = "windows",
+        target_os = "linux",
+        target_os = "ios"
+    ))]
+    {
+        let _ = window;
+        return run_native_secure_store_self_test();
+    }
+    #[cfg(target_os = "android")]
+    {
+        return run_android_secure_store_self_test(window);
+    }
+    #[cfg(not(any(
+        target_os = "macos",
+        target_os = "windows",
+        target_os = "linux",
+        target_os = "ios",
+        target_os = "android"
+    )))]
+    {
+        let _ = window;
+        build_secure_store_self_test_result(
+            "unsupported",
+            false,
+            false,
+            false,
+            false,
+            Some("secure store self-test is not supported on this platform".to_string()),
+        )
     }
 }
 
@@ -551,7 +766,8 @@ pub fn run() {
             get_startup_migration_report,
             get_sync_provider_secure_auth,
             set_sync_provider_secure_auth,
-            delete_sync_provider_secure_auth
+            delete_sync_provider_secure_auth,
+            run_sync_provider_secure_store_self_test
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

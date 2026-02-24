@@ -77,6 +77,7 @@ import {
   type SyncProviderManagedConnectorDraft,
 } from "@/lib/sync-provider-adapter-factory";
 import type { SyncProviderAuthState } from "@/lib/sync-provider-auth";
+import { runSyncProviderSecureStoreSelfTest } from "@/lib/sync-provider-secure-store";
 import { ManualMergeEditor } from "./ManualMergeEditor";
 
 interface ReminderSettingsProps {
@@ -842,6 +843,12 @@ export function ReminderSettings({
     string | null
   >(null);
   const [syncProviderTesting, setSyncProviderTesting] = useState(false);
+  const [syncProviderSecureStoreTesting, setSyncProviderSecureStoreTesting] =
+    useState(false);
+  const [syncProviderSecureStoreFeedback, setSyncProviderSecureStoreFeedback] =
+    useState<string | null>(null);
+  const [syncProviderSecureStoreError, setSyncProviderSecureStoreError] =
+    useState<string | null>(null);
   const [syncRuntimeFeedback, setSyncRuntimeFeedback] = useState<string | null>(
     null,
   );
@@ -1455,6 +1462,8 @@ export function ReminderSettings({
     setSyncProviderError(null);
     setSyncProviderTestFeedback(null);
     setSyncProviderTestError(null);
+    setSyncProviderSecureStoreFeedback(null);
+    setSyncProviderSecureStoreError(null);
     setManagedConnectorDraft((previous) => ({
       ...previous,
       [field]: value,
@@ -1480,6 +1489,8 @@ export function ReminderSettings({
     setSyncProviderError(null);
     setSyncProviderTestFeedback(null);
     setSyncProviderTestError(null);
+    setSyncProviderSecureStoreFeedback(null);
+    setSyncProviderSecureStoreError(null);
 
     const providerCapability =
       syncProviderCapabilities[syncProviderDraft] ??
@@ -1512,6 +1523,8 @@ export function ReminderSettings({
     setSyncProviderError(null);
     setSyncProviderTestFeedback(null);
     setSyncProviderTestError(null);
+    setSyncProviderSecureStoreFeedback(null);
+    setSyncProviderSecureStoreError(null);
 
     if (!providerSupportsManagedConnector) {
       setSyncProviderTestError(
@@ -1553,6 +1566,51 @@ export function ReminderSettings({
       setSyncProviderTestError(getErrorMessage(error, locale));
     } finally {
       setSyncProviderTesting(false);
+    }
+  };
+
+  const handleRunSecureStoreSelfTest = async () => {
+    setSyncProviderFeedback(null);
+    setSyncProviderError(null);
+    setSyncProviderTestFeedback(null);
+    setSyncProviderTestError(null);
+    setSyncProviderSecureStoreFeedback(null);
+    setSyncProviderSecureStoreError(null);
+
+    setSyncProviderSecureStoreTesting(true);
+    try {
+      const result = await runSyncProviderSecureStoreSelfTest();
+      if (result.roundtrip_ok) {
+        setSyncProviderSecureStoreFeedback(
+          t("settings.sync.provider.managed.secureStoreTest.feedback.success", {
+            backend: result.backend,
+          }),
+        );
+        return;
+      }
+
+      if (!result.available) {
+        setSyncProviderSecureStoreError(
+          t(
+            "settings.sync.provider.managed.secureStoreTest.error.unavailable",
+            {
+              backend: result.backend,
+            },
+          ),
+        );
+        return;
+      }
+
+      setSyncProviderSecureStoreError(
+        t("settings.sync.provider.managed.secureStoreTest.error.failed", {
+          backend: result.backend,
+          detail: result.detail ?? t("common.unknown"),
+        }),
+      );
+    } catch (error) {
+      setSyncProviderSecureStoreError(getErrorMessage(error, locale));
+    } finally {
+      setSyncProviderSecureStoreTesting(false);
     }
   };
 
@@ -2330,6 +2388,8 @@ export function ReminderSettings({
                   setSyncProviderError(null);
                   setSyncProviderTestFeedback(null);
                   setSyncProviderTestError(null);
+                  setSyncProviderSecureStoreFeedback(null);
+                  setSyncProviderSecureStoreError(null);
                   setSyncProviderDraft(event.target.value as SyncProvider);
                 }}
                 disabled={syncProviderSaving || syncProviderLoading}
@@ -2608,7 +2668,10 @@ export function ReminderSettings({
               className="settings-btn settings-btn-primary settings-btn-provider"
               onClick={() => void handleSaveSyncProvider()}
               disabled={
-                syncProviderSaving || syncProviderLoading || syncProviderTesting
+                syncProviderSaving ||
+                syncProviderLoading ||
+                syncProviderTesting ||
+                syncProviderSecureStoreTesting
               }
             >
               <span className="settings-btn-label">
@@ -2625,13 +2688,37 @@ export function ReminderSettings({
                 disabled={
                   syncProviderSaving ||
                   syncProviderLoading ||
-                  syncProviderTesting
+                  syncProviderTesting ||
+                  syncProviderSecureStoreTesting
                 }
               >
                 <span className="settings-btn-label">
                   {syncProviderTesting
                     ? t("settings.sync.provider.managed.test.testing")
                     : t("settings.sync.provider.managed.test.action")}
+                </span>
+              </button>
+            )}
+            {shouldShowManagedConnectorSettings && (
+              <button
+                type="button"
+                className="settings-btn"
+                onClick={() => void handleRunSecureStoreSelfTest()}
+                disabled={
+                  syncProviderSaving ||
+                  syncProviderLoading ||
+                  syncProviderTesting ||
+                  syncProviderSecureStoreTesting
+                }
+              >
+                <span className="settings-btn-label">
+                  {syncProviderSecureStoreTesting
+                    ? t(
+                        "settings.sync.provider.managed.secureStoreTest.testing",
+                      )
+                    : t(
+                        "settings.sync.provider.managed.secureStoreTest.action",
+                      )}
                 </span>
               </button>
             )}
@@ -2651,6 +2738,16 @@ export function ReminderSettings({
           {syncProviderTestError && (
             <p className="settings-feedback settings-feedback-error">
               {syncProviderTestError}
+            </p>
+          )}
+          {syncProviderSecureStoreFeedback && (
+            <p className="settings-feedback">
+              {syncProviderSecureStoreFeedback}
+            </p>
+          )}
+          {syncProviderSecureStoreError && (
+            <p className="settings-feedback settings-feedback-error">
+              {syncProviderSecureStoreError}
             </p>
           )}
         </div>

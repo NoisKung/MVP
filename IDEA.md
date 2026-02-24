@@ -201,15 +201,18 @@
     - `src/lib/sync-transport.test.ts`
   - เพิ่ม secure token storage policy v0.2:
     - redaction ของ `managed_auth` sensitive fields ก่อน persist
-    - เก็บ token ผ่าน OS keychain บน Tauri desktop (best-effort)
+    - เก็บ token ผ่าน secure keystore บน Tauri desktop/iOS/Android (best-effort)
     - fallback เป็น session-only สำหรับ runtime อื่น
     - เพิ่ม storage policy marker ใน config (`managed_auth_storage_policy`)
     - เพิ่ม tests: `src/lib/sync-provider-token-policy.test.ts`, `src/lib/database.migration.test.ts`, `src/lib/sync-provider-secure-store.test.ts`
+  - เพิ่ม secure store self-test สำหรับยืนยัน read/write/delete โดยไม่ทับ token จริง:
+    - Rust command: `run_sync_provider_secure_store_self_test`
+    - Settings action: `Verify Secure Store`
   - เพิ่ม integration tests สำหรับ connector behavior + error mapping:
     - `src/lib/sync-provider-adapters.test.ts`
     - `src/lib/sync-provider-auth.test.ts`
 - คงเหลือ:
-  - ขยาย secure keystore persistence ให้ครบ mobile targets (iOS/Android) และทดสอบ real-device matrix ก่อน external beta
+  - ยืนยัน real-device matrix ของ secure keystore บน iOS/Android และเก็บหลักฐานก่อน external beta
 
 ## New Initiative: P3-6 MCP Server for SoloStack
 
