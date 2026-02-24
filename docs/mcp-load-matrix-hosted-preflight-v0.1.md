@@ -10,6 +10,7 @@ Status: Pending configuration
 | Hosted base URL | FAIL | yes | Missing or invalid SOLOSTACK_MCP_HOSTED_BASE_URL. |
 | Hosted auth token | FAIL | yes | Missing SOLOSTACK_MCP_HOSTED_AUTH_TOKEN. |
 | Audit sink mode | PASS | no | SOLOSTACK_MCP_AUDIT_SINK=stdout |
+| Audit retention baseline (hosted staging) | WARN | no | SOLOSTACK_MCP_AUDIT_SINK=stdout (no persisted audit retention). |
 | Audit HTTP URL | PASS | no | Not required because audit sink mode is not http. |
 | Hosted health probe (/health) | FAIL | yes | Cannot probe without SOLOSTACK_MCP_HOSTED_BASE_URL. |
 
@@ -26,3 +27,4 @@ Status: Pending configuration
 - `SOLOSTACK_MCP_AUDIT_SINK`: stdout
 - `SOLOSTACK_MCP_AUDIT_HTTP_URL`: not_set
 - `SOLOSTACK_MCP_AUDIT_HTTP_TIMEOUT_MS`: 3000
+- `SOLOSTACK_MCP_AUDIT_RETENTION_DAYS`: 30

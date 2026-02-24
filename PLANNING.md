@@ -254,6 +254,7 @@ Google Drive (`appDataFolder`) vs OneDrive (`approot`) ในมุม SoloStack
   - ตัดสินใจ audit sink/retention baseline:
     - file sink รายวัน + retention 30 วัน
     - env config สำหรับ audit sink (`SOLOSTACK_MCP_AUDIT_*`)
+    - retention policy decision by environment (`dev=14`, `staging=30`, `prod=90`) ใน `docs/mcp-audit-retention-policy-v0.1.md`
   - เพิ่ม centralized audit sink mode `http`:
     - ส่ง `POST` ต่อ event ไป external endpoint
     - รองรับ timeout + optional bearer token

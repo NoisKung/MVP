@@ -820,6 +820,9 @@ Recommended follow-up:
 
 - เสร็จแล้ว:
   - เพิ่ม audit sink mode `file` + retention policy baseline (30 วัน)
+  - เพิ่ม retention policy decision by environment:
+    - `dev=14`, `staging=30`, `prod=90`
+    - เอกสาร: `docs/mcp-audit-retention-policy-v0.1.md`
   - เพิ่ม env config:
     - `SOLOSTACK_MCP_AUDIT_SINK`
     - `SOLOSTACK_MCP_AUDIT_LOG_DIR`

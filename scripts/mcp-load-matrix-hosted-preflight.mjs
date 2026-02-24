@@ -76,6 +76,7 @@ function parseArgs(argv) {
     baseUrl: process.env.SOLOSTACK_MCP_HOSTED_BASE_URL ?? "",
     authToken: process.env.SOLOSTACK_MCP_HOSTED_AUTH_TOKEN ?? "",
     auditSink: process.env.SOLOSTACK_MCP_AUDIT_SINK ?? "stdout",
+    auditRetentionDays: process.env.SOLOSTACK_MCP_AUDIT_RETENTION_DAYS ?? "",
     auditHttpUrl: process.env.SOLOSTACK_MCP_AUDIT_HTTP_URL ?? "",
     auditHttpTimeoutMs: process.env.SOLOSTACK_MCP_AUDIT_HTTP_TIMEOUT_MS ?? "",
     skipHealthProbe: false,
@@ -108,9 +109,13 @@ function parseArgs(argv) {
       index += 1;
       continue;
     }
+    if (token === "--audit-retention-days") {
+      args.auditRetentionDays = argv[index + 1] ?? args.auditRetentionDays;
+      index += 1;
+      continue;
+    }
     if (token === "--audit-http-timeout-ms") {
-      args.auditHttpTimeoutMs =
-        argv[index + 1] ?? args.auditHttpTimeoutMs;
+      args.auditHttpTimeoutMs = argv[index + 1] ?? args.auditHttpTimeoutMs;
       index += 1;
       continue;
     }
@@ -145,7 +150,8 @@ async function probeHostedHealth(input) {
       required: false,
       ok: true,
       detail: "Skipped by --skip-health-probe.",
-      action: "Run preflight again without --skip-health-probe before sign-off.",
+      action:
+        "Run preflight again without --skip-health-probe before sign-off.",
     });
   }
 
@@ -196,10 +202,7 @@ async function probeHostedHealth(input) {
       name: "Hosted health probe (/health)",
       required: true,
       ok: false,
-      detail:
-        error instanceof Error
-          ? error.message
-          : "Health probe failed.",
+      detail: error instanceof Error ? error.message : "Health probe failed.",
       action: "Verify endpoint reachability from this environment.",
     });
   } finally {
@@ -232,7 +235,9 @@ function buildReport(input) {
   lines.push("## Next Actions");
   lines.push("");
 
-  const failedRequired = input.checks.filter((check) => check.required && !check.ok);
+  const failedRequired = input.checks.filter(
+    (check) => check.required && !check.ok,
+  );
   if (failedRequired.length === 0) {
     lines.push("1. `npm run mcp:load-matrix:hosted`");
     lines.push("2. `npm run mcp:load-matrix:compare`");
@@ -252,11 +257,12 @@ function buildReport(input) {
   lines.push(`- \`SOLOSTACK_MCP_HOSTED_BASE_URL\`: ${input.baseUrlLabel}`);
   lines.push(`- \`SOLOSTACK_MCP_HOSTED_AUTH_TOKEN\`: ${input.authTokenLabel}`);
   lines.push(`- \`SOLOSTACK_MCP_AUDIT_SINK\`: ${input.auditSinkLabel}`);
-  lines.push(
-    `- \`SOLOSTACK_MCP_AUDIT_HTTP_URL\`: ${input.auditHttpUrlLabel}`,
-  );
+  lines.push(`- \`SOLOSTACK_MCP_AUDIT_HTTP_URL\`: ${input.auditHttpUrlLabel}`);
   lines.push(
     `- \`SOLOSTACK_MCP_AUDIT_HTTP_TIMEOUT_MS\`: ${input.auditHttpTimeoutLabel}`,
+  );
+  lines.push(
+    `- \`SOLOSTACK_MCP_AUDIT_RETENTION_DAYS\`: ${input.auditRetentionDaysLabel}`,
   );
   lines.push("");
 
@@ -268,13 +274,20 @@ async function main() {
   const normalizedBaseUrl = parseOptionalHttpUrl(args.baseUrl);
   const normalizedAuditHttpUrl = parseOptionalHttpUrl(args.auditHttpUrl);
   const normalizedAuthToken = asOptionalString(args.authToken);
-  const normalizedAuditSink = (asOptionalString(args.auditSink) ?? "stdout")
-    .toLowerCase();
+  const normalizedAuditSink = (
+    asOptionalString(args.auditSink) ?? "stdout"
+  ).toLowerCase();
   const normalizedAuditHttpTimeout = parseBoundedInt(
     args.auditHttpTimeoutMs,
     3000,
     100,
     60_000,
+  );
+  const normalizedAuditRetentionDays = parseBoundedInt(
+    args.auditRetentionDays,
+    30,
+    1,
+    3650,
   );
 
   const checks = [];
@@ -297,7 +310,9 @@ async function main() {
       name: "Hosted auth token",
       required: true,
       ok: Boolean(normalizedAuthToken),
-      detail: normalizedAuthToken ? "Token is set." : "Missing SOLOSTACK_MCP_HOSTED_AUTH_TOKEN.",
+      detail: normalizedAuthToken
+        ? "Token is set."
+        : "Missing SOLOSTACK_MCP_HOSTED_AUTH_TOKEN.",
       action:
         "Set SOLOSTACK_MCP_HOSTED_AUTH_TOKEN for staging/protected endpoint validation.",
     }),
@@ -313,6 +328,37 @@ async function main() {
     }),
   );
 
+  const stagingRetentionMinimumDays = 30;
+  if (normalizedAuditSink === "stdout") {
+    checks.push(
+      buildCheck({
+        name: "Audit retention baseline (hosted staging)",
+        required: false,
+        ok: false,
+        detail:
+          "SOLOSTACK_MCP_AUDIT_SINK=stdout (no persisted audit retention).",
+        action:
+          "For hosted staging sign-off, prefer file/http sink with retention >= 30 days.",
+      }),
+    );
+  } else {
+    const retentionDays = normalizedAuditRetentionDays.value;
+    checks.push(
+      buildCheck({
+        name: "Audit retention baseline (hosted staging)",
+        required: true,
+        ok:
+          normalizedAuditRetentionDays.valid &&
+          retentionDays >= stagingRetentionMinimumDays,
+        detail: normalizedAuditRetentionDays.valid
+          ? `retention=${retentionDays} days`
+          : "SOLOSTACK_MCP_AUDIT_RETENTION_DAYS must be 1..3650.",
+        action:
+          "Set SOLOSTACK_MCP_AUDIT_RETENTION_DAYS to at least 30 for hosted staging evidence.",
+      }),
+    );
+  }
+
   if (normalizedAuditSink === "http") {
     checks.push(
       buildCheck({
@@ -322,7 +368,8 @@ async function main() {
         detail: normalizedAuditHttpUrl.valid
           ? normalizedAuditHttpUrl.value
           : "Missing or invalid SOLOSTACK_MCP_AUDIT_HTTP_URL.",
-        action: "Set SOLOSTACK_MCP_AUDIT_HTTP_URL for centralized sink delivery.",
+        action:
+          "Set SOLOSTACK_MCP_AUDIT_HTTP_URL for centralized sink delivery.",
       }),
     );
     checks.push(
@@ -365,6 +412,7 @@ async function main() {
     auditSinkLabel: normalizedAuditSink,
     auditHttpUrlLabel: normalizedAuditHttpUrl.value ?? "not_set",
     auditHttpTimeoutLabel: String(normalizedAuditHttpTimeout.value),
+    auditRetentionDaysLabel: String(normalizedAuditRetentionDays.value),
   });
 
   writeFileSync(args.out, markdown, "utf8");

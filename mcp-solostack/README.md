@@ -87,6 +87,12 @@ Guardrails runtime:
 - `SOLOSTACK_MCP_AUDIT_HTTP_TIMEOUT_MS` (`100..60000`, default: `3000`)
 - `SOLOSTACK_MCP_AUDIT_HTTP_AUTH_TOKEN` (optional bearer token)
 
+Recommended retention policy:
+- dev: `14` days
+- staging: `30` days
+- prod: `90` days
+- reference: `docs/mcp-audit-retention-policy-v0.1.md`
+
 ## Load Matrix
 
 รัน baseline load/perf matrix (small + medium fixture):

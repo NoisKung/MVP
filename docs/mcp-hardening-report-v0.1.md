@@ -16,6 +16,7 @@ Scope: `mcp-solostack` read-only runtime baseline
 - Timeout guard แบบ configurable:
   - `soft` (duration-based post-check)
   - `worker_hard` (terminate worker on timeout)
+- audit retention decision baseline (`dev=14`, `staging=30`, `prod=90`) in `docs/mcp-audit-retention-policy-v0.1.md`
 
 ## 2) Failure Handling Coverage
 
