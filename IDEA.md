@@ -208,6 +208,8 @@
   - เพิ่ม secure store self-test สำหรับยืนยัน read/write/delete โดยไม่ทับ token จริง:
     - Rust command: `run_sync_provider_secure_store_self_test`
     - Settings action: `Verify Secure Store`
+  - เพิ่ม validation matrix baseline สำหรับรันบนอุปกรณ์จริง:
+    - `docs/sync-provider-secure-store-validation-v0.1.md`
   - เพิ่ม integration tests สำหรับ connector behavior + error mapping:
     - `src/lib/sync-provider-adapters.test.ts`
     - `src/lib/sync-provider-auth.test.ts`

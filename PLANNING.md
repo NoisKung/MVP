@@ -211,6 +211,8 @@ Google Drive (`appDataFolder`) vs OneDrive (`approot`) ในมุม SoloStack
   - เพิ่ม secure store self-test command + Settings action สำหรับ verify read/write/delete แบบไม่ทับ token จริง:
     - Rust command: `run_sync_provider_secure_store_self_test`
     - Settings action: `Verify Secure Store`
+  - เพิ่ม validation matrix baseline สำหรับรันบนอุปกรณ์จริง:
+    - `docs/sync-provider-secure-store-validation-v0.1.md`
   - connector integration tests กับ fixture responses (`src/lib/sync-provider-adapters.test.ts`)
 - คงเหลือ:
   - ยืนยัน real-device matrix ของ secure keystore บน iOS/Android และเก็บหลักฐานก่อน external beta
