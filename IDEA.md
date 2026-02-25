@@ -32,7 +32,9 @@
 | Phase | Focus | Status | Goal |
 | --- | --- | --- | --- |
 | P3-1 | Sync Foundation + Desktop Beta (Windows/macOS/Linux) | Completed | Sync หลักระหว่าง desktop ได้เสถียร |
-| P3-2 | Mobile Client Sync Beta (iOS/Android) | Completed | ใช้งานข้าม desktop + mobile ได้ |
+| P3-2 | Mobile Sync Shared-Core Readiness | Completed | contract/runtime กลางพร้อมใช้งานข้าม platform |
+| P3-2A | iOS Native Client Sync Beta | Planned | แยก iOS app native และคง sync contract เดียวกับ desktop |
+| P3-2B | Android Native Client Sync Beta | Planned | แยก Android app native และคง sync contract เดียวกับ desktop |
 | P3-3 | Conflict Center + Recovery Tools | Completed | ให้ผู้ใช้แก้ conflict ได้ชัดเจน |
 | P3-4 | Security Hardening | Planned | เพิ่มความปลอดภัยระดับ production |
 | P3-5 | Cloud Provider Connectors / Platform (Google/Microsoft/iCloud/AWS) | In Progress | เพิ่มทางเลือกการ sync ตาม ecosystem ผู้ใช้และตัวเลือก backend platform |
@@ -92,7 +94,8 @@
 #### Cross-Platform Strategy
 
 - Desktop ใช้โค้ดปัจจุบันต่อ (Tauri)
-- Mobile (P3-2) แยก client แต่แชร์ types และ sync contract
+- Mobile shared-core (`P3-2`) ปิดแล้ว และใช้เป็นฐานให้ native clients
+- iOS Native (`P3-2A`) และ Android Native (`P3-2B`) แยก roadmap/rollout คนละสาย
 - ทุก client ใช้ payload contract เดียวกันเพื่อลด drift
 
 ## Feasibility Analysis: Google / Microsoft / iCloud / AWS
@@ -363,32 +366,32 @@
 - ปิดแล้ว:
   - dedicated mobile client UI และ desktop<->mobile real-device flow validation
 
-## Initiative: SoloStack iOS + Android Version (P3-2 Expansion)
+## Initiative: SoloStack iOS Native App (P3-2A)
 
 ### Product Goal
 
-- ให้ SoloStack ใช้งานได้ทั้ง desktop + mobile แบบต่อเนื่อง โดยยังคง local-first/offline-first
-- รองรับการจดงานระหว่างเดินทาง และกลับมาทำต่อบน desktop ได้ทันทีหลัง sync
+- ส่งมอบ iOS app แบบ native โดยคงพฤติกรรม local-first/offline-first
+- ให้ผู้ใช้จดงาน/อัปเดตงานบน iPhone/iPad และกลับมาทำต่อบน desktop ได้ทันทีหลัง sync
 
-### Scope v1 (Beta)
+### Scope v1 (Native Beta)
 
-- Mobile core views: `Today`, `Upcoming`, `Board`
+- iOS core views: `Today`, `Upcoming`, `Board`
 - Quick capture + CRUD สำหรับ `task`/`subtask`
-- เลือก `project`, ตั้ง `due date`/`reminder`, และ mark done ได้จากมือถือ
+- เลือก `project`, ตั้ง `due date`/`reminder`, และ mark done ได้บน iOS
 - แสดง sync state (`Synced`, `Syncing`, `Offline`, `Conflict`) + ปุ่ม `Sync now`
-- ใช้ runtime profile แบบ mobile preset เป็นค่า default
+- รองรับ background/foreground behavior ตามข้อจำกัด lifecycle ของ iOS
 
 ### Out of Scope v1
 
 - parity เต็มรูปแบบทุกหน้า (เช่น Dashboard/Weekly Review เชิงลึก)
-- conflict manual merge แบบเต็ม (mobile v1 เน้นรับรู้สถานะ + resolve ขั้นพื้นฐาน)
-- advanced backup/recovery flows ทั้งหมดบน mobile
+- conflict manual merge แบบเต็ม (v1 เน้นรับรู้สถานะ + resolve ขั้นพื้นฐาน)
+- advanced backup/recovery flows ทั้งหมดบน iOS
 
 ### Technical Direction
 
-- ใช้ Tauri v2 mobile (iOS/Android) เพื่อ reuse React app และ shared modules เดิม
-- ใช้ schema SQLite และ sync contract เดียวกับ desktop เพื่อลด model drift
-- tune ค่า sync สำหรับ mobile โดยใช้ foreground/background interval และ limits จาก runtime settings
+- app layer เป็น native iOS โดยใช้ shared sync contract จาก `P3-2`
+- คง schema SQLite และ sync payload เดียวกับ desktop เพื่อลด model drift
+- ใช้ iOS secure storage (Keychain) สำหรับ token/secret ที่เกี่ยวข้องกับ sync
 
 ### Rollout Plan (Suggested)
 
@@ -396,19 +399,58 @@
 - ทดสอบผ่าน TestFlight ภายในทีม
 - validate flows: quick capture, task update, desktop <-> iOS sync
 
-2. Android Internal Alpha
-- ทดสอบผ่าน Closed Testing ภายในทีม
-- validate flows เดียวกับ iOS บนเครือข่ายและอุปกรณ์ที่ต่างกัน
-
-3. Cross-Platform Mobile Beta
-- เปิด iOS + Android beta พร้อมกัน
-- freeze contract และวัด SLA sync จาก production-like environment
+2. iOS External Beta
+- เปิด TestFlight แบบ external testers หลังผ่าน internal stability gate
+- freeze contract + เก็บ SLA sync จาก production-like environment
 
 ### Acceptance Targets
 
-- sync desktop <-> mobile median <= 10 วินาทีในเครือข่ายปกติ
-- offline edits บน mobile ไม่สูญหายเมื่อกลับมา online
-- ไม่มี critical data-loss case ใน mobile test matrix
+- sync desktop <-> iOS median <= 10 วินาทีในเครือข่ายปกติ
+- offline edits บน iOS ไม่สูญหายเมื่อกลับมา online
+- ไม่มี critical data-loss case ใน iOS test matrix
+
+## Initiative: SoloStack Android Native App (P3-2B)
+
+### Product Goal
+
+- ส่งมอบ Android app แบบ native โดยคงพฤติกรรม local-first/offline-first
+- ให้ผู้ใช้ทำงานระหว่างเดินทางบน Android และกลับมา desktop ได้ต่อเนื่องหลัง sync
+
+### Scope v1 (Native Beta)
+
+- Android core views: `Today`, `Upcoming`, `Board`
+- Quick capture + CRUD สำหรับ `task`/`subtask`
+- เลือก `project`, ตั้ง `due date`/`reminder`, และ mark done ได้บน Android
+- แสดง sync state (`Synced`, `Syncing`, `Offline`, `Conflict`) + ปุ่ม `Sync now`
+- รองรับ background sync ตามข้อจำกัด lifecycle/power policy ของ Android
+
+### Out of Scope v1
+
+- parity เต็มรูปแบบทุกหน้า (เช่น Dashboard/Weekly Review เชิงลึก)
+- conflict manual merge แบบเต็ม (v1 เน้นรับรู้สถานะ + resolve ขั้นพื้นฐาน)
+- advanced backup/recovery flows ทั้งหมดบน Android
+
+### Technical Direction
+
+- app layer เป็น native Android โดยใช้ shared sync contract จาก `P3-2`
+- คง schema SQLite และ sync payload เดียวกับ desktop เพื่อลด model drift
+- ใช้ Android secure storage (Keystore) สำหรับ token/secret ที่เกี่ยวข้องกับ sync
+
+### Rollout Plan (Suggested)
+
+1. Android Internal Alpha
+- ทดสอบผ่าน Play Store Closed Testing ภายในทีม
+- validate flows: quick capture, task update, desktop <-> Android sync
+
+2. Android External Beta
+- เปิด Closed/Open Testing ตาม readiness gate
+- freeze contract + เก็บ SLA sync จาก production-like environment
+
+### Acceptance Targets
+
+- sync desktop <-> Android median <= 10 วินาทีในเครือข่ายปกติ
+- offline edits บน Android ไม่สูญหายเมื่อกลับมา online
+- ไม่มี critical data-loss case ใน Android test matrix
 
 ## Kickoff Plan: P3-3 Conflict Center + Recovery Tools
 

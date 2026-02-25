@@ -19,7 +19,9 @@
 
 ### โฟกัสปัจจุบัน
 - P3-1: Sync Foundation + Desktop Beta [closed in current scope]
-- P3-2: Mobile Sync Beta (shared-core readiness)
+- P3-2: Mobile Sync Shared-Core Readiness [closed in current scope]
+- P3-2A: iOS Native Client Sync Beta [planned]
+- P3-2B: Android Native Client Sync Beta [planned]
 - P3-3: Conflict Center + Recovery (baseline implementation started)
 - P3-8: i18n TH/EN foundation [closed in current scope]
 - P3-9: 3D Experience UX/UI [planned]
@@ -27,7 +29,7 @@
 ## 3) Strategic Goals (Q1-Q2 2026)
 
 1. ส่งมอบ desktop sync ที่เสถียรและไม่ทำข้อมูลหาย
-2. เตรียมฐานสำหรับ mobile sync โดยใช้ contract กลางเดียวกัน
+2. ขยายจาก mobile shared-core (`P3-2`) ไปสู่ native tracks (`P3-2A` iOS, `P3-2B` Android) โดยคง contract เดียวกัน
 3. วางทางเลือก cloud connector (Google/Microsoft/iCloud) โดยไม่ล็อกระบบกับ provider เดียว
 4. เปิดช่องทางให้ Agent ดึงข้อมูล SoloStack ไปวิเคราะห์และสรุปงานผ่าน MCP อย่างปลอดภัย
 5. ประเมิน AWS เป็น managed platform option สำหรับ sync backend และ MCP server
@@ -66,14 +68,14 @@
   2. `npm run test:e2e` passed (11/11)
   3. `npm run build` passed
 
-## Phase B: P3-2 Mobile Sync Beta
+## Phase B: P3-2 Mobile Sync Shared-Core Readiness
 
 ช่วงเป้าหมาย: 2026-03-16 ถึง 2026-04-17
 
 ### Deliverables
-- Mobile client beta ต่อกับ sync contract เดียวกับ desktop
-- End-to-end sync flow desktop <-> mobile
-- Sync SLA ระดับ beta สำหรับใช้งานจริงภายในทีม
+- lock runtime/shared-core contract สำหรับ client ทุก platform
+- runtime profile + diagnostics baseline สำหรับ tuning mobile behavior
+- readiness checklist สำหรับ native clients ที่ใช้ contract กลางเดียวกัน
 
 ### Current Implementation Snapshot (2026-02-23)
 - เสร็จแล้ว:
@@ -101,6 +103,42 @@
 - data model ไม่ drift ระหว่าง client
 - conflict กรณีหลักถูกจัดการได้ deterministic
 - ไม่มี critical data-loss case ใน test matrix
+
+### Closure Update (2026-02-25)
+- สถานะ: `Completed` (shared-core ใน repo นี้)
+- งาน mobile execution ถูกแตกเป็น:
+  - `Phase B1: P3-2A iOS Native Client Sync Beta`
+  - `Phase B2: P3-2B Android Native Client Sync Beta`
+
+## Phase B1: P3-2A iOS Native Client Sync Beta
+
+ช่วงเป้าหมาย: tentative (หลัง P3-5/P3-6 hardening milestone)
+
+### Deliverables
+- iOS native app baseline ที่ใช้ sync contract เดียวกับ desktop/shared-core
+- iOS-specific sync/runtime tuning (foreground/background lifecycle)
+- iOS secure storage integration สำหรับ token/secret ที่เกี่ยวข้องกับ sync
+- internal/external TestFlight rollout checklist + evidence
+
+### Exit Criteria
+- sync desktop <-> iOS median <= 10 วินาทีในเครือข่ายปกติ
+- offline edits บน iOS ไม่สูญหายเมื่อกลับมา online
+- ไม่มี critical data-loss case ใน iOS matrix
+
+## Phase B2: P3-2B Android Native Client Sync Beta
+
+ช่วงเป้าหมาย: tentative (หลัง P3-5/P3-6 hardening milestone)
+
+### Deliverables
+- Android native app baseline ที่ใช้ sync contract เดียวกับ desktop/shared-core
+- Android-specific sync/runtime tuning (background limits/power policy)
+- Android secure storage integration สำหรับ token/secret ที่เกี่ยวข้องกับ sync
+- Closed/Open Testing rollout checklist + evidence
+
+### Exit Criteria
+- sync desktop <-> Android median <= 10 วินาทีในเครือข่ายปกติ
+- offline edits บน Android ไม่สูญหายเมื่อกลับมา online
+- ไม่มี critical data-loss case ใน Android matrix
 
 ## Phase C: P3-3 Conflict Center + Recovery
 
