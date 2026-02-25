@@ -82,4 +82,49 @@ struct solostackTests {
         #expect(viewModel.lastSyncedAt == expectedDate)
         #expect(viewModel.lastSyncError == nil)
     }
+
+    @Test func quickCaptureParsesProjectDueDateAndImportanceTokens() async throws {
+        let repository = TestTaskRepository(seed: [])
+        let syncEngine = TestSyncEngine { _, _ in Date(timeIntervalSince1970: 1234) }
+        let viewModel = AppViewModel(
+            environment: AppEnvironment(repository: repository, syncEngine: syncEngine)
+        )
+
+        await viewModel.loadIfNeeded()
+        viewModel.quickCaptureText = "Prepare QA handoff #iOS @tomorrow !"
+        await viewModel.addQuickTask()
+
+        #expect(viewModel.tasks.count == 1)
+        let task = viewModel.tasks[0]
+        #expect(task.title == "Prepare QA handoff")
+        #expect(task.projectName == "iOS")
+        #expect(task.isImportant)
+
+        let tomorrow = Calendar.current.date(
+            byAdding: .day,
+            value: 1,
+            to: Calendar.current.startOfDay(for: Date())
+        )
+        #expect(tomorrow != nil)
+        #expect(task.dueDate != nil)
+        if let dueDate = task.dueDate, let tomorrow {
+            #expect(Calendar.current.isDate(dueDate, inSameDayAs: tomorrow))
+        }
+    }
+
+    @Test func deleteTaskRemovesTaskFromCurrentState() async throws {
+        let seed = TaskItem.seedData()
+        let repository = TestTaskRepository(seed: seed)
+        let syncEngine = TestSyncEngine { _, _ in Date(timeIntervalSince1970: 1234) }
+        let viewModel = AppViewModel(
+            environment: AppEnvironment(repository: repository, syncEngine: syncEngine)
+        )
+
+        await viewModel.loadIfNeeded()
+        let deleteID = viewModel.tasks[0].id
+        await viewModel.deleteTask(taskID: deleteID)
+
+        #expect(viewModel.tasks.count == seed.count - 1)
+        #expect(viewModel.tasks.contains(where: { $0.id == deleteID }) == false)
+    }
 }

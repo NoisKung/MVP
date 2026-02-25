@@ -126,6 +126,17 @@
 - offline edits บน iOS ไม่สูญหายเมื่อกลับมา online
 - ไม่มี critical data-loss case ใน iOS matrix
 
+### P3-2A QoL Sprint 1 (Current)
+- เป้าหมาย: ลด friction ของ daily flow บน iOS โดยไม่เพิ่มความซับซ้อนของ data model
+- แผนงาน:
+  - เพิ่ม `search` ข้าม task title/project/status ในทุกแท็บหลัก
+  - เพิ่ม `pull-to-sync` เพื่อให้ผู้ใช้ refresh + sync ได้เร็วจาก list/board
+  - เพิ่ม `swipe delete` เพื่อเคลียร์งานได้ไวขึ้นในทุก view
+  - เพิ่ม quick-capture syntax (`#project`, `@today`, `@tomorrow`, `@nextweek`, `!`) เพื่อลดจำนวน tap ตอนสร้างงาน
+- acceptance:
+  - ทุก flow ข้างต้นผ่าน build + unit tests
+  - ไม่กระทบ sync contract และ persistence behavior เดิม
+
 ## Phase B2: P3-2B Android Native Client Sync Beta
 
 ช่วงเป้าหมาย: tentative (หลัง P3-5/P3-6 hardening milestone)

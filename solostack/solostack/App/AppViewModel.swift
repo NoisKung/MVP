@@ -51,15 +51,15 @@ final class AppViewModel: ObservableObject {
     }
 
     func addQuickTask() async {
-        let normalized = quickCaptureText.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !normalized.isEmpty else { return }
+        guard let capture = parseQuickCaptureInput(quickCaptureText) else { return }
 
         let newTask = TaskItem(
-            title: normalized,
-            projectName: "Inbox",
-            dueDate: nil,
+            title: capture.title,
+            projectName: capture.projectName,
+            dueDate: capture.dueDate,
             status: .todo,
-            updatedAt: Date()
+            updatedAt: Date(),
+            isImportant: capture.isImportant
         )
 
         tasks.insert(newTask, at: 0)
@@ -78,6 +78,12 @@ final class AppViewModel: ObservableObject {
         guard let index = tasks.firstIndex(where: { $0.id == taskID }) else { return }
         tasks[index].status = status
         tasks[index].updatedAt = Date()
+        await persistTasks()
+    }
+
+    func deleteTask(taskID: UUID) async {
+        guard let index = tasks.firstIndex(where: { $0.id == taskID }) else { return }
+        tasks.remove(at: index)
         await persistTasks()
     }
 
@@ -110,6 +116,81 @@ final class AppViewModel: ObservableObject {
     private func persistTasks() async {
         await repository.saveTasks(tasks)
     }
+
+    private func parseQuickCaptureInput(_ input: String) -> QuickCaptureInput? {
+        let normalized = input.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !normalized.isEmpty else { return nil }
+
+        let tokens = normalized.split(whereSeparator: \.isWhitespace).map(String.init)
+        var titleTokens: [String] = []
+        var projectName: String?
+        var dueDate: Date?
+        var isImportant = false
+
+        for token in tokens {
+            let lowered = token.lowercased()
+
+            if lowered == "!" {
+                isImportant = true
+                continue
+            }
+
+            if lowered.hasPrefix("!") {
+                isImportant = true
+                let stripped = String(token.dropFirst())
+                if !stripped.isEmpty {
+                    titleTokens.append(stripped)
+                }
+                continue
+            }
+
+            if lowered.hasPrefix("#"), token.count > 1, projectName == nil {
+                let candidate = String(token.dropFirst())
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                if !candidate.isEmpty {
+                    projectName = candidate
+                    continue
+                }
+            }
+
+            switch lowered {
+            case "@today":
+                dueDate = calendar.startOfDay(for: Date())
+                continue
+            case "@tomorrow":
+                let today = calendar.startOfDay(for: Date())
+                dueDate = calendar.date(byAdding: .day, value: 1, to: today)
+                continue
+            case "@nextweek":
+                let today = calendar.startOfDay(for: Date())
+                dueDate = calendar.date(byAdding: .day, value: 7, to: today)
+                continue
+            default:
+                break
+            }
+
+            titleTokens.append(token)
+        }
+
+        let title = titleTokens
+            .joined(separator: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !title.isEmpty else { return nil }
+
+        return QuickCaptureInput(
+            title: title,
+            projectName: projectName ?? "Inbox",
+            dueDate: dueDate,
+            isImportant: isImportant
+        )
+    }
+}
+
+private struct QuickCaptureInput {
+    let title: String
+    let projectName: String
+    let dueDate: Date?
+    let isImportant: Bool
 }
 
 private extension Calendar {

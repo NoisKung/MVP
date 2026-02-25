@@ -5,8 +5,10 @@ struct TaskRowView: View {
     let onToggle: () -> Void
     let onMove: (TaskItem.Status) -> Void
 
+    @Environment(\.appLayoutMetrics) private var layout
+
     var body: some View {
-        HStack(alignment: .top, spacing: 12) {
+        HStack(alignment: .top, spacing: layout.isRegularWidth ? 14 : 12) {
             Button(action: onToggle) {
                 Image(systemName: task.status == .done ? "checkmark.circle.fill" : "circle")
                     .font(.title3.weight(.semibold))
@@ -80,7 +82,7 @@ struct TaskRowView: View {
             }
             .buttonStyle(.plain)
         }
-        .padding(12)
+        .padding(layout.isRegularWidth ? 14 : 12)
         .desktopCard(
             fill: DesktopTheme.bgElevated,
             border: task.status.tint.opacity(0.35)
@@ -96,6 +98,7 @@ struct TaskRowView: View {
         Label(title, systemImage: systemImage)
             .font(.caption2.weight(.medium))
             .foregroundStyle(tint)
+            .lineLimit(1)
             .padding(.horizontal, 8)
             .padding(.vertical, 4)
             .background(DesktopTheme.bgMuted, in: Capsule())

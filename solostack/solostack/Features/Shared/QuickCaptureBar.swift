@@ -4,12 +4,14 @@ struct QuickCaptureBar: View {
     @Binding var text: String
     let onSubmit: () -> Void
 
+    @Environment(\.appLayoutMetrics) private var layout
+
     private var canSubmit: Bool {
         !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
     var body: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: layout.isRegularWidth ? 14 : 12) {
             HStack(spacing: 8) {
                 Image(systemName: "plus")
                     .font(.subheadline.weight(.bold))
@@ -20,19 +22,19 @@ struct QuickCaptureBar: View {
                 TextField(
                     "",
                     text: $text,
-                    prompt: Text("Quick Capture")
+                    prompt: Text("Quick Capture (#project @today !)")
                         .foregroundStyle(DesktopTheme.textMuted),
                     axis: .vertical
                 )
                 .textFieldStyle(.plain)
                 .submitLabel(.done)
-                .lineLimit(1...2)
+                .lineLimit(1...(layout.isRegularWidth ? 3 : 2))
                 .onSubmit(onSubmit)
                 .foregroundStyle(DesktopTheme.textPrimary)
                 .tint(DesktopTheme.accent)
             }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
+            .padding(.horizontal, layout.isRegularWidth ? 14 : 12)
+            .padding(.vertical, layout.isRegularWidth ? 12 : 10)
             .desktopCard(
                 cornerRadius: 12,
                 fill: DesktopTheme.bgElevated,
@@ -45,7 +47,7 @@ struct QuickCaptureBar: View {
                 Image(systemName: "arrow.up")
                     .font(.headline.weight(.bold))
                     .foregroundStyle(DesktopTheme.textPrimary)
-                    .frame(width: 38, height: 38)
+                    .frame(width: layout.isRegularWidth ? 42 : 38, height: layout.isRegularWidth ? 42 : 38)
                     .background(
                         canSubmit ? DesktopTheme.accent : DesktopTheme.bgMuted,
                         in: Circle()
@@ -68,7 +70,7 @@ struct QuickCaptureBar: View {
             .disabled(!canSubmit)
             .accessibilityLabel("Add Task")
         }
-        .padding(12)
+        .padding(layout.isRegularWidth ? 14 : 12)
         .desktopCard(
             cornerRadius: 16,
             fill: DesktopTheme.bgSurface.opacity(0.96),

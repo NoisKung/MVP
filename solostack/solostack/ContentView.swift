@@ -11,6 +11,8 @@ import SwiftUI
 struct ContentView: View {
     @StateObject private var viewModel: AppViewModel
     @State private var selectedTab: Tab = .today
+    @State private var searchText: String = ""
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
 
     init(viewModel: AppViewModel) {
         _viewModel = StateObject(wrappedValue: viewModel)
@@ -30,9 +32,11 @@ struct ContentView: View {
                 systemImage: "sun.max.fill"
             ) {
                 TodayView(
-                    tasks: viewModel.todayTasks,
+                    tasks: filteredTasks(viewModel.todayTasks),
                     onToggle: onToggle,
-                    onMove: onMove
+                    onMove: onMove,
+                    onDelete: onDelete,
+                    onRefresh: onRefresh
                 )
             }
 
@@ -42,9 +46,11 @@ struct ContentView: View {
                 systemImage: "calendar"
             ) {
                 UpcomingView(
-                    tasks: viewModel.upcomingTasks,
+                    tasks: filteredTasks(viewModel.upcomingTasks),
                     onToggle: onToggle,
-                    onMove: onMove
+                    onMove: onMove,
+                    onDelete: onDelete,
+                    onRefresh: onRefresh
                 )
             }
 
@@ -55,9 +61,13 @@ struct ContentView: View {
             ) {
                 BoardView(
                     statuses: viewModel.orderedStatuses,
-                    tasksForStatus: { status in viewModel.tasks(for: status) },
+                    tasksForStatus: { status in
+                        filteredTasks(viewModel.tasks(for: status))
+                    },
                     onToggle: onToggle,
-                    onMove: onMove
+                    onMove: onMove,
+                    onDelete: onDelete,
+                    onRefresh: onRefresh
                 )
             }
         }
@@ -88,52 +98,101 @@ private extension ContentView {
         Task { await viewModel.moveTask(taskID: taskID, to: status) }
     }
 
+    func onDelete(_ taskID: UUID) {
+        Task { await viewModel.deleteTask(taskID: taskID) }
+    }
+
+    func onRefresh() async {
+        await viewModel.syncNow()
+    }
+
+    func filteredTasks(_ tasks: [TaskItem]) -> [TaskItem] {
+        let terms = searchText
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+            .split(whereSeparator: \.isWhitespace)
+
+        guard !terms.isEmpty else { return tasks }
+
+        return tasks.filter { task in
+            let searchable = [
+                task.title,
+                task.projectName ?? "",
+                task.status.title,
+                task.isImportant ? "important" : ""
+            ]
+                .joined(separator: " ")
+                .lowercased()
+
+            return terms.allSatisfy { searchable.contains($0) }
+        }
+    }
+
     @ViewBuilder
     func sceneContainer<Content: View>(
         title: String,
         tab: Tab,
         systemImage: String,
-        @ViewBuilder content: () -> Content
+        @ViewBuilder content: @escaping () -> Content
     ) -> some View {
         NavigationStack {
-            ZStack {
-                DesktopTheme.appGradient
-                    .ignoresSafeArea()
-
-                content()
-            }
-            .navigationTitle(title)
-            .navigationBarTitleDisplayMode(.large)
-            .toolbar { syncToolbar }
-            .toolbarBackground(.visible, for: .navigationBar)
-            .toolbarBackground(DesktopTheme.bgSurface, for: .navigationBar)
-            .toolbarColorScheme(.dark, for: .navigationBar)
-            .safeAreaInset(edge: .top) {
-                SyncStatusBadge(
-                    status: viewModel.syncStatus,
-                    lastSyncedAt: viewModel.lastSyncedAt,
-                    errorMessage: viewModel.lastSyncError
+            GeometryReader { proxy in
+                let metrics = AppLayoutMetrics.resolve(
+                    width: proxy.size.width,
+                    horizontalSizeClass: horizontalSizeClass
                 )
-                .padding(.horizontal, 16)
-                .padding(.top, 4)
-            }
-            .safeAreaInset(edge: .bottom) {
-                QuickCaptureBar(text: $viewModel.quickCaptureText) {
-                    Task { await viewModel.addQuickTask() }
+
+                ZStack {
+                    DesktopTheme.appGradient
+                        .ignoresSafeArea()
+
+                    content()
+                        .frame(maxWidth: metrics.contentMaxWidth)
+                        .frame(maxWidth: .infinity, alignment: .center)
                 }
-                .padding(.horizontal, 16)
-                .padding(.top, 8)
-                .padding(.bottom, 8)
-                .background {
-                    LinearGradient(
-                        colors: [
-                            DesktopTheme.bgBase.opacity(0),
-                            DesktopTheme.bgBase.opacity(0.92)
-                        ],
-                        startPoint: .top,
-                        endPoint: .bottom
+                .environment(\.appLayoutMetrics, metrics)
+                .navigationTitle(title)
+                .navigationBarTitleDisplayMode(metrics.isRegularWidth ? .inline : .large)
+                .toolbar { syncToolbar }
+                .searchable(
+                    text: $searchText,
+                    placement: .navigationBarDrawer(displayMode: .automatic),
+                    prompt: "Search tasks or projects"
+                )
+                .toolbarBackground(.visible, for: .navigationBar)
+                .toolbarBackground(DesktopTheme.bgSurface, for: .navigationBar)
+                .toolbarColorScheme(.dark, for: .navigationBar)
+                .safeAreaInset(edge: .top) {
+                    SyncStatusBadge(
+                        status: viewModel.syncStatus,
+                        lastSyncedAt: viewModel.lastSyncedAt,
+                        errorMessage: viewModel.lastSyncError
                     )
-                    .ignoresSafeArea()
+                    .frame(maxWidth: metrics.syncBadgeMaxWidth)
+                    .frame(maxWidth: .infinity)
+                    .padding(.horizontal, metrics.sceneHorizontalPadding)
+                    .padding(.top, metrics.isRegularWidth ? 6 : 4)
+                }
+                .safeAreaInset(edge: .bottom) {
+                    QuickCaptureBar(text: $viewModel.quickCaptureText) {
+                        Task { await viewModel.addQuickTask() }
+                    }
+                    .frame(maxWidth: metrics.quickCaptureMaxWidth)
+                    .frame(maxWidth: .infinity)
+                    .padding(.horizontal, metrics.sceneHorizontalPadding)
+                    .padding(.top, metrics.isRegularWidth ? 10 : 8)
+                    .padding(.bottom, metrics.isRegularWidth ? 12 : 8)
+                    .background {
+                        LinearGradient(
+                            colors: [
+                                DesktopTheme.bgBase.opacity(0),
+                                DesktopTheme.bgBase.opacity(0.92)
+                            ],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                        .ignoresSafeArea()
+                    }
                 }
             }
         }
