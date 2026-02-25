@@ -909,6 +909,24 @@ Recommended follow-up:
 - ล็อก tech direction สำหรับ iOS เป็น `Swift` + `SwiftUI`
 - เพิ่ม design baseline เอกสาร `docs/p3-2a-ios-native-swift-design-v0.1.md`
 
+### P3-2A Sync + Database Decision Gate (2026-02-25)
+
+- เป้าหมายของ gate นี้: ล็อกแนวทาง sync/data layer ก่อนลง implementation จริง เพื่อกัน model drift กับ desktop
+- Decision: iOS native ใช้ `SQLite` เป็น local source of truth และใช้ `GRDB` เป็น Swift data access/migration layer
+- Decision: ไม่ใช้ `Core Data` หรือ `Realm` ใน phase นี้ เพื่อคง schema parity กับ desktop และลด translation layer
+- Decision: iOS sync flow ต้องยึด contract เดียวกับ desktop (`bootstrap`, `push`, `pull`, cursor-based incremental)
+- Decision: ทุก local mutation เขียนแบบ transaction เดียว:
+  - update domain tables
+  - enqueue `sync_outbox`
+  - update metadata (`sync_version`, `updated_by_device`)
+- Decision: iOS ต้องรองรับตาราง sync/recovery baseline เดียวกับ desktop:
+  - `sync_outbox`, `sync_checkpoints`, `deleted_records`
+  - `sync_conflicts`, `sync_conflict_events`
+- Decision: token/secret สำหรับ sync transport เก็บใน `Keychain`; DB file เก็บใน App Support ภายใต้ iOS data protection
+- Non-goal ของ phase นี้:
+  - ไม่ทำ CloudKit-only path ที่แตกจาก provider-neutral contract
+  - ไม่เพิ่ม second database engine สำหรับ iOS
+
 ## New Initiative: P3-9 3D Experience UX/UI
 
 ### Objective

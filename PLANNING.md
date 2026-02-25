@@ -137,6 +137,107 @@
   - ทุก flow ข้างต้นผ่าน build + unit tests
   - ไม่กระทบ sync contract และ persistence behavior เดิม
 
+### P3-2A Sync + Database Design (Pre-Implementation)
+
+- เป้าหมาย:
+  - ทำให้ iOS native sync กับ desktop ได้จริง โดยไม่เปลี่ยน contract กลาง
+  - คง local-first/offline-first และกัน data loss จาก crash/network flap
+- สถานะปัจจุบัน (ต้องแทนที่):
+  - repository ยังเป็น in-memory
+  - sync engine ยังเป็น demo/simulated transport
+
+#### Architecture Decision
+
+- Database engine: `SQLite` (single source of truth บน iOS)
+- Data access/migration: `GRDB` (typed query + migration orchestration)
+- Sync secret storage: `Keychain` (token/secret ไม่เก็บใน SQLite)
+- File location:
+  - DB: `Application Support/solostack.sqlite`
+  - backup snapshot: `Application Support/backups/`
+
+#### Database Schema Plan (v1)
+
+- Domain tables:
+  - `projects`
+  - `tasks`
+  - `task_subtasks`
+  - `task_templates`
+  - `settings`
+- Sync/recovery tables:
+  - `sync_outbox`
+  - `sync_checkpoints`
+  - `deleted_records`
+  - `sync_conflicts`
+  - `sync_conflict_events`
+- Required metadata columns:
+  - `sync_version`
+  - `updated_by_device`
+  - `updated_at`
+- Index baseline:
+  - outbox drain: `(status, created_at)`
+  - pull/apply ordering: `(updated_at, id)`
+  - conflict lookup: `(status, detected_at)`
+
+#### Sync Flow Design
+
+1. Local write path (mandatory transaction)
+- mutation domain table
+- increment `sync_version`
+- set `updated_by_device`
+- enqueue record เข้า `sync_outbox` พร้อม idempotency key
+
+2. Push phase
+- อ่าน pending outbox batch (bounded limit)
+- ส่ง `POST /v1/sync/push`
+- mark sent/acked โดยอิง response + idempotency
+
+3. Pull phase
+- อ่าน cursor จาก `sync_checkpoints`
+- เรียก `POST /v1/sync/pull`
+- apply changes แบบ deterministic + update cursor
+
+4. Conflict handling
+- detect ระหว่าง apply pull และ persist เข้า `sync_conflicts`
+- log lifecycle ใน `sync_conflict_events`
+- resolution ใด ๆ ต้อง enqueue outbox ใหม่ด้วย deterministic idempotency key
+
+5. Recovery rules
+- ถ้า sync fail ให้ retry ตาม backoff policy
+- ถ้ามี force restore ให้ preflight `pending outbox/open conflicts` ก่อนเสมอ
+
+#### Execution Plan (P3-2A Sync/DB)
+
+1. Milestone A: Data Layer Foundation
+- เพิ่ม GRDB setup + migration runner
+- implement `SQLiteTaskRepository` แทน in-memory
+- เพิ่ม crash-safe migration tests
+
+2. Milestone B: Real Sync Transport
+- implement `HTTP sync transport` ตาม contract เดียวกับ desktop
+- wire `push/pull/bootstrap` และ checkpoint persistence
+- เพิ่ม offline queue + retry/backoff
+
+3. Milestone C: Conflict/Recovery Integration
+- persist conflict + timeline
+- เชื่อม UI status (`Synced/Syncing/Offline/Conflict`) กับ state จริง
+- เพิ่ม `Retry sync` และ restore preflight guards
+
+4. Milestone D: Hardening + Beta Gate
+- sync soak tests (flaky network / app relaunch / background-foreground)
+- desktop<->iOS real-device validation
+- freeze schema/contract ก่อน external TestFlight
+
+#### Acceptance Gates
+
+- sync desktop <-> iOS median <= 10 วินาที (normal network)
+- offline create/update/delete ไม่สูญหายหลัง reconnect
+- restart app ระหว่าง outbox pending แล้วไม่ทำ duplicate write
+- migration rerun ได้แบบ idempotent
+- ผ่าน:
+  - `xcodebuild ... build`
+  - `xcodebuild ... test (unit/integration)`
+  - desktop integration matrix ตาม P3-2A checklist
+
 ## Phase B2: P3-2B Android Native Client Sync Beta
 
 ช่วงเป้าหมาย: tentative (หลัง P3-5/P3-6 hardening milestone)
