@@ -180,6 +180,13 @@ Options ที่ใช้บ่อย:
 
 ## 3) Sync Architecture (Current)
 
+เอกสารอธิบายเชิงลึก:
+- TH: `docs/sync-deep-dive-v0.1.th.md`
+- EN: `docs/sync-deep-dive-v0.1.en.md`
+- Cloud provider setup (TH): `docs/cloud-provider-setup-v0.1.th.md`
+- Cloud provider setup (EN): `docs/cloud-provider-setup-v0.1.en.md`
+- Backend API examples: `docs/sync-backend-api-examples-v0.1.md`
+
 Core files:
 - `src/lib/sync-contract.ts`: validate/normalize sync payloads
 - `src/lib/sync-engine.ts`: prepare/ack/apply/advance helpers
@@ -213,13 +220,18 @@ Incoming apply rules:
 ## 4) Sync Transport Configuration (UI)
 
 ตั้งค่าในแอปที่หน้า `Settings > Sync`:
-1. กรอก `Push URL` (เช่น `/v1/sync/push`)
-2. กรอก `Pull URL` (เช่น `/v1/sync/pull`)
-3. กด `Save Endpoints`
+1. กรอก `Server Base URL` (เช่น `127.0.0.1:8787` หรือ `sync.example.com`)
+2. กด `Apply Server URL` เพื่อเติม `Push URL`/`Pull URL` ให้อัตโนมัติ
+3. หรือกด `Use Localhost Preset` เพื่อเติมค่า `http://127.0.0.1:8787`
+4. ตรวจค่า `Push URL` และ `Pull URL` (แก้เองได้)
+5. กด `Save Endpoints`
 
 ข้อกำหนด:
 - ต้องตั้ง `push` และ `pull` ครบทั้งคู่ หรือปล่อยว่างทั้งคู่
 - รองรับเฉพาะ `http://` และ `https://`
+- `Server Base URL` สามารถพิมพ์แบบไม่ใส่ scheme ได้:
+  - `localhost`/`LAN` (`127.x`, `10.x`, `192.168.x`, `172.16-31.x`, `.local`) จะเดาเป็น `http://`
+  - host อื่นจะเดาเป็น `https://`
 - ถ้าล้างทั้งคู่ แอปจะกลับเป็น local-only mode
 
 พฤติกรรมหลังตั้งค่า:
@@ -278,6 +290,9 @@ Migration hardening (old -> new app identifier path):
 - ใช้ public/accessible URL จาก tunnel เป็น base URL แล้วต่อท้าย `/v1/sync/push` และ `/v1/sync/pull`
 
 Checklist ก่อนกรอกใน UI:
+- ถ้าใช้ `Server Base URL`:
+  - ใส่แค่ `host[:port]` ก็ได้ แล้วกด `Apply Server URL`
+  - ถ้าทดสอบเครื่องเดียว ให้กด `Use Localhost Preset` ได้ทันที
 - เปิด endpoint จริงครบทั้ง `push` และ `pull`
 - ต้องเป็น `http(s)` เท่านั้น
 - หลีกเลี่ยง trailing slash ซ้ำ เช่น `.../sync//push`
@@ -332,7 +347,28 @@ console.log(summary);
   - `write`
   - `remove`
 - มี capability map ต่อ provider (`google_appdata`, `onedrive_approot`) และ helper สำหรับ normalize request bounds + error shape
-- ไฟล์นี้เป็น contract layer (ยังไม่ใช่ provider implementation จริง)
+- มี managed connector stubs รุ่นแรกใน:
+  - `src/lib/sync-provider-adapters.ts`
+  - `src/lib/sync-provider-auth.ts`
+- มี factory สำหรับสร้าง adapter จาก `sync.provider_config`:
+  - `src/lib/sync-provider-adapter-factory.ts`
+- รองรับ auth header + refresh token flow ใน adapter layer และ map error เป็น shape กลาง
+- ใน `Settings > Sync`:
+  - เมื่อเลือก `google_appdata` หรือ `onedrive_approot` จะมีฟอร์ม managed connector (base URL + token/auth fields)
+  - มีปุ่ม `Test Connector` สำหรับตรวจว่า connector endpoint เข้าถึงได้ก่อนบันทึกใช้งานจริง
+- resolver จะพยายามใช้ managed connector transport ก่อน (ถ้ามี `managed_base_url` + provider รองรับ) แล้วค่อย fallback ไป custom push/pull endpoints
+- token policy (v0.1):
+  - sensitive fields (`access_token`, `refresh_token`, `client_secret`) ไม่ persist ลง SQLite/backup
+  - Tauri desktop จะเก็บ token ใน OS secure keystore (best-effort) และ hydrate กลับตอนเปิดแอปใหม่
+  - runtime อื่นจะ fallback เป็น in-memory session store
+  - config จะมี marker `managed_auth_storage_policy` (เช่น `desktop_secure_keystore` หรือ `browser_session_only`)
+- test coverage:
+  - `src/lib/sync-provider-adapters.test.ts`
+  - `src/lib/sync-provider-auth.test.ts`
+  - `src/lib/sync-provider-adapter-factory.test.ts`
+  - `src/lib/sync-transport.test.ts`
+  - `src/lib/sync-provider-token-policy.test.ts`
+  - `src/lib/sync-provider-secure-store.test.ts`
 
 ## 6) Sync Status Semantics
 
@@ -429,7 +465,11 @@ read tool endpoints:
 - `POST /tools` (generic route, ส่ง `tool` ผ่าน body)
 
 audit log baseline:
-- MCP จะเขียน structured log ต่อ 1 tool call ลง stdout (event `mcp.tool_call`)
+- MCP จะเขียน structured log ต่อ 1 tool call (event `mcp.tool_call`)
+- mode:
+  - `stdout` (default)
+  - `file` (daily JSONL + retention pruning)
+  - `http` (POST JSON ไป centralized audit endpoint)
 - payload หลัก: `request_id`, `tool`, `ok`, `status_code`, `error_code`, `duration_ms`
 
 config env vars:
@@ -445,10 +485,24 @@ config env vars:
 - `SOLOSTACK_MCP_TIMEOUT_GUARD_ENABLED`
 - `SOLOSTACK_MCP_TIMEOUT_STRATEGY`
 - `SOLOSTACK_MCP_TOOL_TIMEOUT_MS`
+- `SOLOSTACK_MCP_AUDIT_SINK` (`stdout|file|http`)
+- `SOLOSTACK_MCP_AUDIT_LOG_DIR`
+- `SOLOSTACK_MCP_AUDIT_RETENTION_DAYS`
+- `SOLOSTACK_MCP_AUDIT_HTTP_URL` (required เมื่อใช้ `http` sink)
+- `SOLOSTACK_MCP_AUDIT_HTTP_TIMEOUT_MS`
+- `SOLOSTACK_MCP_AUDIT_HTTP_AUTH_TOKEN` (optional bearer token)
 
 load/perf matrix baseline:
 - รัน `npm run mcp:load-matrix`
 - output ที่ `docs/mcp-load-matrix-v0.1.md`
+
+hosted staging matrix:
+- รัน `npm run mcp:load-matrix:hosted` (กำหนด `SOLOSTACK_MCP_HOSTED_BASE_URL` และ token ตาม environment)
+- output ที่ `docs/mcp-load-matrix-hosted-staging-v0.1.md`
+
+compare hosted vs local baseline:
+- รัน `npm run mcp:load-matrix:compare`
+- output ที่ `docs/mcp-load-matrix-hosted-compare-v0.1.md`
 
 รายละเอียดเพิ่มเติม: `mcp-solostack/README.md`
 

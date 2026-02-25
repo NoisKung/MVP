@@ -3,6 +3,7 @@ export const MCP_SERVICE_VERSION = "0.1.0";
 
 const SUPPORTED_LOG_LEVELS = new Set(["debug", "info", "warn", "error"]);
 const SUPPORTED_TIMEOUT_STRATEGIES = new Set(["soft", "worker_hard"]);
+const SUPPORTED_AUDIT_SINKS = new Set(["stdout", "file", "http"]);
 const TRUE_VALUES = new Set(["1", "true", "yes", "on"]);
 const FALSE_VALUES = new Set(["0", "false", "no", "off"]);
 
@@ -18,6 +19,10 @@ const DEFAULTS = Object.freeze({
   timeout_guard_enabled: false,
   tool_timeout_ms: 2_000,
   timeout_strategy: "soft",
+  audit_sink: "stdout",
+  audit_log_directory: "mcp-solostack/audit",
+  audit_retention_days: 30,
+  audit_http_timeout_ms: 3000,
 });
 
 function asOptionalString(value) {
@@ -63,6 +68,37 @@ function parseTimeoutStrategy(rawValue) {
   return lowerCaseValue;
 }
 
+function parseAuditSink(rawValue) {
+  const normalized = asOptionalString(rawValue);
+  if (normalized === null) return DEFAULTS.audit_sink;
+  const lowerCaseValue = normalized.toLowerCase();
+  if (!SUPPORTED_AUDIT_SINKS.has(lowerCaseValue)) {
+    throw new Error(
+      "SOLOSTACK_MCP_AUDIT_SINK must be one of: stdout, file, http.",
+    );
+  }
+  return lowerCaseValue;
+}
+
+function parseOptionalHttpUrl(rawValue) {
+  const normalized = asOptionalString(rawValue);
+  if (normalized === null) return null;
+  let parsed;
+  try {
+    parsed = new URL(normalized);
+  } catch {
+    throw new Error(
+      "SOLOSTACK_MCP_AUDIT_HTTP_URL must be a valid http(s) URL.",
+    );
+  }
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    throw new Error(
+      "SOLOSTACK_MCP_AUDIT_HTTP_URL must use http:// or https://.",
+    );
+  }
+  return parsed.toString();
+}
+
 function parseBoolean(rawValue, fallback) {
   const normalized = asOptionalString(rawValue);
   if (normalized === null) return fallback;
@@ -92,6 +128,26 @@ function parseBoundedInteger(rawValue, input) {
 export function loadMcpConfigFromEnv(env = process.env) {
   const host = asOptionalString(env.SOLOSTACK_MCP_HOST) ?? DEFAULTS.host;
   const dbPath = asOptionalString(env.SOLOSTACK_MCP_DB_PATH);
+  const auditSink = parseAuditSink(env.SOLOSTACK_MCP_AUDIT_SINK);
+  const auditHttpUrl = parseOptionalHttpUrl(env.SOLOSTACK_MCP_AUDIT_HTTP_URL);
+  const auditHttpAuthToken = asOptionalString(
+    env.SOLOSTACK_MCP_AUDIT_HTTP_AUTH_TOKEN,
+  );
+  const auditHttpTimeoutMs = parseBoundedInteger(
+    env.SOLOSTACK_MCP_AUDIT_HTTP_TIMEOUT_MS,
+    {
+      env_name: "SOLOSTACK_MCP_AUDIT_HTTP_TIMEOUT_MS",
+      min: 100,
+      max: 60_000,
+      fallback: DEFAULTS.audit_http_timeout_ms,
+    },
+  );
+
+  if (auditSink === "http" && auditHttpUrl === null) {
+    throw new Error(
+      "SOLOSTACK_MCP_AUDIT_HTTP_URL is required when SOLOSTACK_MCP_AUDIT_SINK=http.",
+    );
+  }
 
   return {
     service_name: MCP_SERVICE_NAME,
@@ -137,6 +193,22 @@ export function loadMcpConfigFromEnv(env = process.env) {
       max: 60_000,
       fallback: DEFAULTS.tool_timeout_ms,
     }),
+    audit_sink: auditSink,
+    audit_log_directory:
+      asOptionalString(env.SOLOSTACK_MCP_AUDIT_LOG_DIR) ??
+      DEFAULTS.audit_log_directory,
+    audit_retention_days: parseBoundedInteger(
+      env.SOLOSTACK_MCP_AUDIT_RETENTION_DAYS,
+      {
+        env_name: "SOLOSTACK_MCP_AUDIT_RETENTION_DAYS",
+        min: 1,
+        max: 3650,
+        fallback: DEFAULTS.audit_retention_days,
+      },
+    ),
+    audit_http_url: auditHttpUrl,
+    audit_http_timeout_ms: auditHttpTimeoutMs,
+    audit_http_auth_token: auditHttpAuthToken,
     db_path: dbPath,
   };
 }
@@ -154,6 +226,12 @@ export function getMcpSafeConfigSummary(config) {
     timeout_guard_enabled: config.timeout_guard_enabled,
     timeout_strategy: config.timeout_strategy,
     tool_timeout_ms: config.tool_timeout_ms,
+    audit_sink: config.audit_sink,
+    audit_log_directory: config.audit_log_directory,
+    audit_retention_days: config.audit_retention_days,
+    audit_http_url_set: Boolean(config.audit_http_url),
+    audit_http_timeout_ms: config.audit_http_timeout_ms,
+    audit_http_auth_token_set: Boolean(config.audit_http_auth_token),
     db_path_set: Boolean(config.db_path),
   };
 }

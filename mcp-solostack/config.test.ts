@@ -20,6 +20,12 @@ describe("mcp-solostack config loader", () => {
       timeout_guard_enabled: false,
       timeout_strategy: "soft",
       tool_timeout_ms: 2000,
+      audit_sink: "stdout",
+      audit_log_directory: "mcp-solostack/audit",
+      audit_retention_days: 30,
+      audit_http_url: null,
+      audit_http_timeout_ms: 3000,
+      audit_http_auth_token: null,
       db_path: null,
     });
   });
@@ -38,6 +44,10 @@ describe("mcp-solostack config loader", () => {
       SOLOSTACK_MCP_TIMEOUT_GUARD_ENABLED: "true",
       SOLOSTACK_MCP_TIMEOUT_STRATEGY: "worker_hard",
       SOLOSTACK_MCP_TOOL_TIMEOUT_MS: "2500",
+      SOLOSTACK_MCP_AUDIT_SINK: "file",
+      SOLOSTACK_MCP_AUDIT_LOG_DIR: "/tmp/mcp-audit",
+      SOLOSTACK_MCP_AUDIT_RETENTION_DAYS: "14",
+      SOLOSTACK_MCP_AUDIT_HTTP_TIMEOUT_MS: "2200",
     });
 
     expect(config).toMatchObject({
@@ -53,6 +63,12 @@ describe("mcp-solostack config loader", () => {
       timeout_guard_enabled: true,
       timeout_strategy: "worker_hard",
       tool_timeout_ms: 2500,
+      audit_sink: "file",
+      audit_log_directory: "/tmp/mcp-audit",
+      audit_retention_days: 14,
+      audit_http_url: null,
+      audit_http_timeout_ms: 2200,
+      audit_http_auth_token: null,
     });
     expect(getMcpSafeConfigSummary(config)).toEqual({
       host: "0.0.0.0",
@@ -66,7 +82,35 @@ describe("mcp-solostack config loader", () => {
       timeout_guard_enabled: true,
       timeout_strategy: "worker_hard",
       tool_timeout_ms: 2500,
+      audit_sink: "file",
+      audit_log_directory: "/tmp/mcp-audit",
+      audit_retention_days: 14,
+      audit_http_url_set: false,
+      audit_http_timeout_ms: 2200,
+      audit_http_auth_token_set: false,
       db_path_set: true,
+    });
+  });
+
+  it("loads http audit sink config with redacted summary", () => {
+    const config = loadMcpConfigFromEnv({
+      SOLOSTACK_MCP_AUDIT_SINK: "http",
+      SOLOSTACK_MCP_AUDIT_HTTP_URL: "https://audit.example.com/v1/events",
+      SOLOSTACK_MCP_AUDIT_HTTP_TIMEOUT_MS: "5000",
+      SOLOSTACK_MCP_AUDIT_HTTP_AUTH_TOKEN: "secret-token",
+    });
+
+    expect(config).toMatchObject({
+      audit_sink: "http",
+      audit_http_url: "https://audit.example.com/v1/events",
+      audit_http_timeout_ms: 5000,
+      audit_http_auth_token: "secret-token",
+    });
+    expect(getMcpSafeConfigSummary(config)).toMatchObject({
+      audit_sink: "http",
+      audit_http_url_set: true,
+      audit_http_timeout_ms: 5000,
+      audit_http_auth_token_set: true,
     });
   });
 
@@ -112,5 +156,36 @@ describe("mcp-solostack config loader", () => {
         SOLOSTACK_MCP_TIMEOUT_STRATEGY: "hard_cancel",
       }),
     ).toThrow("SOLOSTACK_MCP_TIMEOUT_STRATEGY must be one of");
+
+    expect(() =>
+      loadMcpConfigFromEnv({
+        SOLOSTACK_MCP_AUDIT_SINK: "kinesis",
+      }),
+    ).toThrow("SOLOSTACK_MCP_AUDIT_SINK must be one of");
+
+    expect(() =>
+      loadMcpConfigFromEnv({
+        SOLOSTACK_MCP_AUDIT_SINK: "http",
+      }),
+    ).toThrow("SOLOSTACK_MCP_AUDIT_HTTP_URL is required");
+
+    expect(() =>
+      loadMcpConfigFromEnv({
+        SOLOSTACK_MCP_AUDIT_SINK: "http",
+        SOLOSTACK_MCP_AUDIT_HTTP_URL: "ftp://audit.example.com/events",
+      }),
+    ).toThrow("SOLOSTACK_MCP_AUDIT_HTTP_URL must use http:// or https://");
+
+    expect(() =>
+      loadMcpConfigFromEnv({
+        SOLOSTACK_MCP_AUDIT_HTTP_TIMEOUT_MS: "10",
+      }),
+    ).toThrow("SOLOSTACK_MCP_AUDIT_HTTP_TIMEOUT_MS must be between");
+
+    expect(() =>
+      loadMcpConfigFromEnv({
+        SOLOSTACK_MCP_AUDIT_RETENTION_DAYS: "0",
+      }),
+    ).toThrow("SOLOSTACK_MCP_AUDIT_RETENTION_DAYS must be between");
   });
 });

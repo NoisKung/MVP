@@ -42,9 +42,9 @@ Example:
 
 Tool endpoints require `SOLOSTACK_MCP_DB_PATH` to point to a valid SQLite file.
 
-## Audit Logging (Baseline)
+## Audit Logging
 
-ทุก tool call จะถูก log แบบ structured JSON ผ่าน stdout:
+ทุก tool call จะถูก log แบบ structured JSON:
 - `event`: `mcp.tool_call`
 - `request_id`
 - `tool`
@@ -54,6 +54,11 @@ Tool endpoints require `SOLOSTACK_MCP_DB_PATH` to point to a valid SQLite file.
 - `duration_ms`
 - `tool_duration_ms`
 - `next_cursor`
+
+Audit sink modes:
+- `stdout` (default): log ผ่าน console/stdout
+- `file`: เขียน JSONL ไฟล์แบบรายวัน (`mcp-tool-call-YYYY-MM-DD.log`) พร้อม retention pruning
+- `http`: ส่ง audit event ไป centralized endpoint แบบ `POST` JSON ต่อ event
 
 Guardrails runtime:
 - rate limit ต่อ `/tools*` (ปิดโดย default)
@@ -75,6 +80,18 @@ Guardrails runtime:
 - `SOLOSTACK_MCP_TIMEOUT_GUARD_ENABLED` (`true|false`, default: `false`)
 - `SOLOSTACK_MCP_TIMEOUT_STRATEGY` (`soft|worker_hard`, default: `soft`)
 - `SOLOSTACK_MCP_TOOL_TIMEOUT_MS` (`100..60000`, default: `2000`)
+- `SOLOSTACK_MCP_AUDIT_SINK` (`stdout|file|http`, default: `stdout`)
+- `SOLOSTACK_MCP_AUDIT_LOG_DIR` (default: `mcp-solostack/audit`)
+- `SOLOSTACK_MCP_AUDIT_RETENTION_DAYS` (`1..3650`, default: `30`)
+- `SOLOSTACK_MCP_AUDIT_HTTP_URL` (required เมื่อ `SOLOSTACK_MCP_AUDIT_SINK=http`)
+- `SOLOSTACK_MCP_AUDIT_HTTP_TIMEOUT_MS` (`100..60000`, default: `3000`)
+- `SOLOSTACK_MCP_AUDIT_HTTP_AUTH_TOKEN` (optional bearer token)
+
+Recommended retention policy:
+- dev: `14` days
+- staging: `30` days
+- prod: `90` days
+- reference: `docs/mcp-audit-retention-policy-v0.1.md`
 
 ## Load Matrix
 
@@ -86,3 +103,73 @@ npm run mcp:load-matrix
 
 output default:
 - `docs/mcp-load-matrix-v0.1.md`
+
+Hosted profile config (user-editable):
+
+1. สร้างไฟล์ config ของตัวเองจากตัวอย่าง:
+
+```bash
+cp mcp-solostack/hosted-profiles.example.json mcp-solostack/hosted-profiles.json
+```
+
+2. ปรับค่า profile ให้ตรง environment:
+- `localhost`:
+  - `base_url`: เช่น `127.0.0.1:8787` (สคริปต์จะ infer เป็น `http://`)
+  - `auth_token`: optional
+- `cloud`:
+  - `base_url`: เช่น `https://mcp.example.com`
+  - `auth_token_env`: เช่น `SOLOSTACK_MCP_HOSTED_AUTH_TOKEN`
+
+3. ถ้าใช้ไฟล์คนละ path ให้ระบุ `--config <path>` เพิ่มในคำสั่ง
+
+Hosted staging load matrix:
+
+```bash
+SOLOSTACK_MCP_HOSTED_BASE_URL=https://<hosted-endpoint> \
+SOLOSTACK_MCP_HOSTED_AUTH_TOKEN=<token> \
+npm run mcp:load-matrix:hosted
+```
+
+output default:
+- `docs/mcp-load-matrix-hosted-staging-v0.1.md`
+
+Hosted staging preflight (env + health probe):
+
+```bash
+npm run mcp:load-matrix:hosted:preflight
+```
+
+หรือเลือก profile:
+
+```bash
+npm run mcp:load-matrix:hosted:preflight -- --profile localhost
+npm run mcp:load-matrix:hosted:preflight -- --profile cloud
+```
+
+output default:
+- `docs/mcp-load-matrix-hosted-preflight-v0.1.md`
+
+Hosted pipeline (preflight -> hosted matrix -> compare):
+
+```bash
+npm run mcp:load-matrix:hosted:pipeline
+```
+
+หรือเลือก profile:
+
+```bash
+npm run mcp:load-matrix:hosted:pipeline -- --profile localhost
+npm run mcp:load-matrix:hosted:pipeline -- --profile cloud
+```
+
+output default:
+- `docs/mcp-load-matrix-hosted-pipeline-v0.1.md`
+
+Compare hosted vs local baseline:
+
+```bash
+npm run mcp:load-matrix:compare
+```
+
+output default:
+- `docs/mcp-load-matrix-hosted-compare-v0.1.md`

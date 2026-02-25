@@ -190,4 +190,144 @@ test.describe("Transport-backed conflict resolve flow", () => {
     );
     expect(resolutionChangeExists).toBe(true);
   });
+
+  test("keeps retry action idempotent and resolves when corrected replay arrives", async ({
+    page,
+  }) => {
+    const uniqueSuffix = `${Date.now()}-${Math.floor(Math.random() * 1_000_000)}`;
+    const conflictEntityId = `task-transport-retry-${uniqueSuffix}`;
+    const incomingIdempotencyKey = `incoming-transport-retry-${uniqueSuffix}`;
+    const recordedPushBatches: RecordedPushChange[][] = [];
+    let pushCallCount = 0;
+    let pullCallCount = 0;
+
+    await page.route("**/e2e-sync/push", async (route) => {
+      pushCallCount += 1;
+      const payload = readRouteJson(route);
+      const changes = getRecordedPushChanges(payload);
+      recordedPushBatches.push(changes);
+
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          accepted: changes.map((change) => change.idempotency_key),
+          rejected: [],
+          server_cursor: `cursor-push-${pushCallCount}`,
+          server_time: new Date().toISOString(),
+        }),
+      });
+    });
+
+    await page.route("**/e2e-sync/pull", async (route) => {
+      pullCallCount += 1;
+
+      const firstConflictReplayChange = {
+        entity_type: "TASK",
+        entity_id: conflictEntityId,
+        operation: "UPSERT",
+        updated_at: "2026-02-17T05:00:00.000Z",
+        updated_by_device: "device-remote",
+        sync_version: 2,
+        payload: {
+          description: "Missing title to trigger conflict.",
+        },
+        idempotency_key: incomingIdempotencyKey,
+      };
+      const correctedReplayChange = {
+        ...firstConflictReplayChange,
+        payload: {
+          title: "Recovered title after retry",
+        },
+      };
+
+      const changes =
+        pullCallCount === 1
+          ? [firstConflictReplayChange]
+          : pullCallCount === 2
+            ? [correctedReplayChange]
+            : [];
+
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({
+          server_cursor: `cursor-pull-${pullCallCount}`,
+          server_time: new Date().toISOString(),
+          has_more: false,
+          changes,
+        }),
+      });
+    });
+
+    await page.goto("/?e2e=1&e2e_transport=1");
+    const syncCard = await openSyncCard(page);
+    const origin = new URL(page.url()).origin;
+
+    await syncCard.getByLabel("Push URL").fill(`${origin}/e2e-sync/push`);
+    await syncCard.getByLabel("Pull URL").fill(`${origin}/e2e-sync/pull`);
+    await syncCard.getByRole("button", { name: "Save Endpoints" }).click();
+    await expect(
+      syncCard.getByText("Sync endpoints were saved."),
+    ).toBeVisible();
+
+    await syncCard
+      .getByRole("button", { name: /Sync now|Syncing\.\.\./u })
+      .click();
+
+    const conflictItem = syncCard
+      .locator(".sync-conflict-item")
+      .filter({ hasText: conflictEntityId })
+      .first();
+    await expect(conflictItem).toBeVisible();
+
+    for (let index = 0; index < 2; index += 1) {
+      let retryDialogMessage: string | null = null;
+      page.once("dialog", async (dialog) => {
+        retryDialogMessage = dialog.message();
+        await dialog.accept();
+      });
+
+      await conflictItem.getByRole("button", { name: "Retry" }).click();
+      await expect
+        .poll(() => retryDialogMessage, {
+          timeout: 5000,
+        })
+        .toContain("re-queue this conflict");
+      await expect(
+        syncCard.getByText(
+          "Conflict retry queued. Undo is available for 5 seconds.",
+        ),
+      ).toBeVisible();
+    }
+
+    await syncCard
+      .getByRole("button", { name: /Sync now|Syncing\.\.\./u })
+      .click();
+
+    await expect(
+      syncCard
+        .locator(".sync-conflict-item")
+        .filter({ hasText: conflictEntityId }),
+    ).toHaveCount(0);
+    await expect(syncCard.locator(".sync-pill")).toContainText("Synced");
+
+    await expect
+      .poll(() => pullCallCount, {
+        timeout: 10_000,
+      })
+      .toBeGreaterThanOrEqual(2);
+    await expect
+      .poll(() => pushCallCount, {
+        timeout: 10_000,
+      })
+      .toBeGreaterThanOrEqual(1);
+
+    const resolutionPushCount = recordedPushBatches
+      .flat()
+      .filter((change) =>
+        change.entity_id.startsWith("local.sync.conflict_resolution."),
+      ).length;
+    expect(resolutionPushCount).toBe(1);
+  });
 });

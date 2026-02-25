@@ -72,6 +72,17 @@ import {
   isTaskProjectNotFoundConflict,
 } from "./sync-conflict-rules";
 import { summarizeBackupPayload } from "./backup-summary";
+import {
+  getSyncProviderSessionAuth,
+  hydrateSyncProviderConfigWithSessionAuth,
+  sanitizeSyncProviderConfigForPersistence,
+  setSyncProviderSessionAuth,
+} from "./sync-provider-token-policy";
+import {
+  readSyncProviderSecureAuth,
+  writeSyncProviderSecureAuth,
+} from "./sync-provider-secure-store";
+import type { SyncProviderAuthState } from "./sync-provider-auth";
 
 const DATABASE_NAME = "sqlite:solostack.db";
 
@@ -1215,22 +1226,75 @@ function parseSyncSessionDiagnosticsHistoryValue(
   }
 }
 
+interface NormalizedSyncProviderConfigResult {
+  provider_config: Record<string, unknown> | null;
+  session_auth: SyncProviderAuthState | null;
+  redacted: boolean;
+}
+
 function normalizeSyncProviderConfigObject(
   value: unknown,
-): Record<string, unknown> | null {
-  if (!isPlainObject(value)) return null;
-  return value;
+): NormalizedSyncProviderConfigResult {
+  const normalized = sanitizeSyncProviderConfigForPersistence(value);
+  return {
+    provider_config: normalized.provider_config,
+    session_auth: normalized.session_auth,
+    redacted: normalized.redacted,
+  };
 }
 
 function parseSyncProviderConfigValue(
   value: unknown,
-): Record<string, unknown> | null {
-  if (typeof value !== "string" || !value.trim()) return null;
+): NormalizedSyncProviderConfigResult {
+  if (typeof value !== "string" || !value.trim()) {
+    return {
+      provider_config: null,
+      session_auth: null,
+      redacted: false,
+    };
+  }
   try {
     return normalizeSyncProviderConfigObject(JSON.parse(value));
   } catch {
+    return {
+      provider_config: null,
+      session_auth: null,
+      redacted: false,
+    };
+  }
+}
+
+async function resolveSyncProviderRuntimeAuth(input: {
+  provider: SyncProvider;
+  parsed_session_auth: SyncProviderAuthState | null;
+}): Promise<SyncProviderAuthState | null> {
+  const inMemorySessionAuth = getSyncProviderSessionAuth(input.provider);
+  if (inMemorySessionAuth) {
+    return inMemorySessionAuth;
+  }
+
+  const secureStoreAuth = await readSyncProviderSecureAuth(input.provider);
+  if (secureStoreAuth) {
+    setSyncProviderSessionAuth({
+      provider: input.provider,
+      auth: secureStoreAuth,
+    });
+    return secureStoreAuth;
+  }
+
+  if (!input.parsed_session_auth) {
     return null;
   }
+
+  setSyncProviderSessionAuth({
+    provider: input.provider,
+    auth: input.parsed_session_auth,
+  });
+  await writeSyncProviderSecureAuth({
+    provider: input.provider,
+    auth: input.parsed_session_auth,
+  });
+  return input.parsed_session_auth;
 }
 
 function normalizeSyncConflictStrategyDefaultsObject(
@@ -1513,18 +1577,51 @@ export async function getSyncProviderSettings(): Promise<SyncProviderSettings> {
 
   let provider: SyncProvider = DEFAULT_SYNC_PROVIDER;
   let providerConfig: Record<string, unknown> | null = null;
+  let providerConfigRedacted = false;
+  let parsedSessionAuth: SyncProviderAuthState | null = null;
 
   for (const row of rows) {
     if (row.key === SYNC_SETTINGS_PROVIDER_KEY) {
       provider = asSyncProvider(row.value, DEFAULT_SYNC_PROVIDER);
     } else if (row.key === SYNC_SETTINGS_PROVIDER_CONFIG_KEY) {
-      providerConfig = parseSyncProviderConfigValue(row.value);
+      const parsedProviderConfig = parseSyncProviderConfigValue(row.value);
+      providerConfig = parsedProviderConfig.provider_config;
+      providerConfigRedacted = parsedProviderConfig.redacted;
+      parsedSessionAuth = parsedProviderConfig.session_auth;
     }
   }
 
+  const runtimeSessionAuth = await resolveSyncProviderRuntimeAuth({
+    provider,
+    parsed_session_auth: parsedSessionAuth,
+  });
+
+  if (providerConfigRedacted) {
+    const normalizedProviderConfigJson = providerConfig
+      ? JSON.stringify(providerConfig)
+      : null;
+    if (normalizedProviderConfigJson) {
+      await db.execute(
+        `INSERT INTO settings (key, value)
+             VALUES ($1, $2)
+        ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+        [SYNC_SETTINGS_PROVIDER_CONFIG_KEY, normalizedProviderConfigJson],
+      );
+    } else {
+      await db.execute("DELETE FROM settings WHERE key = $1", [
+        SYNC_SETTINGS_PROVIDER_CONFIG_KEY,
+      ]);
+    }
+  }
+
+  const hydratedProviderConfig = hydrateSyncProviderConfigWithSessionAuth({
+    provider_config: providerConfig,
+    session_auth: runtimeSessionAuth,
+  });
+
   return {
     provider,
-    provider_config: providerConfig,
+    provider_config: hydratedProviderConfig,
   };
 }
 
@@ -1533,9 +1630,14 @@ export async function updateSyncProviderSettings(
 ): Promise<SyncProviderSettings> {
   const db = await getDb();
   const provider = asSyncProvider(input.provider, DEFAULT_SYNC_PROVIDER);
-  const providerConfig = normalizeSyncProviderConfigObject(
+  const normalizedProviderConfig = normalizeSyncProviderConfigObject(
     input.provider_config ?? null,
   );
+  const providerConfig = normalizedProviderConfig.provider_config;
+  setSyncProviderSessionAuth({
+    provider,
+    auth: normalizedProviderConfig.session_auth,
+  });
   const providerConfigJson = providerConfig
     ? JSON.stringify(providerConfig)
     : null;
@@ -1566,9 +1668,17 @@ export async function updateSyncProviderSettings(
     throw error;
   }
 
+  await writeSyncProviderSecureAuth({
+    provider,
+    auth: normalizedProviderConfig.session_auth,
+  });
+
   return {
     provider,
-    provider_config: providerConfig,
+    provider_config: hydrateSyncProviderConfigWithSessionAuth({
+      provider_config: providerConfig,
+      session_auth: getSyncProviderSessionAuth(provider),
+    }),
   };
 }
 

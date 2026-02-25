@@ -1,6 +1,6 @@
 # SoloStack Product Roadmap
 
-อัปเดตล่าสุด: 2026-02-22
+อัปเดตล่าสุด: 2026-02-25
 
 ## Product Principles
 
@@ -31,16 +31,21 @@
 
 | Phase | Focus | Status | Goal |
 | --- | --- | --- | --- |
-| P3-1 | Sync Foundation + Desktop Beta (Windows/macOS/Linux) | In Progress | Sync หลักระหว่าง desktop ได้เสถียร |
-| P3-2 | Mobile Client Sync Beta (iOS/Android) | In Progress | ใช้งานข้าม desktop + mobile ได้ |
+| P3-1 | Sync Foundation + Desktop Beta (Windows/macOS/Linux) | Completed | Sync หลักระหว่าง desktop ได้เสถียร |
+| P3-2 | Mobile Sync Shared-Core Readiness | Completed | contract/runtime กลางพร้อมใช้งานข้าม platform |
+| P3-2A | iOS Native Client Sync Beta | Planned | พัฒนา iOS native ด้วย Swift และคง sync contract เดียวกับ desktop |
+| P3-2B | Android Native Client Sync Beta | Planned | แยก Android app native และคง sync contract เดียวกับ desktop |
 | P3-3 | Conflict Center + Recovery Tools | Completed | ให้ผู้ใช้แก้ conflict ได้ชัดเจน |
 | P3-4 | Security Hardening | Planned | เพิ่มความปลอดภัยระดับ production |
-| P3-5 | Cloud Provider Connectors / Platform (Google/Microsoft/iCloud/AWS) | Discovery | เพิ่มทางเลือกการ sync ตาม ecosystem ผู้ใช้และตัวเลือก backend platform |
+| P3-5 | Cloud Provider Connectors / Platform (Google/Microsoft/iCloud/AWS) | In Progress | เพิ่มทางเลือกการ sync ตาม ecosystem ผู้ใช้และตัวเลือก backend platform |
 | P3-6 | MCP Server for SoloStack Agent Data Access | In Progress | ให้ Agent ดึงข้อมูลไปวิเคราะห์/สรุป/วางแผนได้อย่างปลอดภัย |
-| P3-7 | Product Quality of Life (QoL) | In Progress | ลด friction การใช้งานรายวันและลด human error |
-| P3-8 | Internationalization (TH/EN) | In Progress | รองรับ UI สองภาษา (ไทย/อังกฤษ) และให้ผู้ใช้สลับภาษาได้เอง |
+| P3-7 | Product Quality of Life (QoL) | Completed | ลด friction การใช้งานรายวันและลด human error |
+| P3-8 | Internationalization (TH/EN) | Completed | รองรับ UI สองภาษา (ไทย/อังกฤษ) และให้ผู้ใช้สลับภาษาได้เอง |
+| P3-9 | 3D Experience UX/UI | Planned | ยกระดับ UX/UI ด้วยมิติและ motion ที่มีความหมาย โดยยังคง performance และ accessibility |
 
 ## Active Plan: P3-1 Sync Foundation + Desktop Beta
+
+- สถานะล่าสุด: `Completed` (ปิดงานเมื่อ 2026-02-25)
 
 ### Objective
 
@@ -89,7 +94,8 @@
 #### Cross-Platform Strategy
 
 - Desktop ใช้โค้ดปัจจุบันต่อ (Tauri)
-- Mobile (P3-2) แยก client แต่แชร์ types และ sync contract
+- Mobile shared-core (`P3-2`) ปิดแล้ว และใช้เป็นฐานให้ native clients
+- iOS Native (`P3-2A`) และ Android Native (`P3-2B`) แยก roadmap/rollout คนละสาย
 - ทุก client ใช้ payload contract เดียวกันเพื่อลด drift
 
 ## Feasibility Analysis: Google / Microsoft / iCloud / AWS
@@ -185,6 +191,36 @@
 - ~~Spike 2: OneDrive connector (approot)~~ [done: discovery/spike]
 - ~~Spike 3: iCloud connector เฉพาะ Apple-first mode~~ [done: feasibility note]
 - ~~Spike 4: AWS backend reference architecture สำหรับ sync + MCP~~ [done: architecture spike]
+
+## P3-5 Implementation Update (2026-02-23)
+
+- เสร็จแล้ว:
+  - เพิ่ม managed connector stubs สำหรับ `google_appdata` และ `onedrive_approot`:
+    - `src/lib/sync-provider-adapters.ts`
+  - เพิ่ม provider auth/token helper พร้อม refresh flow:
+    - `src/lib/sync-provider-auth.ts`
+  - เพิ่ม UI settings สำหรับ managed connector (base URL + token fields) และปุ่ม `Test Connector`:
+    - `src/components/ReminderSettings.tsx`
+    - `src/lib/sync-provider-adapter-factory.ts`
+  - ผูก managed connector adapter เข้ากับ sync transport resolver แล้ว (เลือก path managed ก่อน endpoint custom):
+    - `src/lib/sync-transport.ts`
+    - `src/lib/sync-transport.test.ts`
+  - เพิ่ม secure token storage policy v0.2:
+    - redaction ของ `managed_auth` sensitive fields ก่อน persist
+    - เก็บ token ผ่าน secure keystore บน Tauri desktop/iOS/Android (best-effort)
+    - fallback เป็น session-only สำหรับ runtime อื่น
+    - เพิ่ม storage policy marker ใน config (`managed_auth_storage_policy`)
+    - เพิ่ม tests: `src/lib/sync-provider-token-policy.test.ts`, `src/lib/database.migration.test.ts`, `src/lib/sync-provider-secure-store.test.ts`
+  - เพิ่ม secure store self-test สำหรับยืนยัน read/write/delete โดยไม่ทับ token จริง:
+    - Rust command: `run_sync_provider_secure_store_self_test`
+    - Settings action: `Verify Secure Store`
+  - เพิ่ม validation matrix baseline สำหรับรันบนอุปกรณ์จริง:
+    - `docs/sync-provider-secure-store-validation-v0.1.md`
+  - เพิ่ม integration tests สำหรับ connector behavior + error mapping:
+    - `src/lib/sync-provider-adapters.test.ts`
+    - `src/lib/sync-provider-auth.test.ts`
+- คงเหลือ:
+  - ยืนยัน real-device matrix ของ secure keystore บน iOS/Android และเก็บหลักฐานก่อน external beta
 
 ## New Initiative: P3-6 MCP Server for SoloStack
 
@@ -316,8 +352,9 @@
   - เพิ่ม `Export Filtered JSON` ใน full-history view เพื่อส่งออก snapshot ตามตัวกรอง พร้อม metadata การกรอง
   - เพิ่ม Playwright test สำหรับ full-history export flow (validation + filter metadata)
   - เพิ่ม test coverage: unit tests (runtime normalization/visibility behavior) + Playwright flow (preset/validation)
-- กำลังทำต่อ:
-  - เตรียม mobile beta client ให้ใช้ contract/runtime tuning เดียวกับ desktop
+- ปิดแล้ว:
+  - dedicated mobile client beta ใช้ contract/runtime tuning ชุดเดียวกับ desktop แล้ว
+  - desktop<->mobile real-device sync validation ผ่านตามเป้าหมาย P3-2
 
 ### P3-2 Core Readiness Update (2026-02-20)
 
@@ -326,35 +363,35 @@
   - เพิ่ม source tracking สำหรับ runtime preset detection เพื่อ debug mobile auto-seed ได้ชัดเจนขึ้น
   - ครอบคลุม test matrix ฝั่ง core/runtime profile แล้ว
   - สรุป checklist readiness ไว้ที่ `docs/p3-2-mobile-beta-core-readiness-v0.1.md`
-- คงเหลือ:
-  - พัฒนา/ทดสอบ dedicated mobile client UI และ desktop<->mobile real-device flow
+- ปิดแล้ว:
+  - dedicated mobile client UI และ desktop<->mobile real-device flow validation
 
-## Initiative: SoloStack iOS + Android Version (P3-2 Expansion)
+## Initiative: SoloStack iOS Native App (P3-2A)
 
 ### Product Goal
 
-- ให้ SoloStack ใช้งานได้ทั้ง desktop + mobile แบบต่อเนื่อง โดยยังคง local-first/offline-first
-- รองรับการจดงานระหว่างเดินทาง และกลับมาทำต่อบน desktop ได้ทันทีหลัง sync
+- ส่งมอบ iOS app แบบ native โดยคงพฤติกรรม local-first/offline-first
+- ให้ผู้ใช้จดงาน/อัปเดตงานบน iPhone/iPad และกลับมาทำต่อบน desktop ได้ทันทีหลัง sync
 
-### Scope v1 (Beta)
+### Scope v1 (Native Beta)
 
-- Mobile core views: `Today`, `Upcoming`, `Board`
+- iOS core views: `Today`, `Upcoming`, `Board`
 - Quick capture + CRUD สำหรับ `task`/`subtask`
-- เลือก `project`, ตั้ง `due date`/`reminder`, และ mark done ได้จากมือถือ
+- เลือก `project`, ตั้ง `due date`/`reminder`, และ mark done ได้บน iOS
 - แสดง sync state (`Synced`, `Syncing`, `Offline`, `Conflict`) + ปุ่ม `Sync now`
-- ใช้ runtime profile แบบ mobile preset เป็นค่า default
+- รองรับ background/foreground behavior ตามข้อจำกัด lifecycle ของ iOS
 
 ### Out of Scope v1
 
 - parity เต็มรูปแบบทุกหน้า (เช่น Dashboard/Weekly Review เชิงลึก)
-- conflict manual merge แบบเต็ม (mobile v1 เน้นรับรู้สถานะ + resolve ขั้นพื้นฐาน)
-- advanced backup/recovery flows ทั้งหมดบน mobile
+- conflict manual merge แบบเต็ม (v1 เน้นรับรู้สถานะ + resolve ขั้นพื้นฐาน)
+- advanced backup/recovery flows ทั้งหมดบน iOS
 
 ### Technical Direction
 
-- ใช้ Tauri v2 mobile (iOS/Android) เพื่อ reuse React app และ shared modules เดิม
-- ใช้ schema SQLite และ sync contract เดียวกับ desktop เพื่อลด model drift
-- tune ค่า sync สำหรับ mobile โดยใช้ foreground/background interval และ limits จาก runtime settings
+- app layer เป็น native iOS พัฒนาด้วย `Swift` + `SwiftUI` โดยใช้ shared sync contract จาก `P3-2`
+- คง schema SQLite และ sync payload เดียวกับ desktop เพื่อลด model drift
+- ใช้ iOS secure storage (Keychain) สำหรับ token/secret ที่เกี่ยวข้องกับ sync
 
 ### Rollout Plan (Suggested)
 
@@ -362,19 +399,62 @@
 - ทดสอบผ่าน TestFlight ภายในทีม
 - validate flows: quick capture, task update, desktop <-> iOS sync
 
-2. Android Internal Alpha
-- ทดสอบผ่าน Closed Testing ภายในทีม
-- validate flows เดียวกับ iOS บนเครือข่ายและอุปกรณ์ที่ต่างกัน
-
-3. Cross-Platform Mobile Beta
-- เปิด iOS + Android beta พร้อมกัน
-- freeze contract และวัด SLA sync จาก production-like environment
+2. iOS External Beta
+- เปิด TestFlight แบบ external testers หลังผ่าน internal stability gate
+- freeze contract + เก็บ SLA sync จาก production-like environment
 
 ### Acceptance Targets
 
-- sync desktop <-> mobile median <= 10 วินาทีในเครือข่ายปกติ
-- offline edits บน mobile ไม่สูญหายเมื่อกลับมา online
-- ไม่มี critical data-loss case ใน mobile test matrix
+- sync desktop <-> iOS median <= 10 วินาทีในเครือข่ายปกติ
+- offline edits บน iOS ไม่สูญหายเมื่อกลับมา online
+- ไม่มี critical data-loss case ใน iOS test matrix
+
+### Design Artifact (Kickoff)
+
+- `docs/p3-2a-ios-native-swift-design-v0.1.md`
+
+## Initiative: SoloStack Android Native App (P3-2B)
+
+### Product Goal
+
+- ส่งมอบ Android app แบบ native โดยคงพฤติกรรม local-first/offline-first
+- ให้ผู้ใช้ทำงานระหว่างเดินทางบน Android และกลับมา desktop ได้ต่อเนื่องหลัง sync
+
+### Scope v1 (Native Beta)
+
+- Android core views: `Today`, `Upcoming`, `Board`
+- Quick capture + CRUD สำหรับ `task`/`subtask`
+- เลือก `project`, ตั้ง `due date`/`reminder`, และ mark done ได้บน Android
+- แสดง sync state (`Synced`, `Syncing`, `Offline`, `Conflict`) + ปุ่ม `Sync now`
+- รองรับ background sync ตามข้อจำกัด lifecycle/power policy ของ Android
+
+### Out of Scope v1
+
+- parity เต็มรูปแบบทุกหน้า (เช่น Dashboard/Weekly Review เชิงลึก)
+- conflict manual merge แบบเต็ม (v1 เน้นรับรู้สถานะ + resolve ขั้นพื้นฐาน)
+- advanced backup/recovery flows ทั้งหมดบน Android
+
+### Technical Direction
+
+- app layer เป็น native Android โดยใช้ shared sync contract จาก `P3-2`
+- คง schema SQLite และ sync payload เดียวกับ desktop เพื่อลด model drift
+- ใช้ Android secure storage (Keystore) สำหรับ token/secret ที่เกี่ยวข้องกับ sync
+
+### Rollout Plan (Suggested)
+
+1. Android Internal Alpha
+- ทดสอบผ่าน Play Store Closed Testing ภายในทีม
+- validate flows: quick capture, task update, desktop <-> Android sync
+
+2. Android External Beta
+- เปิด Closed/Open Testing ตาม readiness gate
+- freeze contract + เก็บ SLA sync จาก production-like environment
+
+### Acceptance Targets
+
+- sync desktop <-> Android median <= 10 วินาทีในเครือข่ายปกติ
+- offline edits บน Android ไม่สูญหายเมื่อกลับมา online
+- ไม่มี critical data-loss case ใน Android test matrix
 
 ## Kickoff Plan: P3-3 Conflict Center + Recovery Tools
 
@@ -469,8 +549,43 @@
   - Playwright coverage สำหรับ conflict retry confirmation + re-resolve matrix
   - Playwright coverage สำหรับ resolve strategy matrix (`Keep Local`, `Keep Remote`, `Manual Merge`) และ sync success path
   - integration coverage สำหรับ idempotent retry/resolve replay
+  - เพิ่ม integration test สำหรับ `retry ซ้ำ` + `incoming replay ซ้ำ` เพื่อยืนยันว่า
+    - resolution outbox ยังเป็น idempotent (ไม่แตกเป็นหลายแถว)
+    - replay ที่แก้แล้ว resolve conflict ได้
+    - replay ซ้ำหลัง resolve ไม่ทำให้เกิด side effect ซ้ำใน conflict timeline
+  - เพิ่ม transport-backed E2E สำหรับ flow `Retry` ที่ต้องรอ corrected replay แล้วกลับ `Synced`
   - unit coverage สำหรับ restore guardrails (force-required preflight + blocked restore + force restore success)
   - quality gates ปัจจุบันของ repo ผ่าน (`test`, `test:e2e`, `build`)
+
+### Security Analysis: Resolve Replay + Idempotent Retry (2026-02-23)
+
+Threat surface ที่วิเคราะห์:
+- replay change เดิมซ้ำหลายครั้งจาก transport/backend
+- ผู้ใช้กด `Retry` ซ้ำหลายครั้งบน conflict เดิม
+- event log โตเร็วจาก conflict ที่ถูก replay บ่อย
+- payload conflict/report ที่อาจมีข้อมูลละเอียดเกินจำเป็น
+
+Current controls (implemented):
+- dedupe ฝั่ง conflict identity ด้วย `incoming_idempotency_key` แบบ `UNIQUE` ใน `sync_conflicts`
+- dedupe ฝั่ง resolution outbox ด้วย deterministic idempotency key:
+  - key shape: `conflict-resolution:<conflict_id>:<strategy>`
+  - เขียน `sync_outbox` ผ่าน `ON CONFLICT(idempotency_key) DO UPDATE`
+- guard replay หลัง conflict ถูก `resolved/ignored`:
+  - incoming key เดิมจะถูก `skip` และบันทึก event `retried` พร้อมเหตุผล `incoming_change_repeated`
+- จำกัดการเติบโตของ timeline:
+  - เก็บสูงสุด 200 events ต่อ conflict
+  - retention 90 วัน
+- เพิ่ม integration + E2E coverage สำหรับ retry/replay path เพื่อลด regression risk
+
+Residual risks / next hardening:
+- replay เดิมที่เป็น payload เดิมสามารถถูก apply ซ้ำได้ในบางกรณี LWW-equal (ไม่กระทบ conflict state แต่มี write ซ้ำ)
+- ยังไม่มี cryptographic integrity/checksum ของ incoming payload ที่ผูกกับ idempotency key จากฝั่ง server
+- export report เป็นข้อมูลเชิง support ที่ควรพิจารณา redaction policy เพิ่มก่อนขยาย beta ภายนอก
+
+Recommended follow-up:
+1. เพิ่ม optional replay guard cache สำหรับ applied incoming key ระยะสั้น (ลด write ซ้ำจาก replay storm)
+2. เพิ่ม server-side signature/validation policy สำหรับ idempotency envelope
+3. นิยาม redaction rules สำหรับ conflict/report export (เช่น masking fields ที่อาจมีข้อมูลอ่อนไหว)
 
 ### Initial Milestones (Suggested)
 
@@ -538,6 +653,12 @@
 - ก่อน restore แสดงสรุปผลกระทบ (`tasks/projects/templates`, outbox/conflicts ที่จะถูกเคลียร์)
 - เป้าหมาย: เพิ่มความมั่นใจก่อนยืนยัน action ใหญ่
 
+5. CalendarView Adaptive UX (Desktop + Mobile)
+- Desktop: ปรับ layout ให้เหมาะจอใหญ่ (month/week density), เพิ่ม keyboard navigation และ day detail panel
+- Mobile: ใช้ agenda-first + day detail แบบ bottom sheet, เพิ่ม touch target ให้กดง่าย และรองรับ swipe day/week
+- Shared: คง filter/sort behavior ให้เหมือนกันทุกแพลตฟอร์ม, ระวัง timezone day-boundary และคุม performance ตอนสลับเดือน
+- เป้าหมาย: ลด friction การวางแผนรายวัน/รายสัปดาห์ทั้ง desktop app และ mobile app
+
 ### Stretch (1-2 สปรินต์)
 
 1. Personal Conflict Strategy Defaults
@@ -569,7 +690,10 @@
 - Personal Conflict Strategy Defaults
 - Command Palette Workflow Actions
 
-### QoL Progress Snapshot (2026-02-20)
+4. QoL Sprint D - Completed
+- CalendarView Adaptive UX (Desktop + Mobile)
+
+### QoL Progress Snapshot (2026-02-23)
 
 - Done:
   - เพิ่ม `Keyboard Shortcut Help` modal (เปิดจาก `?` และปุ่ม `Shortcuts ?` ใน sidebar)
@@ -626,8 +750,11 @@
     - บันทึก focus session ลง `sessions` เมื่อ stop
     - harden การลบ task: clear `sessions.task_id` เป็น `NULL` ก่อน delete เพื่อกัน FK fail
     - เพิ่ม UI coverage test สำหรับ focus controls (`TaskCard` start/stop/disabled states)
+  - ปิด `QoL Sprint D`:
+    - ปรับ backlog เพิ่มหัวข้อ `CalendarView Adaptive UX (Desktop + Mobile)` และปิดเป็นงานเสร็จ
 - Next:
-  - QoL Sprint C ปิดครบทุกหัวข้อแล้ว; ดึงงานถัดไปจาก `P3-8 i18n` / rollout backlog
+  - QoL Sprint D และ P3-8 ปิดแล้ว
+  - เดินงานถัดไปต่อ: รัน hosted staging matrix จริง + ship audit sink เข้า centralized backend สำหรับ `P3-6`
 
 ## New Initiative: P3-8 Internationalization (i18n) TH/EN
 
@@ -666,17 +793,17 @@
 - รองรับ pluralization และ date/time formatting ผ่าน `Intl`
 - ใส่ missing-key guard ใน dev mode เพื่อกันหลุด key translation
 
-### Rollout Plan (Suggested)
+### Rollout Plan (Completed)
 
-1. Sprint i18n-A (2-3 วัน)
+1. Sprint i18n-A (2-3 วัน) - Completed
 - วาง infra + locale provider + settings binding
 - migrate shared/common labels ก่อน
 
-2. Sprint i18n-B (3-5 วัน)
+2. Sprint i18n-B (3-5 วัน) - Completed
 - ครอบคลุม core views และ settings/sync/conflict
 - เติม test สำหรับ language switch + fallback
 
-3. Sprint i18n-C (2-3 วัน)
+3. Sprint i18n-C (2-3 วัน) - Completed
 - copy review (TH/EN), polish typography/spacing
 - freeze key set และออก beta feedback รอบแรก
 
@@ -731,6 +858,94 @@
   - known reason code -> localized message
   - unknown reason code -> fallback raw message
   - empty reason/message -> fallback `common.unknown`
+
+### P3-8 Closure Update (2026-02-23)
+
+- ปิด `P3-8 i18n expansion / rollout backlog` ใน scope ปัจจุบัน
+- เปลี่ยนสถานะ roadmap ของ `P3-8` เป็น `Completed`
+- งานถัดไปย้ายไป `P3-5 connector implementation` และ `P3-6 hosted hardening`
+
+### P3-6 Hosted Hardening Update (2026-02-23)
+
+- เสร็จแล้ว:
+  - เพิ่ม audit sink mode `file` + retention policy baseline (30 วัน)
+  - เพิ่ม retention policy decision by environment:
+    - `dev=14`, `staging=30`, `prod=90`
+    - เอกสาร: `docs/mcp-audit-retention-policy-v0.1.md`
+  - เพิ่ม env config:
+    - `SOLOSTACK_MCP_AUDIT_SINK`
+    - `SOLOSTACK_MCP_AUDIT_LOG_DIR`
+    - `SOLOSTACK_MCP_AUDIT_RETENTION_DAYS`
+  - เพิ่ม hosted load/perf tooling:
+    - `npm run mcp:load-matrix:hosted:preflight`
+    - `npm run mcp:load-matrix:hosted:pipeline`
+    - `npm run mcp:load-matrix:hosted`
+    - `npm run mcp:load-matrix:compare`
+    - user-editable profile config (`localhost`/`cloud`) ผ่าน `mcp-solostack/hosted-profiles.json`
+  - เพิ่ม centralized audit sink mode `http`:
+    - ส่ง `POST` ต่อ event ไป external endpoint
+    - รองรับ timeout + optional bearer token
+    - env config:
+      - `SOLOSTACK_MCP_AUDIT_HTTP_URL`
+      - `SOLOSTACK_MCP_AUDIT_HTTP_TIMEOUT_MS`
+      - `SOLOSTACK_MCP_AUDIT_HTTP_AUTH_TOKEN`
+- คงเหลือ:
+  - รันรายงาน hosted staging จริงและแนบ compare report
+  - blocker ปัจจุบันใน workspace นี้: ยังไม่มี `SOLOSTACK_MCP_HOSTED_BASE_URL` / `SOLOSTACK_MCP_HOSTED_AUTH_TOKEN`
+  - ผูกค่า env ของ `http` sink เข้ากับ staging/prod และยืนยัน delivery/error-rate ตาม policy ของ environment
+
+### P3-1 Closure Update (2026-02-25)
+
+- ปิด `P3-1 Sync Foundation + Desktop Beta` ใน scope ปัจจุบันแล้ว
+- ยืนยัน quality gates ครบตาม Definition of Done:
+  - `npm run test` passed (47 files, 263 tests)
+  - `npm run test:e2e` passed (11/11)
+  - `npm run build` passed
+- งานคิวหลักถัดไปยังคงเป็น `P3-5` และ `P3-6`
+
+### P3-2A Swift Design Kickoff (2026-02-25)
+
+- เริ่มงาน `P3-2A iOS Native` แบบ design-first แล้ว
+- ล็อก tech direction สำหรับ iOS เป็น `Swift` + `SwiftUI`
+- เพิ่ม design baseline เอกสาร `docs/p3-2a-ios-native-swift-design-v0.1.md`
+
+### P3-2A Sync + Database Decision Gate (2026-02-25)
+
+- เป้าหมายของ gate นี้: ล็อกแนวทาง sync/data layer ก่อนลง implementation จริง เพื่อกัน model drift กับ desktop
+- Decision: iOS native ใช้ `SQLite` เป็น local source of truth และใช้ `GRDB` เป็น Swift data access/migration layer
+- Decision: ไม่ใช้ `Core Data` หรือ `Realm` ใน phase นี้ เพื่อคง schema parity กับ desktop และลด translation layer
+- Decision: iOS sync flow ต้องยึด contract เดียวกับ desktop (`bootstrap`, `push`, `pull`, cursor-based incremental)
+- Decision: ทุก local mutation เขียนแบบ transaction เดียว:
+  - update domain tables
+  - enqueue `sync_outbox`
+  - update metadata (`sync_version`, `updated_by_device`)
+- Decision: iOS ต้องรองรับตาราง sync/recovery baseline เดียวกับ desktop:
+  - `sync_outbox`, `sync_checkpoints`, `deleted_records`
+  - `sync_conflicts`, `sync_conflict_events`
+- Decision: token/secret สำหรับ sync transport เก็บใน `Keychain`; DB file เก็บใน App Support ภายใต้ iOS data protection
+- Non-goal ของ phase นี้:
+  - ไม่ทำ CloudKit-only path ที่แตกจาก provider-neutral contract
+  - ไม่เพิ่ม second database engine สำหรับ iOS
+
+## New Initiative: P3-9 3D Experience UX/UI
+
+### Objective
+
+- เพิ่มความชัดเจนของลำดับข้อมูลและสถานะงานด้วย spatial cues (depth/layer/motion)
+- ทำให้ interaction รู้สึกตอบสนองดีขึ้น โดยไม่ลดความเร็วของ workflow หลัก
+
+### Scope v1 (In)
+
+- กำหนด design tokens สำหรับ depth/shadow/perspective ที่ใช้ร่วมกันทั้งแอป
+- เพิ่ม motion ที่มีความหมายในจุดสำคัญ: card hover/focus, panel transition, context switch
+- เพิ่ม user setting สำหรับเปิด/ปิดเอฟเฟกต์ 3D และระดับ motion (Default / Reduced)
+- รองรับ fallback เป็น 2D mode อัตโนมัติบนอุปกรณ์หรือสภาวะที่ performance ต่ำ
+
+### Guardrails
+
+- ต้องไม่เพิ่ม interaction latency ใน flow หลัก (`Quick capture`, `Task update`, `Sync status`)
+- เคารพ `prefers-reduced-motion` และ accessibility baseline ทุกหน้าหลัก
+- ทุกเอฟเฟกต์ต้องมี performance budget และมี test/trace ก่อนเปิดใช้เป็น default
 
 ## Upgrade Plan: Old -> New (Migration Track)
 
@@ -866,4 +1081,4 @@
 5. ~~ทำ AWS reference spike (sync API + MCP hosting + cost baseline)~~ [done]
 6. ~~ตั้ง i18n foundation (`TH/EN`) + key governance และเริ่ม migrate strings กลุ่ม `Settings`/`Sync` ก่อน~~ [done]
 7. ~~ปิด migration hardening checklist สำหรับ old -> new (legacy path detection, marker idempotency, diagnostics keys)~~ [done]
-8. ทำ dedicated mobile client beta implementation (UI + real-device desktop<->mobile sync validation)
+8. ~~ทำ dedicated mobile client beta implementation (UI + real-device desktop<->mobile sync validation)~~ [done]

@@ -2,8 +2,14 @@ import { parseSyncApiError } from "./sync-contract";
 import type { SyncTransport } from "./sync-runner";
 import { translate } from "./i18n";
 import type { AppLocale, SyncProvider } from "./types";
+import {
+  createManagedSyncConnectorAdapterFromSettings,
+  supportsManagedConnectorAdapter,
+} from "./sync-provider-adapter-factory";
+import type { SyncConnectorAdapter } from "./sync-connector-contract";
 
 const DEFAULT_SYNC_TIMEOUT_MS = 15_000;
+const MANAGED_RPC_ROOT_KEY = "_solostack_sync_rpc";
 export const SYNC_TRANSPORT_ERROR_CODES = {
   INVALID_JSON: "SYNC_TRANSPORT_INVALID_JSON",
   TIMEOUT: "SYNC_TRANSPORT_TIMEOUT",
@@ -63,6 +69,13 @@ function isManagedSyncProvider(provider: SyncProvider): boolean {
   return provider !== "provider_neutral";
 }
 
+function normalizeTimeoutMs(value: number | undefined): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return DEFAULT_SYNC_TIMEOUT_MS;
+  }
+  return Math.max(1_000, Math.floor(value));
+}
+
 function isManagedProviderAvailable(
   providerConfig: Record<string, unknown> | null | undefined,
 ): boolean {
@@ -116,6 +129,101 @@ function getErrorMessage(error: unknown): string {
     return error;
   }
   return SYNC_TRANSPORT_ERROR_CODES.UNEXPECTED;
+}
+
+function createManagedRpcRequestId(): string {
+  const maybeRandomUUID = globalThis.crypto?.randomUUID;
+  if (typeof maybeRandomUUID === "function") {
+    return maybeRandomUUID.call(globalThis.crypto);
+  }
+  return `${Date.now()}-${Math.floor(Math.random() * 1_000_000)}`;
+}
+
+async function cleanupManagedRpcKey(
+  adapter: SyncConnectorAdapter,
+  key: string,
+  timeoutMs: number,
+): Promise<void> {
+  try {
+    await adapter.remove({
+      key,
+      timeout_ms: timeoutMs,
+    });
+  } catch {
+    // Best-effort cleanup only.
+  }
+}
+
+async function executeManagedConnectorRpc(input: {
+  adapter: SyncConnectorAdapter;
+  operation: "push" | "pull";
+  payload: unknown;
+  timeoutMs: number;
+}): Promise<unknown> {
+  const requestId = createManagedRpcRequestId();
+  const requestKey = `${MANAGED_RPC_ROOT_KEY}/requests/${input.operation}-${requestId}.json`;
+  const responseKey = `${MANAGED_RPC_ROOT_KEY}/responses/${input.operation}-${requestId}.json`;
+
+  await input.adapter.write({
+    key: requestKey,
+    content: JSON.stringify(input.payload ?? {}),
+    timeout_ms: input.timeoutMs,
+  });
+
+  try {
+    const response = await input.adapter.read({
+      key: responseKey,
+      timeout_ms: input.timeoutMs,
+    });
+    const rawContent =
+      typeof response.content === "string" ? response.content : "";
+    if (!rawContent.trim()) {
+      throw new Error(SYNC_TRANSPORT_ERROR_CODES.INVALID_JSON);
+    }
+    try {
+      return JSON.parse(rawContent) as unknown;
+    } catch {
+      throw new Error(SYNC_TRANSPORT_ERROR_CODES.INVALID_JSON);
+    }
+  } finally {
+    void cleanupManagedRpcKey(input.adapter, requestKey, input.timeoutMs);
+    void cleanupManagedRpcKey(input.adapter, responseKey, input.timeoutMs);
+  }
+}
+
+function createManagedConnectorSyncTransport(input: {
+  provider: SyncProvider;
+  providerConfig?: Record<string, unknown> | null;
+  timeoutMs?: number;
+}): SyncTransport | null {
+  if (!supportsManagedConnectorAdapter(input.provider)) {
+    return null;
+  }
+
+  const adapter = createManagedSyncConnectorAdapterFromSettings({
+    provider: input.provider,
+    providerConfig: input.providerConfig,
+  });
+  if (!adapter) return null;
+
+  const timeoutMs = normalizeTimeoutMs(input.timeoutMs);
+
+  return {
+    push: async (payload: unknown) =>
+      executeManagedConnectorRpc({
+        adapter,
+        operation: "push",
+        payload,
+        timeoutMs,
+      }),
+    pull: async (payload: unknown) =>
+      executeManagedConnectorRpc({
+        adapter,
+        operation: "pull",
+        payload,
+        timeoutMs,
+      }),
+  };
 }
 
 async function parseJsonPayload(response: Response): Promise<unknown> {
@@ -176,10 +284,7 @@ export function createHttpSyncTransport(
     throw new Error(SYNC_TRANSPORT_ERROR_CODES.REQUIRE_BOTH_URLS);
   }
 
-  const timeoutMs =
-    typeof options.timeoutMs === "number" && Number.isFinite(options.timeoutMs)
-      ? Math.max(1_000, Math.floor(options.timeoutMs))
-      : DEFAULT_SYNC_TIMEOUT_MS;
+  const timeoutMs = normalizeTimeoutMs(options.timeoutMs);
 
   return {
     push: async (payload: unknown) =>
@@ -242,6 +347,22 @@ export function resolveSyncTransportConfig(
       warning: translate(locale, "sync.transport.warning.providerUnavailable", {
         provider: providerLabel,
       }),
+    };
+  }
+
+  const managedTransport = providerManaged
+    ? createManagedConnectorSyncTransport({
+        provider: input.provider,
+        providerConfig: input.providerConfig,
+        timeoutMs: input.timeoutMs,
+      })
+    : null;
+  if (managedTransport) {
+    return {
+      status: "ready",
+      provider: input.provider,
+      transport: managedTransport,
+      warning: null,
     };
   }
 

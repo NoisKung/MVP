@@ -1,0 +1,16 @@
+{
+  "active_profile": "localhost",
+  "profiles": {
+    "localhost": {
+      "base_url": "127.0.0.1:8787",
+      "iterations": 10,
+      "skip_health_probe": false
+    },
+    "cloud": {
+      "base_url": "https://mcp.example.com",
+      "auth_token_env": "SOLOSTACK_MCP_HOSTED_AUTH_TOKEN",
+      "iterations": 30,
+      "skip_health_probe": false
+    }
+  }
+}

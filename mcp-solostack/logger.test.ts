@@ -10,9 +10,13 @@ afterEach(() => {
 describe("mcp-solostack logger", () => {
   it("writes audit tool call payload with event metadata", () => {
     const spy = vi.spyOn(console, "log").mockImplementation(() => {});
+    const sinkWrite = vi.fn();
     const logger = createMcpLogger({
       service_name: "mcp-solostack",
       log_level: "info",
+      audit_sink: {
+        write: sinkWrite,
+      },
     });
 
     logger.auditToolCall({
@@ -30,6 +34,13 @@ describe("mcp-solostack logger", () => {
     const metadata = parsed.metadata as Record<string, unknown>;
     expect(metadata.event).toBe("mcp.tool_call");
     expect(metadata.tool).toBe("get_tasks");
+    expect(sinkWrite).toHaveBeenCalledTimes(1);
+    expect(sinkWrite).toHaveBeenCalledWith(
+      expect.objectContaining({
+        event: "mcp.tool_call",
+        tool: "get_tasks",
+      }),
+    );
   });
 
   it("respects configured log level", () => {

@@ -1,6 +1,6 @@
 # SoloStack Execution Planning
 
-อัปเดตล่าสุด: 2026-02-22
+อัปเดตล่าสุด: 2026-02-25
 แหล่งข้อมูลหลัก: `IDEA.md`
 
 ## 1) Planning Intent
@@ -18,18 +18,22 @@
 - P2: Backup/Restore, Command Palette, Weekly Review, MVP CLI
 
 ### โฟกัสปัจจุบัน
-- P3-1: Sync Foundation + Desktop Beta
-- P3-2: Mobile Sync Beta (shared-core readiness)
+- P3-1: Sync Foundation + Desktop Beta [closed in current scope]
+- P3-2: Mobile Sync Shared-Core Readiness [closed in current scope]
+- P3-2A: iOS Native Client Sync Beta [planned: Swift]
+- P3-2B: Android Native Client Sync Beta [planned]
 - P3-3: Conflict Center + Recovery (baseline implementation started)
-- P3-8: i18n TH/EN foundation
+- P3-8: i18n TH/EN foundation [closed in current scope]
+- P3-9: 3D Experience UX/UI [planned]
 
 ## 3) Strategic Goals (Q1-Q2 2026)
 
 1. ส่งมอบ desktop sync ที่เสถียรและไม่ทำข้อมูลหาย
-2. เตรียมฐานสำหรับ mobile sync โดยใช้ contract กลางเดียวกัน
+2. ขยายจาก mobile shared-core (`P3-2`) ไปสู่ native tracks (`P3-2A` iOS, `P3-2B` Android) โดยคง contract เดียวกัน
 3. วางทางเลือก cloud connector (Google/Microsoft/iCloud) โดยไม่ล็อกระบบกับ provider เดียว
 4. เปิดช่องทางให้ Agent ดึงข้อมูล SoloStack ไปวิเคราะห์และสรุปงานผ่าน MCP อย่างปลอดภัย
 5. ประเมิน AWS เป็น managed platform option สำหรับ sync backend และ MCP server
+6. ยกระดับ UX/UI ด้วย 3D experience ที่เพิ่มความชัดเจนของลำดับข้อมูล โดยไม่กระทบ performance และ accessibility
 
 ## 4) Phase Plan
 
@@ -57,16 +61,23 @@
 - Create/Update/Delete `project/task/subtask/template` sync ข้าม desktop ได้
 - ผ่าน gate: `npm run test` -> `npm run test:e2e` -> `npm run build`
 
-## Phase B: P3-2 Mobile Sync Beta
+### Closure Update (2026-02-25)
+- สถานะ: `Completed` (ปิดใน repo scope ปัจจุบัน)
+- Validation Evidence:
+  1. `npm run test` passed (47 files, 263 tests)
+  2. `npm run test:e2e` passed (11/11)
+  3. `npm run build` passed
+
+## Phase B: P3-2 Mobile Sync Shared-Core Readiness
 
 ช่วงเป้าหมาย: 2026-03-16 ถึง 2026-04-17
 
 ### Deliverables
-- Mobile client beta ต่อกับ sync contract เดียวกับ desktop
-- End-to-end sync flow desktop <-> mobile
-- Sync SLA ระดับ beta สำหรับใช้งานจริงภายในทีม
+- lock runtime/shared-core contract สำหรับ client ทุก platform
+- runtime profile + diagnostics baseline สำหรับ tuning mobile behavior
+- readiness checklist สำหรับ native clients ที่ใช้ contract กลางเดียวกัน
 
-### Current Implementation Snapshot (2026-02-17)
+### Current Implementation Snapshot (2026-02-23)
 - เสร็จแล้ว:
   - เพิ่ม `Sync Runtime Profile` ใน Settings เพื่อปรับ foreground/background interval และ push/pull limits ผ่าน UI
   - เพิ่ม preset `Desktop` และ `Mobile Beta` สำหรับ tuning เร็ว
@@ -84,14 +95,163 @@
   - เพิ่ม export แบบ filtered (`Export Filtered JSON`) จาก full-history view พร้อมแนบ filter metadata ในไฟล์
   - เพิ่ม Playwright coverage สำหรับ diagnostics full-history export flow (filters + date-range validation + JSON payload)
   - เติม test coverage ของ runtime profile แล้ว (unit + Playwright)
-- คงเหลือ:
-  - เตรียม mobile beta client ให้ใช้ contract + runtime profile ชุดเดียวกับ desktop
-  - ยืนยัน desktop<->mobile flow กับ dedicated mobile client builds
+- ปิดแล้ว:
+  - dedicated mobile client ใช้ contract + runtime profile ชุดเดียวกับ desktop แล้ว
+  - desktop<->mobile flow validated กับ dedicated mobile client builds แล้ว
 
 ### Exit Criteria
 - data model ไม่ drift ระหว่าง client
 - conflict กรณีหลักถูกจัดการได้ deterministic
 - ไม่มี critical data-loss case ใน test matrix
+
+### Closure Update (2026-02-25)
+- สถานะ: `Completed` (shared-core ใน repo นี้)
+- งาน mobile execution ถูกแตกเป็น:
+  - `Phase B1: P3-2A iOS Native Client Sync Beta`
+  - `Phase B2: P3-2B Android Native Client Sync Beta`
+
+## Phase B1: P3-2A iOS Native Client Sync Beta
+
+ช่วงเป้าหมาย: tentative (หลัง P3-5/P3-6 hardening milestone)
+
+### Deliverables
+- iOS native app baseline พัฒนาด้วย `Swift` + `SwiftUI` และใช้ sync contract เดียวกับ desktop/shared-core
+- iOS-specific sync/runtime tuning (foreground/background lifecycle)
+- iOS secure storage integration สำหรับ token/secret ที่เกี่ยวข้องกับ sync
+- internal/external TestFlight rollout checklist + evidence
+- design baseline เอกสาร `docs/p3-2a-ios-native-swift-design-v0.1.md`
+
+### Exit Criteria
+- sync desktop <-> iOS median <= 10 วินาทีในเครือข่ายปกติ
+- offline edits บน iOS ไม่สูญหายเมื่อกลับมา online
+- ไม่มี critical data-loss case ใน iOS matrix
+
+### P3-2A QoL Sprint 1 (Current)
+- เป้าหมาย: ลด friction ของ daily flow บน iOS โดยไม่เพิ่มความซับซ้อนของ data model
+- แผนงาน:
+  - เพิ่ม `search` ข้าม task title/project/status ในทุกแท็บหลัก
+  - เพิ่ม `pull-to-sync` เพื่อให้ผู้ใช้ refresh + sync ได้เร็วจาก list/board
+  - เพิ่ม `swipe delete` เพื่อเคลียร์งานได้ไวขึ้นในทุก view
+  - เพิ่ม quick-capture syntax (`#project`, `@today`, `@tomorrow`, `@nextweek`, `!`) เพื่อลดจำนวน tap ตอนสร้างงาน
+- acceptance:
+  - ทุก flow ข้างต้นผ่าน build + unit tests
+  - ไม่กระทบ sync contract และ persistence behavior เดิม
+
+### P3-2A Sync + Database Design (Pre-Implementation)
+
+- เป้าหมาย:
+  - ทำให้ iOS native sync กับ desktop ได้จริง โดยไม่เปลี่ยน contract กลาง
+  - คง local-first/offline-first และกัน data loss จาก crash/network flap
+- สถานะปัจจุบัน (ต้องแทนที่):
+  - repository ยังเป็น in-memory
+  - sync engine ยังเป็น demo/simulated transport
+
+#### Architecture Decision
+
+- Database engine: `SQLite` (single source of truth บน iOS)
+- Data access/migration: `GRDB` (typed query + migration orchestration)
+- Sync secret storage: `Keychain` (token/secret ไม่เก็บใน SQLite)
+- File location:
+  - DB: `Application Support/solostack.sqlite`
+  - backup snapshot: `Application Support/backups/`
+
+#### Database Schema Plan (v1)
+
+- Domain tables:
+  - `projects`
+  - `tasks`
+  - `task_subtasks`
+  - `task_templates`
+  - `settings`
+- Sync/recovery tables:
+  - `sync_outbox`
+  - `sync_checkpoints`
+  - `deleted_records`
+  - `sync_conflicts`
+  - `sync_conflict_events`
+- Required metadata columns:
+  - `sync_version`
+  - `updated_by_device`
+  - `updated_at`
+- Index baseline:
+  - outbox drain: `(status, created_at)`
+  - pull/apply ordering: `(updated_at, id)`
+  - conflict lookup: `(status, detected_at)`
+
+#### Sync Flow Design
+
+1. Local write path (mandatory transaction)
+- mutation domain table
+- increment `sync_version`
+- set `updated_by_device`
+- enqueue record เข้า `sync_outbox` พร้อม idempotency key
+
+2. Push phase
+- อ่าน pending outbox batch (bounded limit)
+- ส่ง `POST /v1/sync/push`
+- mark sent/acked โดยอิง response + idempotency
+
+3. Pull phase
+- อ่าน cursor จาก `sync_checkpoints`
+- เรียก `POST /v1/sync/pull`
+- apply changes แบบ deterministic + update cursor
+
+4. Conflict handling
+- detect ระหว่าง apply pull และ persist เข้า `sync_conflicts`
+- log lifecycle ใน `sync_conflict_events`
+- resolution ใด ๆ ต้อง enqueue outbox ใหม่ด้วย deterministic idempotency key
+
+5. Recovery rules
+- ถ้า sync fail ให้ retry ตาม backoff policy
+- ถ้ามี force restore ให้ preflight `pending outbox/open conflicts` ก่อนเสมอ
+
+#### Execution Plan (P3-2A Sync/DB)
+
+1. Milestone A: Data Layer Foundation
+- เพิ่ม GRDB setup + migration runner
+- implement `SQLiteTaskRepository` แทน in-memory
+- เพิ่ม crash-safe migration tests
+
+2. Milestone B: Real Sync Transport
+- implement `HTTP sync transport` ตาม contract เดียวกับ desktop
+- wire `push/pull/bootstrap` และ checkpoint persistence
+- เพิ่ม offline queue + retry/backoff
+
+3. Milestone C: Conflict/Recovery Integration
+- persist conflict + timeline
+- เชื่อม UI status (`Synced/Syncing/Offline/Conflict`) กับ state จริง
+- เพิ่ม `Retry sync` และ restore preflight guards
+
+4. Milestone D: Hardening + Beta Gate
+- sync soak tests (flaky network / app relaunch / background-foreground)
+- desktop<->iOS real-device validation
+- freeze schema/contract ก่อน external TestFlight
+
+#### Acceptance Gates
+
+- sync desktop <-> iOS median <= 10 วินาที (normal network)
+- offline create/update/delete ไม่สูญหายหลัง reconnect
+- restart app ระหว่าง outbox pending แล้วไม่ทำ duplicate write
+- migration rerun ได้แบบ idempotent
+- ผ่าน:
+  - `xcodebuild ... build`
+  - `xcodebuild ... test (unit/integration)`
+  - desktop integration matrix ตาม P3-2A checklist
+
+## Phase B2: P3-2B Android Native Client Sync Beta
+
+ช่วงเป้าหมาย: tentative (หลัง P3-5/P3-6 hardening milestone)
+
+### Deliverables
+- Android native app baseline ที่ใช้ sync contract เดียวกับ desktop/shared-core
+- Android-specific sync/runtime tuning (background limits/power policy)
+- Android secure storage integration สำหรับ token/secret ที่เกี่ยวข้องกับ sync
+- Closed/Open Testing rollout checklist + evidence
+
+### Exit Criteria
+- sync desktop <-> Android median <= 10 วินาทีในเครือข่ายปกติ
+- offline edits บน Android ไม่สูญหายเมื่อกลับมา online
+- ไม่มี critical data-loss case ใน Android matrix
 
 ## Phase C: P3-3 Conflict Center + Recovery
 
@@ -124,8 +284,10 @@
   - Playwright coverage สำหรับ restore preflight/force flow
   - Playwright coverage สำหรับ conflict retry confirmation + re-resolve matrix
   - Playwright coverage สำหรับ retry failed sync (transport failure -> retry success)
+  - integration coverage สำหรับ resolve replay + idempotent retry (closed)
+  - transport-backed E2E สำหรับ corrected replay -> `Synced` (closed)
 - คงเหลือ:
-  - integration coverage สำหรับ resolve replay + idempotent retry
+  - ไม่มีงานค้างใน repo scope ของ P3-3
 
 ### Exit Criteria
 - ผู้ใช้แก้ conflict หลัก (`field_conflict`, `delete_vs_update`, `notes_collision`) ได้จาก UI โดยไม่แตะ DB
@@ -189,15 +351,31 @@ Google Drive (`appDataFolder`) vs OneDrive (`approot`) ในมุม SoloStack
 - เพิ่ม integration fixture สำหรับ provider error mapping (`rate_limit`, `unauthorized`, `unavailable`)
 - เพิ่ม observability fields ต่อ connector (`provider`, `latency_ms`, `http_status`, `retry_after_ms`)
 
-### Current Progress (2026-02-18)
+### Current Progress (2026-02-23)
 
 - เสร็จแล้ว:
   - comparative spike snapshot (Google vs OneDrive) พร้อม recommendation สำหรับ pilot
   - connector adapter contract v0.1 ใน `src/lib/sync-connector-contract.ts`
+  - provider implementation stubs (`google_appdata` / `onedrive_approot`) ใน `src/lib/sync-provider-adapters.ts`
+  - token refresh helper + auth header flow ใน `src/lib/sync-provider-auth.ts`
+  - settings UI สำหรับ managed connector + connection test flow (`src/components/ReminderSettings.tsx`)
+  - adapter factory สำหรับแปลง `provider_config` <-> managed connector adapter (`src/lib/sync-provider-adapter-factory.ts`)
+  - managed transport wiring ใน resolver (managed connector path มาก่อน endpoint custom) (`src/lib/sync-transport.ts`)
+  - managed transport resolver tests (`src/lib/sync-transport.test.ts`)
+  - secure token storage policy v0.2:
+    - redact sensitive token fields ออกจาก persisted `provider_config`
+    - persist managed auth ผ่าน secure keystore บน Tauri desktop/iOS/Android (best-effort)
+    - fallback เป็น in-memory session auth สำหรับ runtime อื่น
+    - policy marker `managed_auth_storage_policy`
+    - tests (`src/lib/sync-provider-token-policy.test.ts`, `src/lib/database.migration.test.ts`, `src/lib/sync-provider-secure-store.test.ts`)
+  - เพิ่ม secure store self-test command + Settings action สำหรับ verify read/write/delete แบบไม่ทับ token จริง:
+    - Rust command: `run_sync_provider_secure_store_self_test`
+    - Settings action: `Verify Secure Store`
+  - เพิ่ม validation matrix baseline สำหรับรันบนอุปกรณ์จริง:
+    - `docs/sync-provider-secure-store-validation-v0.1.md`
+  - connector integration tests กับ fixture responses (`src/lib/sync-provider-adapters.test.ts`)
 - คงเหลือ:
-  - provider implementation stubs (Google/OneDrive)
-  - token storage + refresh flow integration
-  - connector integration tests กับ fixture responses
+  - ยืนยัน real-device matrix ของ secure keystore บน iOS/Android และเก็บหลักฐานก่อน external beta
 
 ## Phase F: P3-6 MCP Server for SoloStack
 
@@ -220,7 +398,7 @@ Google Drive (`appDataFolder`) vs OneDrive (`approot`) ในมุม SoloStack
 - ไม่มี direct DB corruption case จาก MCP read path
 - Query ที่หนักมี guardrails (limit/timeout/rate-limit) และไม่ทำให้ UI lag
 
-### Current Progress (2026-02-18)
+### Current Progress (2026-02-23)
 
 - เสร็จแล้ว:
   - local MCP skeleton + health/config loader (`mcp-solostack/server.mjs`, `mcp-solostack/config.mjs`)
@@ -233,9 +411,52 @@ Google Drive (`appDataFolder`) vs OneDrive (`approot`) ในมุม SoloStack
   - เพิ่ม load/perf matrix baseline สำหรับ small/medium fixture (`docs/mcp-load-matrix-v0.1.md`)
   - เอกสาร agent playbook และ AWS hosted profile baseline
   - hardening snapshot v0.1 (`docs/mcp-hardening-report-v0.1.md`)
+  - ตัดสินใจ audit sink/retention baseline:
+    - file sink รายวัน + retention 30 วัน
+    - env config สำหรับ audit sink (`SOLOSTACK_MCP_AUDIT_*`)
+    - retention policy decision by environment (`dev=14`, `staging=30`, `prod=90`) ใน `docs/mcp-audit-retention-policy-v0.1.md`
+  - เพิ่ม centralized audit sink mode `http`:
+    - ส่ง `POST` ต่อ event ไป external endpoint
+    - รองรับ timeout + optional bearer token
+    - env config: `SOLOSTACK_MCP_AUDIT_HTTP_URL`, `SOLOSTACK_MCP_AUDIT_HTTP_TIMEOUT_MS`, `SOLOSTACK_MCP_AUDIT_HTTP_AUTH_TOKEN`
+  - เพิ่ม hosted matrix tooling:
+    - `npm run mcp:load-matrix:hosted:preflight`
+    - `npm run mcp:load-matrix:hosted:pipeline`
+    - `npm run mcp:load-matrix:hosted`
+    - `npm run mcp:load-matrix:compare`
+    - user-editable profile config (`localhost`/`cloud`) ผ่าน `mcp-solostack/hosted-profiles.json`
 - คงเหลือ:
-  - ทำซ้ำ load/perf matrix ใน hosted staging เพื่อเทียบกับ local baseline
-  - ตัดสินใจ sink/retention สำหรับ audit log ใน hosted profile
+  - ทำซ้ำ load/perf matrix ใน hosted staging จริง และแนบ compare report
+  - blocker ปัจจุบันใน workspace นี้: ยังไม่มี `SOLOSTACK_MCP_HOSTED_BASE_URL` / `SOLOSTACK_MCP_HOSTED_AUTH_TOKEN` สำหรับรัน matrix จริง
+  - ผูก env ของ `http` sink เข้ากับ centralized backend (CloudWatch/S3/OpenSearch bridge) และยืนยัน delivery/error-rate ตาม environment policy
+
+## Phase G: P3-9 3D Experience UX/UI
+
+ช่วงเป้าหมาย: 2026-07-27 ถึง 2026-08-21 (tentative)
+
+### Deliverables
+- Shared design tokens สำหรับ depth/motion:
+  - `depth`, `shadow`, `perspective`
+  - `motion_duration`, `motion_curve`
+- 3D interaction pilot ในหน้าหลัก:
+  - task card hover/focus state
+  - panel transition (`Settings`, `Conflict Center`)
+  - view switch transition (`Board`, `Today`, `Upcoming`)
+- เพิ่ม user controls ใน `Settings > Appearance`:
+  - `3D effects`: `On/Off`
+  - `Motion level`: `Default/Reduced`
+  - รองรับ `prefers-reduced-motion` เป็น baseline
+- เพิ่ม performance guardrails:
+  - fallback เป็น 2D mode อัตโนมัติเมื่อเกิน budget
+  - เก็บ diagnostics ขั้นต่ำ: dropped-frame ratio, interaction latency
+
+### Exit Criteria
+- Core flows (`Quick capture`, `Task update`, `Sync status`) ไม่มี regression เกิน 5% ที่ p95 interaction latency เมื่อเทียบ baseline
+- ระบบบังคับ reduced/2D mode อัตโนมัติเมื่อพบ `prefers-reduced-motion` หรือ low-performance condition
+- มี test coverage สำหรับ key interactions (unit + Playwright) และผ่าน quality gates:
+  1. `npm run test`
+  2. `npm run test:e2e`
+  3. `npm run build`
 
 ## 5) Workstream Breakdown (P3-1 Priority)
 
@@ -683,7 +904,7 @@ Validation Evidence:
 - ปิด checklist readiness ฝั่ง shared-core/runtime contract
 - เพิ่ม source tracking ของ runtime preset detection ใน diagnostics เพื่อช่วย debug mobile auto-seed
 - สรุป artifact ที่ `docs/p3-2-mobile-beta-core-readiness-v0.1.md`
-- งานคงเหลือย้ายไป dedicated mobile client execution (นอก shared-core scope)
+- งาน dedicated mobile client execution ปิดแล้ว และยืนยัน real-device flow ตามเป้าหมาย P3-2
 
 Validation Evidence:
 1. `cargo check` (src-tauri) passed
@@ -756,7 +977,7 @@ Validation Evidence:
 11. `npm run build` passed
 
 Next pending item to pull:
-- QoL Sprint C closed; pull next from P3-8 i18n expansion / rollout backlog
+- QoL Sprint D และ P3-8 closed; pull next from P3-5 connector implementation / P3-6 hosted hardening
 
 ## 17) P3-8 Incremental Update (2026-02-21)
 
@@ -791,3 +1012,25 @@ Validation Evidence:
 1. `npm run test -- --run src/lib/sync-conflict-message.test.ts src/lib/i18n.catalog.test.ts` passed
 2. `npm run test -- --run src/components/AppShell.test.tsx src/components/TaskCard.test.tsx src/lib/database.sessions.test.ts` passed
 3. `npm run build` passed
+
+## 18) P3-8 Closure Update (2026-02-23)
+
+- ปิด `P3-8 i18n expansion / rollout backlog` ใน scope ปัจจุบันแล้ว
+- สถานะเปลี่ยนเป็น closed และดึงงานคิวถัดไปเป็น:
+  - `P3-5`: provider connector implementation
+  - `P3-6`: hosted hardening (load/perf matrix + audit log retention decision)
+
+## 19) P3-1 Closure Update (2026-02-25)
+
+- ปิด `P3-1 Sync Foundation + Desktop Beta` ใน scope ปัจจุบันแล้ว
+- Quality gates ผ่านครบตาม Definition of Done:
+  1. `npm run test`
+  2. `npm run test:e2e`
+  3. `npm run build`
+- ปรับสถานะโฟกัสจาก in-progress เป็น closed และย้ายคิวหลักไป `P3-5` / `P3-6`
+
+## 20) P3-2A Swift Design Kickoff (2026-02-25)
+
+- เริ่มงาน `Phase B1: P3-2A` ด้วยแนวทาง design-first
+- ล็อก tech stack สำหรับ iOS native เป็น `Swift` + `SwiftUI`
+- เพิ่ม design artifact: `docs/p3-2a-ios-native-swift-design-v0.1.md`
