@@ -27,3 +27,8 @@ src-tauri/gen
 *.njsproj
 *.sln
 *.sw?
+
+# Xcode user data
+*.xcuserstate
+xcuserdata/
+*.xcworkspace/xcuserdata/
