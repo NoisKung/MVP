@@ -20,7 +20,7 @@
 ### โฟกัสปัจจุบัน
 - P3-1: Sync Foundation + Desktop Beta [closed in current scope]
 - P3-2: Mobile Sync Shared-Core Readiness [closed in current scope]
-- P3-2A: iOS Native Client Sync Beta [planned]
+- P3-2A: iOS Native Client Sync Beta [planned: Swift]
 - P3-2B: Android Native Client Sync Beta [planned]
 - P3-3: Conflict Center + Recovery (baseline implementation started)
 - P3-8: i18n TH/EN foundation [closed in current scope]
@@ -115,10 +115,11 @@
 ช่วงเป้าหมาย: tentative (หลัง P3-5/P3-6 hardening milestone)
 
 ### Deliverables
-- iOS native app baseline ที่ใช้ sync contract เดียวกับ desktop/shared-core
+- iOS native app baseline พัฒนาด้วย `Swift` + `SwiftUI` และใช้ sync contract เดียวกับ desktop/shared-core
 - iOS-specific sync/runtime tuning (foreground/background lifecycle)
 - iOS secure storage integration สำหรับ token/secret ที่เกี่ยวข้องกับ sync
 - internal/external TestFlight rollout checklist + evidence
+- design baseline เอกสาร `docs/p3-2a-ios-native-swift-design-v0.1.md`
 
 ### Exit Criteria
 - sync desktop <-> iOS median <= 10 วินาทีในเครือข่ายปกติ
@@ -915,3 +916,9 @@ Validation Evidence:
   2. `npm run test:e2e`
   3. `npm run build`
 - ปรับสถานะโฟกัสจาก in-progress เป็น closed และย้ายคิวหลักไป `P3-5` / `P3-6`
+
+## 20) P3-2A Swift Design Kickoff (2026-02-25)
+
+- เริ่มงาน `Phase B1: P3-2A` ด้วยแนวทาง design-first
+- ล็อก tech stack สำหรับ iOS native เป็น `Swift` + `SwiftUI`
+- เพิ่ม design artifact: `docs/p3-2a-ios-native-swift-design-v0.1.md`

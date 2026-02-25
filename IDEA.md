@@ -33,7 +33,7 @@
 | --- | --- | --- | --- |
 | P3-1 | Sync Foundation + Desktop Beta (Windows/macOS/Linux) | Completed | Sync หลักระหว่าง desktop ได้เสถียร |
 | P3-2 | Mobile Sync Shared-Core Readiness | Completed | contract/runtime กลางพร้อมใช้งานข้าม platform |
-| P3-2A | iOS Native Client Sync Beta | Planned | แยก iOS app native และคง sync contract เดียวกับ desktop |
+| P3-2A | iOS Native Client Sync Beta | Planned | พัฒนา iOS native ด้วย Swift และคง sync contract เดียวกับ desktop |
 | P3-2B | Android Native Client Sync Beta | Planned | แยก Android app native และคง sync contract เดียวกับ desktop |
 | P3-3 | Conflict Center + Recovery Tools | Completed | ให้ผู้ใช้แก้ conflict ได้ชัดเจน |
 | P3-4 | Security Hardening | Planned | เพิ่มความปลอดภัยระดับ production |
@@ -389,7 +389,7 @@
 
 ### Technical Direction
 
-- app layer เป็น native iOS โดยใช้ shared sync contract จาก `P3-2`
+- app layer เป็น native iOS พัฒนาด้วย `Swift` + `SwiftUI` โดยใช้ shared sync contract จาก `P3-2`
 - คง schema SQLite และ sync payload เดียวกับ desktop เพื่อลด model drift
 - ใช้ iOS secure storage (Keychain) สำหรับ token/secret ที่เกี่ยวข้องกับ sync
 
@@ -408,6 +408,10 @@
 - sync desktop <-> iOS median <= 10 วินาทีในเครือข่ายปกติ
 - offline edits บน iOS ไม่สูญหายเมื่อกลับมา online
 - ไม่มี critical data-loss case ใน iOS test matrix
+
+### Design Artifact (Kickoff)
+
+- `docs/p3-2a-ios-native-swift-design-v0.1.md`
 
 ## Initiative: SoloStack Android Native App (P3-2B)
 
@@ -898,6 +902,12 @@ Recommended follow-up:
   - `npm run test:e2e` passed (11/11)
   - `npm run build` passed
 - งานคิวหลักถัดไปยังคงเป็น `P3-5` และ `P3-6`
+
+### P3-2A Swift Design Kickoff (2026-02-25)
+
+- เริ่มงาน `P3-2A iOS Native` แบบ design-first แล้ว
+- ล็อก tech direction สำหรับ iOS เป็น `Swift` + `SwiftUI`
+- เพิ่ม design baseline เอกสาร `docs/p3-2a-ios-native-swift-design-v0.1.md`
 
 ## New Initiative: P3-9 3D Experience UX/UI
 
