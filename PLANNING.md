@@ -1,6 +1,6 @@
 # SoloStack Execution Planning
 
-อัปเดตล่าสุด: 2026-02-23
+อัปเดตล่าสุด: 2026-02-25
 แหล่งข้อมูลหลัก: `IDEA.md`
 
 ## 1) Planning Intent
@@ -18,10 +18,11 @@
 - P2: Backup/Restore, Command Palette, Weekly Review, MVP CLI
 
 ### โฟกัสปัจจุบัน
-- P3-1: Sync Foundation + Desktop Beta
+- P3-1: Sync Foundation + Desktop Beta [closed in current scope]
 - P3-2: Mobile Sync Beta (shared-core readiness)
 - P3-3: Conflict Center + Recovery (baseline implementation started)
 - P3-8: i18n TH/EN foundation [closed in current scope]
+- P3-9: 3D Experience UX/UI [planned]
 
 ## 3) Strategic Goals (Q1-Q2 2026)
 
@@ -30,6 +31,7 @@
 3. วางทางเลือก cloud connector (Google/Microsoft/iCloud) โดยไม่ล็อกระบบกับ provider เดียว
 4. เปิดช่องทางให้ Agent ดึงข้อมูล SoloStack ไปวิเคราะห์และสรุปงานผ่าน MCP อย่างปลอดภัย
 5. ประเมิน AWS เป็น managed platform option สำหรับ sync backend และ MCP server
+6. ยกระดับ UX/UI ด้วย 3D experience ที่เพิ่มความชัดเจนของลำดับข้อมูล โดยไม่กระทบ performance และ accessibility
 
 ## 4) Phase Plan
 
@@ -56,6 +58,13 @@
 - Offline edit ไม่หายเมื่อกลับมา online
 - Create/Update/Delete `project/task/subtask/template` sync ข้าม desktop ได้
 - ผ่าน gate: `npm run test` -> `npm run test:e2e` -> `npm run build`
+
+### Closure Update (2026-02-25)
+- สถานะ: `Completed` (ปิดใน repo scope ปัจจุบัน)
+- Validation Evidence:
+  1. `npm run test` passed (47 files, 263 tests)
+  2. `npm run test:e2e` passed (11/11)
+  3. `npm run build` passed
 
 ## Phase B: P3-2 Mobile Sync Beta
 
@@ -269,6 +278,34 @@ Google Drive (`appDataFolder`) vs OneDrive (`approot`) ในมุม SoloStack
   - ทำซ้ำ load/perf matrix ใน hosted staging จริง และแนบ compare report
   - blocker ปัจจุบันใน workspace นี้: ยังไม่มี `SOLOSTACK_MCP_HOSTED_BASE_URL` / `SOLOSTACK_MCP_HOSTED_AUTH_TOKEN` สำหรับรัน matrix จริง
   - ผูก env ของ `http` sink เข้ากับ centralized backend (CloudWatch/S3/OpenSearch bridge) และยืนยัน delivery/error-rate ตาม environment policy
+
+## Phase G: P3-9 3D Experience UX/UI
+
+ช่วงเป้าหมาย: 2026-07-27 ถึง 2026-08-21 (tentative)
+
+### Deliverables
+- Shared design tokens สำหรับ depth/motion:
+  - `depth`, `shadow`, `perspective`
+  - `motion_duration`, `motion_curve`
+- 3D interaction pilot ในหน้าหลัก:
+  - task card hover/focus state
+  - panel transition (`Settings`, `Conflict Center`)
+  - view switch transition (`Board`, `Today`, `Upcoming`)
+- เพิ่ม user controls ใน `Settings > Appearance`:
+  - `3D effects`: `On/Off`
+  - `Motion level`: `Default/Reduced`
+  - รองรับ `prefers-reduced-motion` เป็น baseline
+- เพิ่ม performance guardrails:
+  - fallback เป็น 2D mode อัตโนมัติเมื่อเกิน budget
+  - เก็บ diagnostics ขั้นต่ำ: dropped-frame ratio, interaction latency
+
+### Exit Criteria
+- Core flows (`Quick capture`, `Task update`, `Sync status`) ไม่มี regression เกิน 5% ที่ p95 interaction latency เมื่อเทียบ baseline
+- ระบบบังคับ reduced/2D mode อัตโนมัติเมื่อพบ `prefers-reduced-motion` หรือ low-performance condition
+- มี test coverage สำหรับ key interactions (unit + Playwright) และผ่าน quality gates:
+  1. `npm run test`
+  2. `npm run test:e2e`
+  3. `npm run build`
 
 ## 5) Workstream Breakdown (P3-1 Priority)
 
@@ -831,3 +868,12 @@ Validation Evidence:
 - สถานะเปลี่ยนเป็น closed และดึงงานคิวถัดไปเป็น:
   - `P3-5`: provider connector implementation
   - `P3-6`: hosted hardening (load/perf matrix + audit log retention decision)
+
+## 19) P3-1 Closure Update (2026-02-25)
+
+- ปิด `P3-1 Sync Foundation + Desktop Beta` ใน scope ปัจจุบันแล้ว
+- Quality gates ผ่านครบตาม Definition of Done:
+  1. `npm run test`
+  2. `npm run test:e2e`
+  3. `npm run build`
+- ปรับสถานะโฟกัสจาก in-progress เป็น closed และย้ายคิวหลักไป `P3-5` / `P3-6`

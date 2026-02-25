@@ -7,7 +7,7 @@ describe("localizeErrorMessage", () => {
       "Project not found.",
     );
     expect(localizeErrorMessage("DB_PROJECT_NOT_FOUND", "th")).toBe(
-      "ไม่พบโปรเจค",
+      "ไม่พบโปรเจกต์",
     );
   });
 
@@ -17,7 +17,7 @@ describe("localizeErrorMessage", () => {
       "th",
     );
     expect(localized).toContain("การกู้คืนถูกบล็อก");
-    expect(localized).toContain("2 การเปลี่ยนแปลง outbox ที่รออยู่");
+    expect(localized).toContain("2 การเปลี่ยนแปลงคิวขาออกที่รออยู่");
     expect(localized).toContain("1 คอนฟลิกต์ที่เปิดอยู่");
   });
 

@@ -1,6 +1,6 @@
 # SoloStack Product Roadmap
 
-อัปเดตล่าสุด: 2026-02-23
+อัปเดตล่าสุด: 2026-02-25
 
 ## Product Principles
 
@@ -31,7 +31,7 @@
 
 | Phase | Focus | Status | Goal |
 | --- | --- | --- | --- |
-| P3-1 | Sync Foundation + Desktop Beta (Windows/macOS/Linux) | In Progress | Sync หลักระหว่าง desktop ได้เสถียร |
+| P3-1 | Sync Foundation + Desktop Beta (Windows/macOS/Linux) | Completed | Sync หลักระหว่าง desktop ได้เสถียร |
 | P3-2 | Mobile Client Sync Beta (iOS/Android) | Completed | ใช้งานข้าม desktop + mobile ได้ |
 | P3-3 | Conflict Center + Recovery Tools | Completed | ให้ผู้ใช้แก้ conflict ได้ชัดเจน |
 | P3-4 | Security Hardening | Planned | เพิ่มความปลอดภัยระดับ production |
@@ -39,8 +39,11 @@
 | P3-6 | MCP Server for SoloStack Agent Data Access | In Progress | ให้ Agent ดึงข้อมูลไปวิเคราะห์/สรุป/วางแผนได้อย่างปลอดภัย |
 | P3-7 | Product Quality of Life (QoL) | Completed | ลด friction การใช้งานรายวันและลด human error |
 | P3-8 | Internationalization (TH/EN) | Completed | รองรับ UI สองภาษา (ไทย/อังกฤษ) และให้ผู้ใช้สลับภาษาได้เอง |
+| P3-9 | 3D Experience UX/UI | Planned | ยกระดับ UX/UI ด้วยมิติและ motion ที่มีความหมาย โดยยังคง performance และ accessibility |
 
 ## Active Plan: P3-1 Sync Foundation + Desktop Beta
+
+- สถานะล่าสุด: `Completed` (ปิดงานเมื่อ 2026-02-25)
 
 ### Objective
 
@@ -844,6 +847,35 @@ Recommended follow-up:
   - รันรายงาน hosted staging จริงและแนบ compare report
   - blocker ปัจจุบันใน workspace นี้: ยังไม่มี `SOLOSTACK_MCP_HOSTED_BASE_URL` / `SOLOSTACK_MCP_HOSTED_AUTH_TOKEN`
   - ผูกค่า env ของ `http` sink เข้ากับ staging/prod และยืนยัน delivery/error-rate ตาม policy ของ environment
+
+### P3-1 Closure Update (2026-02-25)
+
+- ปิด `P3-1 Sync Foundation + Desktop Beta` ใน scope ปัจจุบันแล้ว
+- ยืนยัน quality gates ครบตาม Definition of Done:
+  - `npm run test` passed (47 files, 263 tests)
+  - `npm run test:e2e` passed (11/11)
+  - `npm run build` passed
+- งานคิวหลักถัดไปยังคงเป็น `P3-5` และ `P3-6`
+
+## New Initiative: P3-9 3D Experience UX/UI
+
+### Objective
+
+- เพิ่มความชัดเจนของลำดับข้อมูลและสถานะงานด้วย spatial cues (depth/layer/motion)
+- ทำให้ interaction รู้สึกตอบสนองดีขึ้น โดยไม่ลดความเร็วของ workflow หลัก
+
+### Scope v1 (In)
+
+- กำหนด design tokens สำหรับ depth/shadow/perspective ที่ใช้ร่วมกันทั้งแอป
+- เพิ่ม motion ที่มีความหมายในจุดสำคัญ: card hover/focus, panel transition, context switch
+- เพิ่ม user setting สำหรับเปิด/ปิดเอฟเฟกต์ 3D และระดับ motion (Default / Reduced)
+- รองรับ fallback เป็น 2D mode อัตโนมัติบนอุปกรณ์หรือสภาวะที่ performance ต่ำ
+
+### Guardrails
+
+- ต้องไม่เพิ่ม interaction latency ใน flow หลัก (`Quick capture`, `Task update`, `Sync status`)
+- เคารพ `prefers-reduced-motion` และ accessibility baseline ทุกหน้าหลัก
+- ทุกเอฟเฟกต์ต้องมี performance budget และมี test/trace ก่อนเปิดใช้เป็น default
 
 ## Upgrade Plan: Old -> New (Migration Track)
 
